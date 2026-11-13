@@ -3,16 +3,17 @@
 import { Carregando } from "@/components/ui/carregando";
 
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, History, Inbox, Truck } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { History, Inbox, Link2, ScrollText, SearchX, Truck } from "lucide-react";
+import { use, useState } from "react";
 
+import { fmtData } from "@/components/pagamentos/format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { SectionCard } from "@/components/ui/section-card";
 import { AlvaraVeiculosModal } from "@/components/transporte-regulado/alvara-veiculos-modal";
+import { rotuloTipoServico } from "@/components/transporte/rotulos";
 import { WorkflowTimeline } from "@/components/transporte/WorkflowTimeline";
 import {
   api,
@@ -89,21 +90,14 @@ function JsonDiff({ antes, depois }: any) {
 }
 
 export default function AlvaraDetailPage({ params }: PageParams) {
-  const router = useRouter();
-  const [resolvedParams, setResolvedParams] = useState<{ id: string } | null>(
-    null,
-  );
+  // `use(params)` e não `params.then(setState)` + retorno antecipado: com o
+  // retorno antes dos `useQuery`, o segundo render tinha mais hooks que o
+  // primeiro — o React acusa isso como erro.
+  const { id } = use(params);
+  const alvaraId = parseInt(id, 10);
   const [page, setPage] = useState(0);
   const [showVeiculosModal, setShowVeiculosModal] = useState(false);
   const LIMIT = 20;
-
-  // Resolve params
-  if (!resolvedParams) {
-    params.then((p) => setResolvedParams(p));
-    return <Carregando />;
-  }
-
-  const alvaraId = parseInt(resolvedParams.id, 10);
 
   // Alvará
   const { data: alvara, isLoading: alvaraLoading } = useQuery<Alvara>({
@@ -126,140 +120,118 @@ export default function AlvaraDetailPage({ params }: PageParams) {
     });
 
   if (alvaraLoading) {
-    return <div className="p-6 text-center">Carregando alvará...</div>;
+    return <Carregando className="py-8 text-center text-foreground-muted" />;
   }
 
   if (!alvara) {
     return (
-      <div className="p-6 text-center text-danger">
-        Alvará não encontrado
-      </div>
+      <EmptyState
+        icon={SearchX}
+        title="Alvará não encontrado"
+        description="Ele pode ter sido excluído. Volte para a lista de alvarás."
+      />
     );
   }
 
   return (
     <div className="space-y-6 pb-8">
-      {/* Header */}
-      <div className="flex items-center gap-4">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => router.back()}
-          className="gap-2"
-        >
-          <ChevronLeft className="h-4 w-4" />
-          Voltar
-        </Button>
-      </div>
-
+      {/* A seta de voltar vem da trilha (Alvarás); o botão "Voltar" solto
+          com router.back() saiu. */}
       <PageHeader
+        icon={ScrollText}
         title={`Alvará ${alvara.numero_alvara}`}
-        description={`ID: ${alvara.id} • Criado em ${formatDate(alvara.criado_em)}`}
+        description={`${rotuloTipoServico(alvara.tipo_servico)} · cadastrado em ${fmtData(alvara.criado_em)}`}
+        breadcrumbs={[
+          { label: "Transporte Regulado", href: "/m/transporte" },
+          { label: "Alvarás", href: "/m/transporte/alvaras" },
+          { label: alvara.numero_alvara },
+        ]}
       />
 
       {/* Informações do Alvará */}
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        <div className="rounded-card border border-border bg-card p-6 shadow-card">
-          <h3 className="mb-4 text-lg font-semibold">Informações Básicas</h3>
+        <SectionCard title="Dados do alvará" icon={ScrollText}>
           <dl className="space-y-3">
             <div>
               <dt className="text-sm font-medium text-muted-foreground">Número</dt>
-              <dd className="text-base text-foreground">{alvara.numero_alvara}</dd>
+              <dd className="font-mono text-base text-foreground">{alvara.numero_alvara}</dd>
             </div>
             <div>
-              <dt className="text-sm font-medium text-muted-foreground">
-                Tipo de Serviço
-              </dt>
+              <dt className="text-sm font-medium text-muted-foreground">Tipo de serviço</dt>
               <dd className="text-base text-foreground">
-                {alvara.tipo_servico}
+                {rotuloTipoServico(alvara.tipo_servico)}
               </dd>
             </div>
             <div>
-              <dt className="text-sm font-medium text-muted-foreground">Data Início</dt>
-              <dd className="text-base text-foreground">
-                {alvara.data_inicio
-                  ? new Date(alvara.data_inicio).toLocaleDateString("pt-BR")
-                  : "—"}
+              <dt className="text-sm font-medium text-muted-foreground">Início</dt>
+              <dd className="text-base tabular-nums text-foreground">
+                {fmtData(alvara.data_inicio)}
               </dd>
             </div>
             <div>
               <dt className="text-sm font-medium text-muted-foreground">Validade</dt>
-              <dd className="text-base text-foreground">
-                {alvara.data_validade
-                  ? new Date(alvara.data_validade).toLocaleDateString("pt-BR")
-                  : "Indefinido"}
+              <dd className="text-base tabular-nums text-foreground">
+                {alvara.data_validade ? fmtData(alvara.data_validade) : "Sem validade"}
               </dd>
             </div>
           </dl>
-        </div>
+        </SectionCard>
 
-        <div className="rounded-card border border-border bg-card p-6 shadow-card">
-          <h3 className="mb-4 text-lg font-semibold">Relacionamentos</h3>
+        <SectionCard title="Vínculos" icon={Link2}>
           <dl className="space-y-3">
             <div>
-              <dt className="text-sm font-medium text-muted-foreground">
-                Permissionário
-              </dt>
+              <dt className="text-sm font-medium text-muted-foreground">Permissionário</dt>
               <dd className="text-base text-foreground">
-                {alvara.id_permissionario ? `ID: ${alvara.id_permissionario}` : "—"}
+                {alvara.id_permissionario ? `Nº ${alvara.id_permissionario}` : "—"}
               </dd>
             </div>
             <div>
               <dt className="text-sm font-medium text-muted-foreground">Empresa</dt>
               <dd className="text-base text-foreground">
-                {alvara.id_empresa ? `ID: ${alvara.id_empresa}` : "—"}
+                {alvara.id_empresa ? `Nº ${alvara.id_empresa}` : "—"}
               </dd>
             </div>
             <div>
-              <dt className="text-sm font-medium text-muted-foreground">
-                Renovado De
-              </dt>
+              <dt className="text-sm font-medium text-muted-foreground">Renovado de</dt>
               <dd className="text-base text-foreground">
                 {alvara.renovado_de ? `Alvará ${alvara.renovado_de}` : "Original"}
               </dd>
             </div>
           </dl>
-        </div>
+        </SectionCard>
       </div>
 
-      {/* Veículos */}
-      <div className="rounded-card border border-border bg-card shadow-card">
-        <div className="border-b border-border px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Truck className="h-5 w-5" />
-            <h3 className="text-lg font-semibold">Veículos Vinculados</h3>
-          </div>
-          <Button
-            size="sm"
-            onClick={() => setShowVeiculosModal(true)}
-          >
-            Gerenciar Veículos
-          </Button>
-        </div>
-      </div>
+      <SectionCard
+        title="Veículos vinculados"
+        description="Veículos que operam sob este alvará."
+        icon={Truck}
+      >
+        <Button variant="secondary" size="sm" onClick={() => setShowVeiculosModal(true)}>
+          <Truck className="mr-1 h-4 w-4" aria-hidden="true" />
+          Gerenciar veículos
+        </Button>
+      </SectionCard>
 
       {/* Fluxo de trabalho */}
       <WorkflowTimeline entidadeTipo="alvara" entidadeId={alvara.id} />
 
       {/* Histórico de Auditoria */}
-      <div className="rounded-card border border-border bg-card shadow-card">
+      <section className="rounded-card border border-border bg-card shadow-card">
         <div className="border-b border-border px-6 py-4">
           <div className="flex items-center gap-2">
-            <History className="h-5 w-5" />
-            <h3 className="text-lg font-semibold">Histórico de Auditoria</h3>
+            <History className="h-5 w-5 text-brand" aria-hidden="true" />
+            <h2 className="text-md font-semibold text-foreground">Histórico de auditoria</h2>
           </div>
         </div>
 
         {auditoriaLoading ? (
-          <div className="p-6 text-center text-muted-foreground">
-            Carregando histórico...
-          </div>
+          <Carregando className="p-6 text-center text-muted-foreground" />
         ) : !auditoria || auditoria.eventos.length === 0 ? (
           <div className="p-6">
             <EmptyState
               icon={Inbox}
               title="Nenhum evento de auditoria"
-              description="Nenhuma alteração registrada ainda"
+              description="As alterações deste alvará aparecem aqui."
             />
           </div>
         ) : (
@@ -294,7 +266,7 @@ export default function AlvaraDetailPage({ params }: PageParams) {
             {auditoria.total && auditoria.total > LIMIT && (
               <div className="border-t border-border px-6 py-4 flex items-center justify-between">
                 <div className="text-sm text-muted-foreground">
-                  Total: {auditoria.total} eventos
+                  {auditoria.total} eventos
                 </div>
                 <div className="flex gap-2">
                   <Button
@@ -311,14 +283,14 @@ export default function AlvaraDetailPage({ params }: PageParams) {
                     disabled={(page + 1) * LIMIT >= (auditoria.total || 0)}
                     onClick={() => setPage(page + 1)}
                   >
-                    Próximo
+                    Próxima
                   </Button>
                 </div>
               </div>
             )}
           </>
         )}
-      </div>
+      </section>
 
       {/* Modal de Veículos */}
       <AlvaraVeiculosModal

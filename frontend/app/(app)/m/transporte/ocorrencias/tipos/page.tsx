@@ -3,17 +3,20 @@
 import { Carregando } from "@/components/ui/carregando";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Inbox, Plus, Tags } from "lucide-react";
+import { Inbox, Pencil, Plus, Tags, Trash2 } from "lucide-react";
 import { useState } from "react";
 
+import { useValidacao } from "@/components/transporte/formulario";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { EscolhaSegmentada } from "@/components/ui/escolha-segmentada";
+import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
@@ -98,6 +101,7 @@ export default function OcorrenciasTiposPage() {
     setEditing(null);
     setForm(EMPTY);
     setErr(null);
+    val.reiniciar();
     setDialogOpen(true);
   }
 
@@ -105,6 +109,7 @@ export default function OcorrenciasTiposPage() {
     setEditing(t);
     setForm(paraForm(t));
     setErr(null);
+    val.reiniciar();
     setDialogOpen(true);
   }
 
@@ -122,9 +127,13 @@ export default function OcorrenciasTiposPage() {
     setForm((f) => ({ ...f, [k]: v }));
   }
 
-  function submeter(e: React.FormEvent) {
-    e.preventDefault();
+  const val = useValidacao<"nome">({
+    nome: form.nome.trim() === "" ? "Informe o nome do tipo." : undefined,
+  });
+
+  function submeter() {
     setErr(null);
+    if (!val.conferir()) return;
     salvarM.mutate();
   }
 
@@ -134,7 +143,7 @@ export default function OcorrenciasTiposPage() {
     <div className="space-y-4">
       <PageHeader
         icon={Tags}
-        title="Tipos de Ocorrência"
+        title="Tipos de ocorrência"
         description="Catálogo dos tipos usados para registrar fiscalizações e denúncias."
         breadcrumbs={[
           { label: "Transporte Regulado", href: "/m/transporte" },
@@ -145,7 +154,7 @@ export default function OcorrenciasTiposPage() {
           canCreate ? (
             <Button onClick={abrirNovo}>
               <Plus className="mr-1 h-4 w-4" />
-              Novo tipo
+              Novo tipo de ocorrência
             </Button>
           ) : undefined
         }
@@ -158,6 +167,14 @@ export default function OcorrenciasTiposPage() {
           icon={Inbox}
           title="Nenhum tipo cadastrado"
           description="Cadastre os tipos de ocorrência do transporte regulado."
+          action={
+            canCreate ? (
+              <Button onClick={abrirNovo}>
+                <Plus className="mr-1 h-4 w-4" />
+                Cadastrar tipo
+              </Button>
+            ) : undefined
+          }
         />
       ) : (
         <Table>
@@ -179,17 +196,24 @@ export default function OcorrenciasTiposPage() {
                     {t.ativo ? "Ativo" : "Inativo"}
                   </Badge>
                 </TD>
-                <TD className="space-x-2 text-right">
-                  {canEdit && (
-                    <Button variant="ghost" size="sm" onClick={() => abrirEdicao(t)}>
-                      Editar
-                    </Button>
-                  )}
-                  {canDelete && (
-                    <Button variant="ghost" size="sm" onClick={() => pedirExclusao(t)}>
-                      Excluir
-                    </Button>
-                  )}
+                <TD className="text-right">
+                  <AcoesDaLinha
+                    acoes={[
+                      {
+                        label: "Editar",
+                        icon: Pencil,
+                        onClick: () => abrirEdicao(t),
+                        oculta: !canEdit,
+                      },
+                      {
+                        label: "Excluir",
+                        icon: Trash2,
+                        perigo: true,
+                        onClick: () => pedirExclusao(t),
+                        oculta: !canDelete,
+                      },
+                    ]}
+                  />
                 </TD>
               </TR>
             ))}
@@ -200,56 +224,54 @@ export default function OcorrenciasTiposPage() {
       <Dialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
-        title={editing ? "Editar tipo" : "Novo tipo"}
+        title={editing ? `Editar tipo — ${editing.nome}` : "Novo tipo de ocorrência"}
+        description={editing ? undefined : "O tipo aparece na lista ao registrar uma ocorrência."}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={submeter} loading={salvarM.isPending}>
+              {editing ? "Salvar alterações" : "Criar tipo"}
+            </Button>
+          </>
+        }
       >
-        <form className="space-y-3" onSubmit={submeter}>
-          {err && (
-            <div className="rounded-md border border-danger/40 bg-danger/10 p-2 text-sm text-danger">
-              {err}
-            </div>
-          )}
-          <div>
-            <Label htmlFor="nome">Nome</Label>
+        <div ref={val.ref} className="space-y-4">
+          <FormField label="Nome" required error={val.erro("nome")}>
             <Input
               id="nome"
-              required
               value={form.nome}
               onChange={(e) => set("nome", e.target.value)}
+              onBlur={val.sair("nome")}
+              placeholder="Ex.: Transporte sem alvará"
             />
-          </div>
-          <div>
-            <Label htmlFor="descricao">Descrição</Label>
+          </FormField>
+          <FormField
+            label="Descrição"
+            opcional
+            hint="Aparece como dica para quem registra a ocorrência."
+          >
             <Textarea
               id="descricao"
               rows={3}
               value={form.descricao}
               onChange={(e) => set("descricao", e.target.value)}
+              placeholder="Ex.: veículo operando serviço regulado sem alvará válido"
             />
-          </div>
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="ativo"
-              checked={form.ativo}
-              onChange={(e) => set("ativo", e.target.checked)}
-            />
-            <Label htmlFor="ativo" className="!mb-0">
-              Ativo
-            </Label>
-          </div>
-          {editing && !form.ativo && (
-            <p className="text-xs text-muted-foreground">
-              Tipo inativo não aparece mais no registro de novas ocorrências.
-            </p>
-          )}
-          <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="secondary" onClick={() => setDialogOpen(false)}>
-              Cancelar
-            </Button>
-            <Button type="submit" disabled={salvarM.isPending}>
-              {salvarM.isPending ? "Salvando..." : "Salvar"}
-            </Button>
-          </div>
-        </form>
+          </FormField>
+          <EscolhaSegmentada<"ativo" | "inativo">
+            nome="tipo-ativo"
+            titulo="Situação"
+            valor={form.ativo ? "ativo" : "inativo"}
+            onChange={(v) => set("ativo", v === "ativo")}
+            opcoes={[
+              { valor: "ativo", rotulo: "Ativo", descricao: "Aparece no registro de novas ocorrências." },
+              { valor: "inativo", rotulo: "Inativo", descricao: "Sai do registro de novas ocorrências; as já registradas não mudam." },
+            ]}
+          />
+          {err && <Alert intent="danger">{err}</Alert>}
+        </div>
       </Dialog>
     </div>
   );

@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
  * contador. Moravam no menu lateral, oito itens com o mesmo caminho: o menu
  * virava o filtro de uma tela só. Aqui ficam onde o recorte acontece.
  *
- * **Não são `role="tab"`**, pelo mesmo motivo do `RelatoriosNav`: cada aba é
+ * **Não são `role="tab"`**, pelo mesmo motivo do antigo `RelatoriosNav` (SI-34 o trocou por uma página só): cada aba é
  * um link que troca a URL (`?caixa=`), não um painel na mesma página. O padrão
  * é `<nav>` + links + `aria-current="page"` no ativo.
  *

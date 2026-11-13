@@ -130,7 +130,9 @@ class GoogleDocsService:
         # Decrypt existing tokens
         access_token = decrypt(cred.access_token_cifrado)
         refresh_token = (
-            decrypt(cred.refresh_token_cifrado)
+            # O Google nem sempre devolve refresh token; o callback grava ""
+            # cifrado (a coluna é NOT NULL). Vazio é "não tem", não um token.
+            (decrypt(cred.refresh_token_cifrado) or None)
             if cred.refresh_token_cifrado
             else None
         )

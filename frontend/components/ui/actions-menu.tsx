@@ -16,6 +16,8 @@ export interface ActionsMenuItem {
   onClick: () => void;
   /** Se true, item aparece esmaecido e ignora cliques/teclas. */
   disabled?: boolean;
+  /** Ação destrutiva (Excluir, Revogar): texto em vermelho, separada por uma linha. */
+  perigo?: boolean;
 }
 
 interface ActionsMenuProps {
@@ -29,6 +31,8 @@ interface ActionsMenuProps {
   variant?: "primary" | "secondary" | "ghost";
   /** Tamanho do botão; default "sm". */
   size?: "sm" | "md";
+  /** Esconde o chevron (gatilho só com ícone, ex.: "Mais ações" da linha). */
+  semSeta?: boolean;
   /** className extra no wrapper. */
   className?: string;
 }
@@ -49,6 +53,7 @@ export function ActionsMenu({
   items,
   variant = "secondary",
   size = "sm",
+  semSeta = false,
   className,
 }: ActionsMenuProps) {
   const [open, setOpen] = React.useState(false);
@@ -141,14 +146,16 @@ export function ActionsMenu({
         }}
       >
         {Icon && <Icon className="h-4 w-4" aria-hidden="true" />}
-        {label}
-        <ChevronDown
-          className={cn(
-            "h-3.5 w-3.5 transition-transform",
-            open && "rotate-180",
-          )}
-          aria-hidden="true"
-        />
+        {semSeta && Icon ? <span className="sr-only">{label}</span> : label}
+        {!semSeta && (
+          <ChevronDown
+            className={cn(
+              "h-3.5 w-3.5 transition-transform",
+              open && "rotate-180",
+            )}
+            aria-hidden="true"
+          />
+        )}
       </Button>
 
       <Popover
@@ -161,8 +168,13 @@ export function ActionsMenu({
         <ul role="menu" onKeyDown={onKeyDown} className="focus:outline-none">
           {items.map((item, i) => {
             const ItemIcon = item.icon;
+            const separa = item.perigo && i > 0 && !items[i - 1]?.perigo;
             return (
-              <li key={i} role="none">
+              <li
+                key={i}
+                role="none"
+                className={cn(separa && "mt-1 border-t border-border pt-1")}
+              >
                 <button
                   ref={(el) => {
                     itemRefs.current[i] = el;
@@ -178,7 +190,9 @@ export function ActionsMenu({
                     "focus-visible:outline-none focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
                     item.disabled
                       ? "cursor-not-allowed text-foreground-subtle opacity-50"
-                      : "text-foreground hover:bg-muted",
+                      : item.perigo
+                        ? "text-danger-soft-foreground hover:bg-danger-soft focus-visible:bg-danger-soft"
+                        : "text-foreground hover:bg-muted",
                   )}
                 >
                   {ItemIcon && (

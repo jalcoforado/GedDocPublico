@@ -1,13 +1,16 @@
 "use client";
 
-import { Carregando } from "@/components/ui/carregando";
-
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { CheckCircle2, FileText, Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { RedigirDocumentoDialog } from "@/components/RedigirDocumentoDialog";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Carregando } from "@/components/ui/carregando";
 import { useConfirm } from "@/components/ui/confirm";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useToast } from "@/components/ui/toast";
 import { api, type MinutaStatus, type ProcessoDetail } from "@/lib/api";
 
@@ -17,10 +20,10 @@ const STATUS_LABEL: Record<MinutaStatus, string> = {
   cancelada: "Cancelada",
 };
 
-const STATUS_CLASS: Record<MinutaStatus, string> = {
-  rascunho: "bg-amber-100 text-amber-800",
-  finalizada: "bg-green-100 text-green-800",
-  cancelada: "bg-gray-100 text-gray-600",
+const STATUS_INTENT: Record<MinutaStatus, "warning" | "success" | "neutral"> = {
+  rascunho: "warning",
+  finalizada: "success",
+  cancelada: "neutral",
 };
 
 export function MinutasProcesso({ processo }: { processo: ProcessoDetail }) {
@@ -95,11 +98,12 @@ export function MinutasProcesso({ processo }: { processo: ProcessoDetail }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <div className="text-sm text-gray-600">
+        <div className="text-sm text-foreground-muted">
           {minutas.length} documento{minutas.length === 1 ? "" : "s"} redigido
           {minutas.length === 1 ? "" : "s"}
         </div>
         <Button onClick={abrirNova} disabled={!processo.ativo}>
+          <Plus className="h-4 w-4" aria-hidden="true" />
           Redigir documento
         </Button>
       </div>
@@ -107,10 +111,12 @@ export function MinutasProcesso({ processo }: { processo: ProcessoDetail }) {
       {minutasQ.isLoading ? (
         <Carregando className="text-sm text-muted-foreground" />
       ) : minutas.length === 0 ? (
-        <p className="text-sm text-gray-500">
-          Nenhum documento redigido. Use "Redigir documento" para criar a partir de um
-          modelo ou em branco.
-        </p>
+        <EmptyState
+          icon={FileText}
+          title="Nenhum documento redigido"
+          description="Use “Redigir documento” para criar a partir de um modelo ou em branco."
+          className="p-6"
+        />
       ) : (
         <ul className="divide-y divide-border rounded-md border border-border bg-card">
           {minutas.map((m) => (
@@ -123,43 +129,31 @@ export function MinutasProcesso({ processo }: { processo: ProcessoDetail }) {
                   {m.titulo}
                 </div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span
-                    className={`inline-flex rounded px-1.5 py-0.5 font-medium ${STATUS_CLASS[m.status]}`}
-                  >
-                    {STATUS_LABEL[m.status]}
-                  </span>
+                  <Badge intent={STATUS_INTENT[m.status]}>{STATUS_LABEL[m.status]}</Badge>
                   <span>v{m.versao}</span>
                   {m.origem === "google" && <span>· Google Docs</span>}
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {m.status === "rascunho" && (
-                  <>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => abrirEdicao(m.id)}
-                    >
-                      Editar
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={() => finalizar(m.id)}
-                      disabled={finalizarM.isPending}
-                    >
-                      Finalizar
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => excluir(m.id)}
-                      disabled={removeM.isPending}
-                    >
-                      Excluir
-                    </Button>
-                  </>
-                )}
-              </div>
+              {m.status === "rascunho" && (
+                <AcoesDaLinha
+                  acoes={[
+                    { label: "Editar", icon: Pencil, onClick: () => abrirEdicao(m.id) },
+                    {
+                      label: "Finalizar",
+                      icon: CheckCircle2,
+                      onClick: () => finalizar(m.id),
+                      disabled: finalizarM.isPending,
+                    },
+                    {
+                      label: "Excluir",
+                      icon: Trash2,
+                      perigo: true,
+                      onClick: () => excluir(m.id),
+                      disabled: removeM.isPending,
+                    },
+                  ]}
+                />
+              )}
             </li>
           ))}
         </ul>

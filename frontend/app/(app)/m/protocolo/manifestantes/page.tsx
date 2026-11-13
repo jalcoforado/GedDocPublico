@@ -2,8 +2,10 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { UserCircle } from "lucide-react";
 
 import { CrudPage } from "@/components/CrudPage";
+import { BadgeAtivo } from "@/components/protocolo/BadgeAtivo";
 import { api, type Manifestante } from "@/lib/api";
 import { aplicarMascara } from "@/lib/mascaras";
 
@@ -23,6 +25,9 @@ export default function ManifestantesPage() {
   return (
     <CrudPage<Manifestante>
       title="Manifestantes"
+      icon={UserCircle}
+      description="Pessoas e organizações que abrem ou acompanham processos."
+      novoLabel="Novo manifestante"
       queryKey={["manifestantes", q]}
       fetchList={({ page }) => api.manifestantes.list({ q: q || undefined, page, page_size: 50 })}
       createFn={api.manifestantes.create}
@@ -56,7 +61,7 @@ export default function ManifestantesPage() {
               ?.tipo_manifestante ?? "—",
         },
         { header: "Email", render: (r) => r.email ?? "—" },
-        { header: "Ativo", render: (r) => (r.ativo ? "Sim" : "Não"), className: "w-20" },
+        { header: "Situação", render: (r) => <BadgeAtivo ativo={r.ativo} />, className: "w-24" },
       ]}
       fields={[
         // Tipo e Situação na mesma linha: o Ativo ficava no fim do formulário,
@@ -75,6 +80,7 @@ export default function ManifestantesPage() {
           type: "text",
           required: true,
           colSpan: 2,
+          placeholder: "Ex.: Maria da Silva",
         },
         {
           name: "cpf_cnpj",
@@ -82,18 +88,38 @@ export default function ManifestantesPage() {
           type: "text",
           required: true,
           mascara: (f) => (juridica(f) ? "cnpj" : "cpf"),
+          dica: "Digite só os números; a pontuação entra sozinha.",
         },
         {
           name: "email",
           label: "E-mail",
           type: "email",
           placeholder: "nome@exemplo.com.br",
+          dica: "Para avisos do andamento do processo.",
         },
-        { name: "telefone_celular", label: "Celular", type: "text", required: true, mascara: "celular" },
+        {
+          name: "telefone_celular",
+          label: "Celular",
+          type: "text",
+          required: true,
+          mascara: "celular",
+          dica: "Com DDD: (00) 00000-0000.",
+        },
         { name: "telefone_residencial", label: "Residencial", type: "text", mascara: "telefone" },
         { name: "telefone_comercial", label: "Comercial", type: "text", mascara: "telefone" },
-        { name: "organizacao", label: "Organização", type: "text" },
-        { name: "responsavel", label: "Responsável", type: "text", colSpan: 2 },
+        {
+          name: "organizacao",
+          label: "Organização",
+          type: "text",
+          placeholder: "Ex.: Associação de Moradores do Centro",
+        },
+        {
+          name: "responsavel",
+          label: "Responsável",
+          type: "text",
+          colSpan: 2,
+          dica: "Quem responde pela organização, se for o caso.",
+        },
         { name: "observacao", label: "Observação", type: "textarea", colSpan: 2 },
       ]}
     />

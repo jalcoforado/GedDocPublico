@@ -1,7 +1,5 @@
 "use client";
 
-import { Carregando } from "@/components/ui/carregando";
-
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bell,
@@ -10,18 +8,22 @@ import {
   MessageCircle,
   Phone,
 } from "lucide-react";
-import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Carregando } from "@/components/ui/carregando";
 import { Checkbox } from "@/components/ui/checkbox";
+import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
+import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import {
   notificacoesApi,
   type NotificacaoPreferenciaEvento,
 } from "@/lib/api";
+import { aplicarMascara } from "@/lib/mascaras";
 
 const CANAL_ICON: Record<"in_app" | "email" | "whatsapp", React.ComponentType<{ className?: string }>> = {
   in_app: Bell,
@@ -29,9 +31,21 @@ const CANAL_ICON: Record<"in_app" | "email" | "whatsapp", React.ComponentType<{ 
   whatsapp: MessageCircle,
 };
 
+const ERRO_TELEFONE =
+  "Use só números, com o código do país e o DDD. Ex.: +5588999998888.";
+
+/**
+ * "+5588999998888" → "+55 (88) 99999-8888", só para mostrar: o que se grava
+ * continua sendo o número cru. Número de fora do Brasil volta como veio.
+ */
+function telefoneLegivel(t: string): string {
+  const m = /^\+?55(\d{10,11})$/.exec(t);
+  return m ? `+55 ${aplicarMascara("telefone", m[1]).valor}` : t;
+}
+
 const CANAL_LABEL: Record<"in_app" | "email" | "whatsapp", string> = {
   in_app: "No app",
-  email: "Email",
+  email: "E-mail",
   whatsapp: "WhatsApp",
 };
 
@@ -43,11 +57,14 @@ const CANAL_LABEL: Record<"in_app" | "email" | "whatsapp", string> = {
  */
 function CelulaCanal({
   canal,
+  evento,
   valor,
   disabled,
   onChange,
 }: {
   canal: "in_app" | "email" | "whatsapp";
+  /** Nome do evento, para o nome acessível da caixa ("E-mail — Processo recebido"). */
+  evento: string;
   valor: boolean | null;
   disabled?: boolean;
   onChange: (v: boolean) => void;
@@ -56,7 +73,7 @@ function CelulaCanal({
   if (valor === null) {
     return (
       <div
-        className="flex flex-col items-center gap-1 px-3 py-2 text-muted-foreground/50"
+        className="flex flex-col items-center gap-1 px-3 py-2 text-foreground-subtle"
         title={`${CANAL_LABEL[canal]}: não se aplica a este evento`}
       >
         <Icon className="h-4 w-4" aria-hidden="true" />
@@ -66,14 +83,15 @@ function CelulaCanal({
   }
   return (
     <label
-      className="flex cursor-pointer flex-col items-center gap-1 rounded-md px-3 py-2 hover:bg-muted/40"
+      className="flex cursor-pointer flex-col items-center gap-1 rounded-md px-3 py-2 hover:bg-muted"
       title={CANAL_LABEL[canal]}
     >
-      <Icon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+      <Icon className="h-4 w-4 text-foreground-muted" aria-hidden="true" />
       <Checkbox
         checked={valor}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
+        aria-label={`${CANAL_LABEL[canal]} — ${evento}`}
       />
     </label>
   );
@@ -94,6 +112,7 @@ export default function PreferenciasNotificacoesPage() {
   });
 
   const [telefone, setTelefone] = useState<string>("");
+  const [telTocado, setTelTocado] = useState(false);
   useEffect(() => {
     if (telQ.data) setTelefone(telQ.data.telefone ?? "");
   }, [telQ.data]);
@@ -142,7 +161,7 @@ export default function PreferenciasNotificacoesPage() {
   });
 
   if (prefsQ.isLoading) {
-    return <Carregando className="text-muted-foreground" />;
+    return <Carregando className="text-foreground-muted" />;
   }
   if (prefsQ.error || !prefsQ.data) {
     return (
@@ -158,118 +177,159 @@ export default function PreferenciasNotificacoesPage() {
   const telMudou = telLimpo !== (telSalvo ?? "");
   const telValido = telLimpo === "" || /^\+?[1-9]\d{7,14}$/.test(telLimpo);
 
+  function salvarTelefone() {
+    // Erro só depois da tentativa: ao sair do campo ou ao salvar.
+    if (!telValido) {
+      setTelTocado(true);
+      document.getElementById("tel")?.focus();
+      return;
+    }
+    saveTel.mutate(telLimpo || null);
+  }
+
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-primary">Preferências de notificações</h1>
-        <Link href="/perfil" className="text-sm text-primary hover:underline">
-          ← Voltar
-        </Link>
-      </div>
+    <div className="space-y-4">
+      <PageHeader
+        icon={Bell}
+        title="Preferências de notificações"
+        description="Por onde você quer ser avisado de cada tipo de evento."
+        breadcrumbs={[
+          { label: "Meu perfil", href: "/perfil" },
+          { label: "Notificações" },
+        ]}
+      />
 
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Por evento
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          Escolha por quais canais você quer receber cada tipo de aviso. Uma
-          célula marcada com <strong>—</strong> significa que este evento não
-          usa aquele canal — não é um toggle desligado, é uma combinação que
-          não existe no sistema.
-        </p>
-
-        <div className="overflow-hidden rounded-md border border-border">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/30">
-                <th className="px-3 py-2 text-left font-medium text-muted-foreground">
-                  Evento
-                </th>
-                {(["in_app", "email", "whatsapp"] as const).map((canal) => (
-                  <th key={canal} className="px-3 py-2 text-center font-medium text-muted-foreground">
-                    {CANAL_LABEL[canal]}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {p.map((linha) => (
-                <tr key={linha.evento} className="border-b border-border last:border-0">
-                  <td className="px-3 py-2 font-medium">{linha.label}</td>
+      {/* Mesma largura de leitura dos cartões de Meu perfil, alinhada à
+          esquerda como o resto das telas. */}
+      <div className="max-w-3xl space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Por evento</CardTitle>
+            <CardDescription>
+              Escolha por quais canais você quer receber cada tipo de aviso. Uma
+              célula marcada com <strong>—</strong> significa que este evento não
+              usa aquele canal — não é um toggle desligado, é uma combinação que
+              não existe no sistema.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <Table>
+              <THead>
+                <TR>
+                  <TH>Evento</TH>
                   {(["in_app", "email", "whatsapp"] as const).map((canal) => (
-                    <td key={canal} className="text-center">
-                      <CelulaCanal
-                        canal={canal}
-                        valor={linha[canal]}
-                        disabled={canal === "whatsapp" && !telSalvo}
-                        onChange={(v) =>
-                          updatePref.mutate({
-                            evento: linha.evento,
-                            patch: { [canal]: v },
-                          })
-                        }
-                      />
-                    </td>
+                    <TH key={canal} className="text-center">
+                      {CANAL_LABEL[canal]}
+                    </TH>
                   ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {p.some((l) => l.whatsapp !== null) && !telSalvo && (
-          <p className="text-xs text-muted-foreground">
-            Adicione seu telefone abaixo para poder ligar o canal WhatsApp.
-          </p>
-        )}
-      </section>
+                </TR>
+              </THead>
+              <TBody>
+                {p.map((linha) => (
+                  <TR key={linha.evento}>
+                    <TD className="font-medium">{linha.label}</TD>
+                    {(["in_app", "email", "whatsapp"] as const).map((canal) => (
+                      <TD key={canal} className="p-0 text-center">
+                        <CelulaCanal
+                          canal={canal}
+                          evento={linha.label}
+                          valor={linha[canal]}
+                          disabled={canal === "whatsapp" && !telSalvo}
+                          onChange={(v) =>
+                            updatePref.mutate({
+                              evento: linha.evento,
+                              patch: { [canal]: v },
+                            })
+                          }
+                        />
+                      </TD>
+                    ))}
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+            {p.some((l) => l.whatsapp !== null) && !telSalvo && (
+              <p className="text-xs text-foreground-muted">
+                Adicione seu telefone abaixo para poder ligar o canal WhatsApp.
+              </p>
+            )}
+          </CardContent>
+        </Card>
 
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Telefone (para WhatsApp)
-        </h2>
-        <div className="space-y-1">
-          <Label htmlFor="tel">Número com DDD (E.164 sugerido)</Label>
-          <div className="flex gap-2">
-            <Input
-              id="tel"
-              value={telefone}
-              onChange={(e) => setTelefone(e.target.value)}
-              placeholder="+5588999998888"
-              aria-invalid={!telValido}
-            />
-            <Button
-              size="md"
-              disabled={!telMudou || !telValido || saveTel.isPending}
-              onClick={() => saveTel.mutate(telLimpo || null)}
+        <Card>
+          <CardHeader>
+            <CardTitle>Telefone para WhatsApp</CardTitle>
+            <CardDescription>
+              Usado só nos avisos que você ligar no canal WhatsApp.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <form
+              noValidate
+              onSubmit={(e) => {
+                e.preventDefault();
+                salvarTelefone();
+              }}
+              className="flex flex-wrap items-start gap-2"
             >
-              <Phone className="mr-1 h-4 w-4" aria-hidden="true" />
-              {saveTel.isPending ? "Salvando…" : "Salvar"}
-            </Button>
-          </div>
-          {!telValido && (
-            <p className="text-xs text-danger-soft-foreground">
-              Use só dígitos e opcionalmente prefixo +. Ex: +5588999998888.
-            </p>
-          )}
-        </div>
+              <FormField
+                label="Celular com WhatsApp"
+                className="min-w-0 flex-1 basis-60"
+                error={telTocado && !telValido ? ERRO_TELEFONE : undefined}
+                hint={
+                  telLimpo && telValido
+                    ? `Os avisos vão para ${telefoneLegivel(telLimpo)}.`
+                    : "Com o código do país e o DDD. Pode digitar com espaços ou traços."
+                }
+              >
+                <Input
+                  id="tel"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  value={telefone}
+                  // Espaço, parêntese, ponto e traço saem na hora: o envio
+                  // espera só "+" e dígitos (E.164), e assim quem digita
+                  // "(88) 99999-8888" não leva um erro por isso.
+                  onChange={(e) => setTelefone(e.target.value.replace(/[\s().-]/g, ""))}
+                  onBlur={() => setTelTocado(true)}
+                  placeholder="Ex.: +55 88 99999-8888"
+                />
+              </FormField>
+              {/* Primário só quando há o que salvar: desligado, o laranja
+                  pálido parecia um botão quebrado, não um "nada mudou". */}
+              <Button
+                type="submit"
+                size="md"
+                className="mt-6"
+                variant={telMudou ? "primary" : "secondary"}
+                disabled={!telMudou}
+                loading={saveTel.isPending}
+              >
+                {!saveTel.isPending && <Phone className="h-4 w-4" aria-hidden="true" />}
+                {saveTel.isPending ? "Salvando…" : "Salvar telefone"}
+              </Button>
+            </form>
 
-        {telSalvo && (
-          <div className="flex items-center justify-between rounded-md border border-dashed border-border bg-muted/30 p-3">
-            <div className="text-xs text-muted-foreground">
-              Testar envio agora pelo provider configurado no servidor.
-            </div>
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={test.isPending}
-              onClick={() => test.mutate()}
-            >
-              <FlaskConical className="mr-1 h-3.5 w-3.5" aria-hidden="true" />
-              {test.isPending ? "Enviando…" : "Enviar teste"}
-            </Button>
-          </div>
-        )}
-      </section>
+            {telSalvo && (
+              <div className="flex items-center justify-between gap-3 rounded-md border border-dashed border-border bg-surface-2 p-3">
+                <div className="text-xs text-foreground-muted">
+                  Testar envio agora pelo provedor configurado no servidor.
+                </div>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={test.isPending}
+                  onClick={() => test.mutate()}
+                >
+                  <FlaskConical className="h-3.5 w-3.5" aria-hidden="true" />
+                  {test.isPending ? "Enviando…" : "Enviar teste"}
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

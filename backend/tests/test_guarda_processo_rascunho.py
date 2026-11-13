@@ -227,6 +227,16 @@ async def cen(admin_engine):
     from app.database import engine as app_engine
 
     await app_engine.dispose()
+    await _limpar_tenant(admin_engine, dados["tenant"].id)
+    async with _sm(admin_engine)() as s:
+        await s.execute(
+            text("DELETE FROM protocolos.prioridade WHERE id=:p"),
+            {"p": dados["prioridade"]},
+        )
+        await s.commit()
+
+
+async def _limpar_tenant(admin_engine, tenant_id: int) -> None:
     async with _sm(admin_engine)() as s:
         for stmt in (
             "UPDATE protocolos.processo SET id_ultima_movimentacao=NULL WHERE tenant_id=:t",
@@ -249,12 +259,65 @@ async def cen(admin_engine):
             "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
             "DELETE FROM aprimora_py.tenant WHERE id=:t",
         ):
-            await s.execute(text(stmt), {"t": dados["tenant"].id})
-        await s.execute(
-            text("DELETE FROM protocolos.prioridade WHERE id=:p"),
-            {"p": dados["prioridade"]},
-        )
+            await s.execute(text(stmt), {"t": tenant_id})
         await s.commit()
+
+
+@pytest_asyncio.fixture
+async def outra_prefeitura(admin_engine):
+    """Segunda prefeitura, com assunto, manifestante e unidade próprios: os ids
+    que um usuário da primeira não pode usar (SI-27). As chaves são os nomes
+    dos campos do payload, para entrar direto em `_edicao(cen, **{campo: ...})`."""
+    slug = _slug("si27-")
+    async with _sm(admin_engine)() as s:
+        tenant, _ = await provisionar_tenant(
+            s, slug=slug, nome="Pref SI-27", admin_email=f"{slug}@t.local",
+            admin_nome="Adm", admin_cpf=uuid.uuid4().hex[:11], plano="basico",
+        )
+
+    async with _sm(admin_engine)() as s:
+        unidade = (
+            await s.execute(
+                text("SELECT id FROM utils.unidade_trabalho WHERE tenant_id=:t LIMIT 1"),
+                {"t": tenant.id},
+            )
+        ).scalar_one()
+        id_tipo_manifestante = (
+            await s.execute(
+                text(
+                    "SELECT id FROM protocolos.tipo_manifestante WHERE tenant_id=:t "
+                    "ORDER BY id LIMIT 1"
+                ),
+                {"t": tenant.id},
+            )
+        ).scalar_one()
+        tp = TipoProcesso(
+            tenant_id=tenant.id, tipo_processo="Geral SI-27",
+            exige_processo_pai=False, ativo=True, excluido=False,
+        )
+        manif = Manifestante(
+            tenant_id=tenant.id, id_tipo_manifestante=id_tipo_manifestante,
+            nome="João de Outra Cidade", cpf_cnpj=uuid.uuid4().hex[:11],
+            ativo=True, excluido=False,
+        )
+        s.add_all([tp, manif])
+        await s.flush()
+        assunto = Assunto(
+            tenant_id=tenant.id, assunto="Assunto de outra prefeitura",
+            id_tipo_processo=tp.id, exige_processo_pai=False, ativo=True, excluido=False,
+        )
+        s.add(assunto)
+        await s.commit()
+        dados = {
+            "tenant": tenant,
+            "id_assunto": assunto.id,
+            "id_manifestante": manif.id,
+            "id_unidade_proprietaria": unidade,
+        }
+
+    yield dados
+
+    await _limpar_tenant(admin_engine, tenant.id)
 
 
 def _as_operador(engine, uid: int, tenant_id: int, tenant_slug: str):
@@ -696,6 +759,65 @@ async def test_si16_edicao_recusa_referencia_que_nao_existe(admin_engine, cen):
         )
     assert ed.status_code == 400, ed.text
     assert "Assunto" in ed.json()["detail"]
+
+
+# ============================================================================
+# SI-27 — criar processo confere se as referências são da mesma prefeitura
+# ============================================================================
+
+_CAMPOS_SI27 = [
+    ("id_assunto", "Assunto"),
+    ("id_manifestante", "Manifestante"),
+    ("id_unidade_proprietaria", "Unidade proprietária"),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rascunho", [False, True], ids=["direto", "rascunho"])
+@pytest.mark.parametrize("campo, rotulo", _CAMPOS_SI27, ids=[c for c, _ in _CAMPOS_SI27])
+async def test_si27_criar_recusa_referencia_de_outra_prefeitura(
+    admin_engine, cen, outra_prefeitura, campo, rotulo, rascunho
+):
+    """A tela só oferece itens da própria prefeitura, mas a API chamada direto
+    aceitava o id de outra — e a RLS, que seria a rede, está inerte (F-12).
+    Usuário comum de propósito: o bypass de SU não pode mascarar nada aqui."""
+    t = cen["tenant"]
+    _as_operador(admin_engine, cen["operador"], t.id, t.slug)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post(
+            "/api/v2/processos",
+            json=_edicao(cen, rascunho=rascunho, **{campo: outra_prefeitura[campo]}),
+        )
+    assert r.status_code == 400, r.text
+    assert rotulo in r.json()["detail"]
+
+    async with _sm(admin_engine)() as s:
+        gravados = (
+            await s.execute(
+                text("SELECT count(*) FROM protocolos.processo WHERE tenant_id IN (:a, :b)"),
+                {"a": t.id, "b": outra_prefeitura["tenant"].id},
+            )
+        ).scalar_one()
+    assert gravados == 0
+
+
+@pytest.mark.asyncio
+async def test_si27_editar_rascunho_recusa_unidade_de_outra_prefeitura(
+    admin_engine, cen, outra_prefeitura
+):
+    """A edição do rascunho passou a usar a mesma conferência da criação."""
+    t = cen["tenant"]
+    _as_operador(admin_engine, cen["operador"], t.id, t.slug)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await _novo_rascunho(c, cen)
+        ed = await c.put(
+            f"/api/v2/processos/{r['id']}/rascunho",
+            json=_edicao(
+                cen, id_unidade_proprietaria=outra_prefeitura["id_unidade_proprietaria"]
+            ),
+        )
+    assert ed.status_code == 400, ed.text
+    assert "Unidade proprietária" in ed.json()["detail"]
 
 
 @pytest.mark.asyncio

@@ -14,7 +14,7 @@
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import { ConfirmProvider } from "@/components/ui/confirm";
 
@@ -284,6 +284,13 @@ describe("Ordem cronológica — tela da fila", () => {
 // ---------------------------------------------------------------------------
 
 describe("Detalhe da solicitação — seção Fila cronológica (F3)", () => {
+  // A primeira importação do detalhe (página grande, frio) passava de 5s em
+  // máquina mais lenta e estourava o tempo do PRIMEIRO teste, não do import.
+  // Aquecida aqui, com folga própria; os `await import` abaixo pegam do cache.
+  beforeAll(async () => {
+    await import("@/components/pagamentos/DetalheDebitoContent");
+  }, 60_000);
+
   it("mostra posição N de M, motivo do bloqueio e exceções autorizadas", async () => {
     const { DetalheDebitoContent } = await import(
       "@/components/pagamentos/DetalheDebitoContent"
@@ -380,11 +387,11 @@ describe("Contratos — categoria da fila cronológica obrigatória (F3)", () =>
     );
     renderComQueryClient(<ContratosPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Novo" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Novo contrato" }));
 
-    const selectCategoria = (await screen.findByLabelText(
-      /^categoria \(fila cronológica\)/i,
-    )) as HTMLSelectElement;
+    // Rótulo curto ("Categoria"); a fila cronológica fica na dica do campo.
+    const selectCategoria = (await screen.findByLabelText(/^categoria/i)) as HTMLSelectElement;
+
     expect(selectCategoria).toBeRequired();
 
     // As 4 categorias em português, além da opção vazia.

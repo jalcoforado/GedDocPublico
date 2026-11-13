@@ -7,12 +7,15 @@ import { Copy, KeyRound, Plus, ShieldOff } from "lucide-react";
 import { useState } from "react";
 
 import { fmtDataHora } from "@/components/pagamentos/format";
+import { useValidacaoCampos } from "@/components/pagamentos/useValidacaoCampos";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
@@ -35,6 +38,10 @@ export default function IntegracoesPage() {
   const [criarOpen, setCriarOpen] = useState(false);
   const [form, setForm] = useState<SistemaIntegradoInput>(FORM_INICIAL);
   const [chaveCriada, setChaveCriada] = useState<string | null>(null);
+  const vCriar = useValidacaoCampos(
+    { nome: !form.nome.trim() && "Dê um nome para reconhecer a chave na lista." },
+    { nome: "integracao-nome" },
+  );
 
   const sistemasQ = useQuery({
     queryKey: ["pag-sistemas-integrados"],
@@ -71,6 +78,7 @@ export default function IntegracoesPage() {
 
   function abrirCriar() {
     setForm(FORM_INICIAL);
+    vCriar.reiniciar();
     setCriarOpen(true);
   }
 
@@ -107,14 +115,14 @@ export default function IntegracoesPage() {
         icon={KeyRound}
         breadcrumbs={[
           { label: "Pagamentos", href: "/m/pagamentos" },
-          { label: "Cadastros", href: "/m/pagamentos/cadastros/fornecedores" },
+          { label: "Cadastros e controle", href: "/m/pagamentos/cadastros" },
           { label: "Sistemas integrados" },
         ]}
         title="Sistemas integrados"
-        description="Chaves de API para integração máquina-a-máquina (M2M) com sistemas externos — cada chave autentica por cabeçalho X-Api-Key e tem escopos independentes de leitura e escrita."
+        description="Chaves de API para sistemas externos lerem ou gravarem dados de pagamentos (cabeçalho X-Api-Key)."
         actions={
           <Button onClick={abrirCriar}>
-            <Plus className="mr-2 h-4 w-4" aria-hidden="true" />
+            <Plus className="h-4 w-4" aria-hidden="true" />
             Nova chave
           </Button>
         }
@@ -122,12 +130,18 @@ export default function IntegracoesPage() {
 
       <SectionCard title="Chaves cadastradas">
         {sistemasQ.isLoading ? (
-          <Carregando className="text-sm text-muted" />
+          <Carregando className="text-sm text-foreground-muted" />
         ) : sistemas.length === 0 ? (
           <EmptyState
             icon={KeyRound}
             title="Nenhum sistema integrado cadastrado"
             description="Crie uma chave para permitir que um sistema externo leia ou grave dados de pagamentos via API."
+            action={
+              <Button onClick={abrirCriar}>
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                Nova chave
+              </Button>
+            }
           />
         ) : (
           <Table>
@@ -138,7 +152,7 @@ export default function IntegracoesPage() {
                 <TH>Escopos</TH>
                 <TH>Estado</TH>
                 <TH>Criado em</TH>
-                <TH />
+                <TH className="text-right">Ações</TH>
               </TR>
             </THead>
             <TBody>
@@ -150,33 +164,34 @@ export default function IntegracoesPage() {
                   </TD>
                   <TD>
                     <div className="flex flex-wrap gap-1">
-                      {s.escopo_leitura && <Badge intent="info">leitura</Badge>}
-                      {s.escopo_escrita && <Badge intent="brand">escrita</Badge>}
+                      {s.escopo_leitura && <Badge intent="info">Leitura</Badge>}
+                      {s.escopo_escrita && <Badge intent="brand">Escrita</Badge>}
                       {!s.escopo_leitura && !s.escopo_escrita && (
-                        <span className="text-xs text-muted-foreground">—</span>
+                        <span className="text-xs text-foreground-muted">—</span>
                       )}
                     </div>
                   </TD>
                   <TD>
                     {s.ativo ? (
-                      <Badge intent="success">ativa</Badge>
+                      <Badge intent="success">Ativa</Badge>
                     ) : (
-                      <Badge intent="neutral">revogada</Badge>
+                      <Badge intent="neutral">Revogada</Badge>
                     )}
                   </TD>
                   <TD>{fmtDataHora(s.criado_em)}</TD>
                   <TD className="text-right">
-                    {s.ativo && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => pedirRevogacao(s)}
-                        disabled={revogar.isPending}
-                      >
-                        <ShieldOff className="mr-2 h-4 w-4" aria-hidden="true" />
-                        Revogar
-                      </Button>
-                    )}
+                    <AcoesDaLinha
+                      acoes={[
+                        {
+                          label: "Revogar",
+                          icon: ShieldOff,
+                          perigo: true,
+                          onClick: () => pedirRevogacao(s),
+                          disabled: revogar.isPending,
+                          oculta: !s.ativo,
+                        },
+                      ]}
+                    />
                   </TD>
                 </TR>
               ))}
@@ -194,27 +209,35 @@ export default function IntegracoesPage() {
             <Button variant="ghost" onClick={() => setCriarOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={() => criar.mutate()} disabled={criar.isPending || !form.nome.trim()}>
-              Criar
+            <Button
+              onClick={() => {
+                if (vCriar.conferir()) criar.mutate();
+              }}
+              loading={criar.isPending}
+            >
+              Criar chave
             </Button>
           </>
         }
       >
         <div className="space-y-4">
-          <div>
-            <Label htmlFor="integracao-nome" required>
-              Nome
-            </Label>
+          <FormField
+            label="Nome do sistema"
+            required
+            error={vCriar.erro("nome")}
+            hint="Para reconhecer a chave na lista. Ex.: o nome do ERP que vai usá-la."
+          >
             <Input
               id="integracao-nome"
               value={form.nome}
               onChange={(e) => setForm((f) => ({ ...f, nome: e.target.value }))}
+              onBlur={vCriar.tocar("nome")}
               placeholder="Ex.: ERP Financeiro"
               autoFocus
             />
-          </div>
-          <div className="space-y-2">
-            <Label>Escopos</Label>
+          </FormField>
+          <fieldset className="space-y-2">
+            <legend className="mb-1 text-sm font-medium text-foreground">O que a chave pode fazer</legend>
             <div className="flex items-center gap-2">
               <Checkbox
                 id="integracao-leitura"
@@ -227,6 +250,9 @@ export default function IntegracoesPage() {
                 Leitura
               </Label>
             </div>
+            <p className="pl-7 text-xs text-foreground-muted">
+              Consultar solicitações, ordens de pagamento e baixas.
+            </p>
             <div className="flex items-center gap-2">
               <Checkbox
                 id="integracao-escrita"
@@ -239,7 +265,10 @@ export default function IntegracoesPage() {
                 Escrita
               </Label>
             </div>
-          </div>
+            <p className="pl-7 text-xs text-foreground-muted">
+              Criar solicitações e registrar liquidação pela API.
+            </p>
+          </fieldset>
         </div>
       </Dialog>
 

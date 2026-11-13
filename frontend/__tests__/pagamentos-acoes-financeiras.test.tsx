@@ -7,7 +7,7 @@
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const estado = { perms: [] as string[], pagamento: "PAGA_PARCIAL" };
 
@@ -111,6 +111,12 @@ async function abrir() {
   await screen.findByText("IRRF");
 }
 
+// A primeira importação do detalhe (muitos módulos) passava dos 5 s do
+// teste em máquina carregada; aquecer aqui tira o custo de dentro do teste.
+beforeAll(async () => {
+  await import("@/components/pagamentos/DetalheDebitoContent");
+}, 30_000);
+
 beforeEach(() => {
   estado.perms = [];
   estado.pagamento = "PAGA_PARCIAL";
@@ -131,9 +137,11 @@ describe("ações financeiras no detalhe do débito", () => {
     fireEvent.click(screen.getByRole("button", { name: "Estornar pagamento da parcela 1" }));
     const dialogo = within(await screen.findByRole("dialog"));
     const confirmar = dialogo.getByRole("button", { name: "Estornar pagamento" });
-    expect(confirmar).toBeDisabled();
+    // Sem justificativa, o clique não estorna: mostra o que falta e foca o campo.
     fireEvent.click(confirmar);
     expect(estornarMock).not.toHaveBeenCalled();
+    expect(await dialogo.findByText(/Explique o motivo/)).toBeInTheDocument();
+    expect(dialogo.getByLabelText(/Justificativa/)).toHaveFocus();
 
     fireEvent.change(dialogo.getByLabelText(/Justificativa/), {
       target: { value: "Pago em duplicidade" },
@@ -162,10 +170,11 @@ describe("ações financeiras no detalhe do débito", () => {
     expect(screen.getAllByRole("button", { name: /^Registrar recolhimento da retenção/ })).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Registrar recolhimento da retenção IRRF" }));
     const dialogo = within(await screen.findByRole("dialog"));
-    const registrar = dialogo.getByRole("button", { name: "Registrar" });
-    expect(registrar).toBeDisabled();
+    const registrar = dialogo.getByRole("button", { name: "Registrar recolhimento" });
     fireEvent.change(dialogo.getByLabelText(/Data do recolhimento/), { target: { value: "2026-10-10" } });
-    expect(registrar).toBeDisabled();
+    fireEvent.click(registrar);
+    expect(recolherMock).not.toHaveBeenCalled();
+    expect(await dialogo.findByText(/Informe o número da guia/)).toBeInTheDocument();
     fireEvent.change(dialogo.getByLabelText(/Documento de arrecadação/), { target: { value: "DARF 123" } });
     fireEvent.click(registrar);
     await waitFor(() =>

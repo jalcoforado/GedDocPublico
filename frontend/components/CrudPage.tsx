@@ -1,15 +1,18 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Inbox } from "lucide-react";
+import { AlertCircle, Inbox, Pencil, Plus, Search, Trash2, type LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Button } from "@/components/ui/button";
+import { CampoComUnidade } from "@/components/ui/campo-com-unidade";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
@@ -23,8 +26,9 @@ import {
   exemploDaMascara,
   type Mascara,
 } from "@/lib/mascaras";
+import { cn } from "@/lib/utils";
 
-export type FieldType = "text" | "email" | "number" | "select" | "checkbox" | "textarea";
+export type FieldType = "text" | "email" | "number" | "date" | "select" | "checkbox" | "textarea";
 
 export interface SelectOption {
   value: string | number;
@@ -47,6 +51,13 @@ export interface CrudField<T = any> {
   mascara?: Mascara | ((form: any) => Mascara);
   /** Checkbox: texto ao lado da caixa (o `label` fica como título acima). */
   textoAoLado?: string;
+  /** Dica permanente sob o campo: formato, exemplo, para que serve. */
+  dica?: string;
+  /** Marca "opcional" ao lado do rótulo (campo livre num grupo de obrigatórios). */
+  opcional?: boolean;
+  /** Unidade grudada no campo (só `text`/`number`): "R$" antes, "km" depois. */
+  prefixo?: string;
+  sufixo?: string;
 }
 
 function resolver<V>(v: V | ((form: any) => V), form: any): V {
@@ -148,6 +159,15 @@ export interface CrudColumn<T> {
 
 interface CrudPageProps<T extends { id: number }> {
   title: string;
+  /** Uma frase sobre o que é o cadastro — o PageHeader de toda tela tem. */
+  description?: React.ReactNode;
+  /** Ícone do cadastro (o mesmo do menu/hub, para a tela ser reconhecível). */
+  icon?: LucideIcon;
+  /**
+   * Rótulo do botão de criar, com o nome da coisa e o gênero certo
+   * ("Nova cidade", "Novo fornecedor"). Também titula o diálogo. Padrão: "Novo".
+   */
+  novoLabel?: string;
   queryKey: any[];
   /**
    * Função que retorna `{items, total, page, page_size}` ou `T[]` direto.
@@ -175,6 +195,9 @@ interface CrudPageProps<T extends { id: number }> {
 
 export function CrudPage<T extends { id: number }>({
   title,
+  description,
+  icon,
+  novoLabel = "Novo",
   queryKey,
   fetchList,
   createFn,
@@ -327,22 +350,37 @@ export function CrudPage<T extends { id: number }>({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-aprimora">{title}</h1>
-        <Button onClick={openNew}>Novo</Button>
-      </div>
+      <PageHeader
+        title={title}
+        description={description}
+        icon={icon}
+        actions={
+          <Button onClick={openNew}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            {novoLabel}
+          </Button>
+        }
+      />
 
-      <div className="flex flex-wrap items-center gap-2">
-        {searchable && (
-          <Input
-            placeholder="Buscar..."
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            className="max-w-sm"
-          />
-        )}
-        {toolbar}
-      </div>
+      {(searchable || toolbar) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {searchable && (
+            <div className="relative w-full max-w-sm">
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-foreground-subtle"
+                aria-hidden="true"
+              />
+              <Input
+                placeholder={`Buscar em ${title.toLowerCase()}…`}
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+          )}
+          {toolbar}
+        </div>
+      )}
 
       <Table>
         <THead>
@@ -366,7 +404,7 @@ export function CrudPage<T extends { id: number }>({
                 <EmptyState
                   icon={Inbox}
                   title={`Nenhum registro em ${title.toLowerCase()}`}
-                  description="Clique em Novo para criar o primeiro."
+                  description={`Use “${novoLabel}” para cadastrar o primeiro.`}
                   className="border-0 bg-transparent"
                 />
               </TD>
@@ -380,41 +418,39 @@ export function CrudPage<T extends { id: number }>({
                 </TD>
               ))}
               <TD className="text-right">
-                <div className="inline-flex gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => openEdit(row)}
-                  >
-                    Editar
-                  </Button>
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    onClick={async () => {
-                      const ok = await confirm({
-                        title: "Excluir registro",
-                        message:
-                          "Esta ação não pode ser desfeita. Deseja realmente excluir este registro?",
-                        confirmLabel: "Excluir",
-                        intent: "danger",
-                      });
-                      if (ok) deleteM.mutate(row.id);
-                    }}
-                  >
-                    Excluir
-                  </Button>
-                </div>
+                <AcoesDaLinha
+                  acoes={[
+                    { label: "Editar", icon: Pencil, onClick: () => openEdit(row) },
+                    {
+                      label: "Excluir",
+                      icon: Trash2,
+                      perigo: true,
+                      onClick: async () => {
+                        const ok = await confirm({
+                          title: "Excluir registro",
+                          message:
+                            "Esta ação não pode ser desfeita. Deseja realmente excluir este registro?",
+                          confirmLabel: "Excluir",
+                          intent: "danger",
+                        });
+                        if (ok) deleteM.mutate(row.id);
+                      },
+                    },
+                  ]}
+                />
               </TD>
             </TR>
           ))}
         </TBody>
       </Table>
 
-      {meta && (
+      {/* Lista vazia já diz isso no EmptyState; "0 registros — página 1"
+          com Anterior/Próxima desabilitados embaixo era ruído. */}
+      {meta && meta.total > 0 && (
         <div className="flex items-center justify-between text-sm text-muted-foreground">
           <span>
-            {meta.total} registros — página {page}
+            {meta.total} {meta.total === 1 ? "registro" : "registros"}
+            {` — página ${page} de ${lastPage}`}
           </span>
           <div className="flex gap-2">
             <Button
@@ -440,34 +476,79 @@ export function CrudPage<T extends { id: number }>({
       <Dialog
         open={open}
         onClose={close}
-        title={editing ? "Editar" : "Novo"}
+        // "Nova cidade" → "Editar cidade": o diálogo diz o que se edita.
+        title={
+          editing
+            ? novoLabel === "Novo"
+              ? "Editar"
+              : `Editar ${novoLabel.replace(/^Nov[oa]\s+/i, "")}`
+            : novoLabel
+        }
         size={dialogSize}
         footer={
           <>
-            <Button variant="secondary" onClick={close}>
+            <Button variant="ghost" onClick={close}>
               Cancelar
             </Button>
-            <Button onClick={submit} disabled={createM.isPending || updateM.isPending}>
-              {createM.isPending || updateM.isPending ? "Salvando..." : "Salvar"}
+            {/* O verbo do formulário (padrão de formulário, regra 8): quem
+                cria cadastra a coisa; quem edita salva alterações. */}
+            <Button onClick={submit} loading={createM.isPending || updateM.isPending}>
+              {editing
+                ? "Salvar alterações"
+                : novoLabel === "Novo"
+                  ? "Cadastrar"
+                  : `Cadastrar ${novoLabel.replace(/^Nov[oa]\s+/i, "")}`}
             </Button>
           </>
         }
       >
-        <form onSubmit={submit} noValidate className="grid grid-cols-2 gap-3">
+        <form onSubmit={submit} noValidate className="grid grid-cols-2 gap-x-4 gap-y-4">
+          {/* Resumo dos erros no topo: num diálogo que rola, o primeiro campo
+              inválido recebe o foco, mas quem errou três precisa saber que
+              são três. Cada item leva ao campo. */}
+          {Object.keys(erros).length > 1 && (
+            <div
+              role="alert"
+              className="col-span-2 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
+            >
+              <p className="font-medium">Revise {Object.keys(erros).length} campos antes de salvar:</p>
+              <ul className="mt-1 list-inside list-disc">
+                {fields
+                  .filter((f) => erros[f.name])
+                  .map((f) => (
+                    <li key={f.name}>
+                      <button
+                        type="button"
+                        onClick={() => document.getElementById(f.name)?.focus()}
+                        className="underline underline-offset-2 hover:no-underline"
+                      >
+                        {resolver(f.label, form)}
+                      </button>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          )}
           {fields.map((f) => {
             const erro = erros[f.name];
             const mascara = f.mascara && f.type === "text" ? resolver(f.mascara, form) : undefined;
             const aria = {
               "aria-invalid": erro ? true : undefined,
-              "aria-describedby": erro ? `${f.name}-erro` : undefined,
+              "aria-describedby":
+                [erro ? `${f.name}-erro` : null, f.dica ? `${f.name}-dica` : null].filter(Boolean).join(" ") ||
+                undefined,
             };
+            const comUnidade = (f.prefixo || f.sufixo) && (f.type === "text" || f.type === "number") && !mascara;
             return (
             <div
               key={f.name}
-              className={f.colSpan === 2 ? "col-span-2" : "col-span-1"}
+              className={f.colSpan === 2 ? "col-span-2" : "col-span-2 sm:col-span-1"}
             >
               <Label htmlFor={f.name} required={f.required && f.type !== "checkbox"}>
                 {resolver(f.label, form)}
+                {f.opcional && !f.required && (
+                  <span className="ml-1.5 text-xs font-normal text-foreground-subtle">opcional</span>
+                )}
               </Label>
               {f.type === "select" ? (
                 <Select
@@ -496,7 +577,7 @@ export function CrudPage<T extends { id: number }>({
                     type="checkbox"
                     checked={!!form[f.name]}
                     onChange={(e) => mudar(f.name, e.target.checked)}
-                    className="h-4 w-4 rounded border-gray-300"
+                    className="h-4 w-4 rounded border-border-strong accent-[hsl(var(--brand))]"
                   />
                   {f.textoAoLado && (
                     <label htmlFor={f.name} className="text-sm text-foreground">
@@ -522,6 +603,28 @@ export function CrudPage<T extends { id: number }>({
                   required={f.required}
                   {...aria}
                 />
+              ) : comUnidade ? (
+                <CampoComUnidade
+                  id={f.name}
+                  type={f.type}
+                  inputMode={f.type === "number" ? "decimal" : undefined}
+                  prefixo={f.prefixo}
+                  sufixo={f.sufixo}
+                  value={form[f.name] ?? ""}
+                  onChange={(e) =>
+                    mudar(
+                      f.name,
+                      f.type === "number"
+                        ? e.target.value === ""
+                          ? null
+                          : Number(e.target.value)
+                        : e.target.value,
+                    )
+                  }
+                  required={f.required}
+                  placeholder={f.placeholder}
+                  {...aria}
+                />
               ) : (
                 <Input
                   id={f.name}
@@ -542,8 +645,14 @@ export function CrudPage<T extends { id: number }>({
                   {...aria}
                 />
               )}
+              {f.dica && (
+                <p id={`${f.name}-dica`} className={cn("mt-1 text-xs text-foreground-muted", erro && "sr-only")}>
+                  {f.dica}
+                </p>
+              )}
               {erro && (
-                <p id={`${f.name}-erro`} className="mt-1 text-sm text-danger">
+                <p id={`${f.name}-erro`} className="mt-1 flex items-start gap-1 text-xs font-medium text-danger-soft-foreground">
+                  <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                   {erro}
                 </p>
               )}

@@ -31,6 +31,8 @@ import {
   type WorkflowTransicao,
 } from "@/lib/api";
 
+import { COR_WF, ROTULO_TRANSICAO, TEMA_XYFLOW, estiloDoNo } from "./cores";
+
 const COL_WIDTH = 220;
 const ROW_HEIGHT = 110;
 const NODE_PADDING_X = 40;
@@ -86,17 +88,11 @@ function estadosToNodes(
     const isFinal = est.final;
     const isSelected = selectedId === est.slug;
 
-    let border = "1px solid var(--border, #d4d4d8)";
-    let background = "var(--card, #fff)";
-    if (isSelected) {
-      border = "2px solid #f59e0b";
-      background = "#fef3c7";
-    } else if (isFinal) {
-      border = "2px solid #16a34a";
-      background = "#dcfce7";
-    } else if (isInicial) {
-      border = "2px dashed #2563eb";
-    }
+    const { border, background } = estiloDoNo({
+      selecionado: isSelected,
+      final: isFinal,
+      inicial: isInicial,
+    });
 
     return {
       id: est.slug,
@@ -109,24 +105,24 @@ function estadosToNodes(
               {est.slug}
             </div>
             {est.sla_dias != null && (
-              <div className="mt-1 text-[10px] text-amber-700">
+              <div className="mt-1 text-[10px] text-warning-soft-foreground">
                 SLA: {est.sla_dias}d
               </div>
             )}
             {est.id_unidade_responsavel != null && (
-              <div className="mt-1 text-[10px] text-slate-700">
+              <div className="mt-1 text-[10px] text-foreground-muted">
                 🏢{" "}
                 {unidadeNomes?.[est.id_unidade_responsavel] ??
                   `#${est.id_unidade_responsavel}`}
               </div>
             )}
             {isInicial && (
-              <div className="mt-1 text-[10px] font-medium text-blue-700">
+              <div className="mt-1 text-[10px] font-medium text-info-soft-foreground">
                 ● inicial
               </div>
             )}
             {isFinal && (
-              <div className="mt-1 text-[10px] font-medium text-green-700">
+              <div className="mt-1 text-[10px] font-medium text-success-soft-foreground">
                 ● final
               </div>
             )}
@@ -136,6 +132,7 @@ function estadosToNodes(
       style: {
         border,
         background,
+        color: COR_WF.texto,
         borderRadius: 8,
         padding: 8,
         width: 170,
@@ -154,20 +151,24 @@ function transicoesToEdges(
   return transicoes.map((t, i) => {
     const id = `e-${t.de}-${t.para}-${i}`;
     const isSelected = selectedId === id;
+    const stroke = isSelected
+      ? COR_WF.selecionado
+      : t.condicao
+        ? COR_WF.condicao
+        : COR_WF.transicao;
     return {
       id,
       source: t.de,
       target: t.para,
       label: t.label,
-      labelStyle: { fontSize: 11 },
-      labelBgStyle: { fill: "#fff", fillOpacity: 0.9 },
+      ...ROTULO_TRANSICAO,
       labelBgPadding: [4, 2],
       style: {
-        stroke: isSelected ? "#f59e0b" : t.condicao ? "#9333ea" : "#64748b",
+        stroke,
         strokeWidth: isSelected ? 3 : 1.5,
         strokeDasharray: t.evento !== "manual" ? "4 2" : undefined,
       },
-      markerEnd: { type: MarkerType.ArrowClosed },
+      markerEnd: { type: MarkerType.ArrowClosed, color: stroke },
     };
   });
 }
@@ -459,7 +460,7 @@ function EditorInner({ dsl, onChange, onSelectionChange, height = 540 }: Workflo
             <ul className="list-disc space-y-1 pl-4">
               <li>
                 <strong>Criar transição (mouse):</strong> passe o cursor na borda
-                direita de um nodo até aparecer a bolinha azul, arraste até a borda
+                direita de um nodo até aparecer a bolinha, arraste até a borda
                 esquerda do outro nodo.
               </li>
               <li>
@@ -487,6 +488,7 @@ function EditorInner({ dsl, onChange, onSelectionChange, height = 540 }: Workflo
       </div>
       <div style={{ height, width: "100%" }} className="workflow-editor bg-muted/20">
         <ReactFlow
+          style={TEMA_XYFLOW}
           nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
+import { FormField } from "@/components/ui/form-field";
 import { Textarea } from "@/components/ui/textarea";
 
 interface Props {
@@ -36,40 +36,36 @@ export function CancelarComplementacaoDialog({
       size="sm"
       footer={
         <>
-          <Button variant="secondary" onClick={onClose} disabled={submitting}>
+          <Button variant="ghost" onClick={onClose} disabled={submitting}>
             Voltar
           </Button>
           <Button
             variant="danger"
-            disabled={submitting}
+            loading={submitting}
             onClick={() =>
               onSubmit({ motivo: motivo.trim().length ? motivo.trim() : null })
             }
           >
-            {submitting ? "Cancelando..." : "Confirmar cancelamento"}
+            {submitting ? "Cancelando…" : "Confirmar cancelamento"}
           </Button>
         </>
       }
     >
-      <div className="space-y-3">
+      <div className="space-y-4">
         <p className="text-sm">
           Esta complementação ficará registrada como{" "}
           <strong>cancelada</strong>. Você poderá abrir uma nova depois.
         </p>
-        <div>
-          <Label htmlFor="motivo-cancel">Motivo (opcional)</Label>
+        <FormField label="Motivo" opcional hint={`Fica no histórico. ${motivo.length}/500`}>
           <Textarea
             id="motivo-cancel"
             rows={3}
             maxLength={500}
             value={motivo}
             onChange={(e) => setMotivo(e.target.value)}
-            placeholder="Por que está cancelando?"
+            placeholder="Ex.: O cidadão entregou os documentos no balcão."
           />
-          <p className="mt-1 text-xs text-foreground-muted">
-            {motivo.length}/500
-          </p>
-        </div>
+        </FormField>
       </div>
     </Dialog>
   );

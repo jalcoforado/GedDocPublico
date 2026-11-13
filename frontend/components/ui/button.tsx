@@ -3,7 +3,7 @@ import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
-type Variant = "primary" | "secondary" | "ghost" | "danger" | "accent";
+type Variant = "primary" | "secondary" | "ghost" | "danger" | "danger-outline" | "accent";
 type Size = "sm" | "md" | "lg" | "icon";
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -36,6 +36,12 @@ const VARIANTS: Record<Variant, string> = {
     "bg-transparent text-foreground hover:bg-muted active:bg-muted/80 focus-visible:ring-ring",
   danger:
     "bg-danger text-danger-foreground shadow-button hover:bg-danger/90 hover:shadow-button-hover active:bg-danger/80 focus-visible:ring-danger",
+  // Ação destrutiva que mora numa linha de tabela (Excluir, Inativar): mesmo
+  // peso do `secondary`, só o texto avisa. O vermelho cheio fica para o botão
+  // que CONFIRMA a exclusão no diálogo — uma coluna de botões vermelhos em
+  // toda linha gritava mais alto que o dado.
+  "danger-outline":
+    "bg-surface-1 text-danger-soft-foreground border border-border-strong shadow-xs hover:bg-danger-soft hover:border-danger/40 active:bg-danger-soft/80 focus-visible:ring-danger",
   accent:
     "bg-accent text-accent-foreground shadow-button hover:bg-accent-light hover:shadow-accent active:bg-accent-dark focus-visible:ring-accent",
 };

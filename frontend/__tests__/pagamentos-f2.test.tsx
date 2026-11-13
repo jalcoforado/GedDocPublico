@@ -12,7 +12,7 @@
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import type {
   AnexoDebitoOut,
@@ -168,6 +168,12 @@ function renderComQueryClient(children: React.ReactNode) {
   });
   return { client, ...render(<QueryClientProvider client={client}>{children}</QueryClientProvider>) };
 }
+
+// A primeira importação do detalhe (muitos módulos) passava dos 5 s do
+// teste em máquina carregada; aquecer aqui tira o custo de dentro dos testes.
+beforeAll(async () => {
+  await import("@/components/pagamentos/DetalheDebitoContent");
+}, 60_000);
 
 describe("Detalhe da solicitação — pendências de ajuste (F2)", () => {
   it("pedido ABERTO bloqueia o botão de reenvio, com o motivo explicado", async () => {

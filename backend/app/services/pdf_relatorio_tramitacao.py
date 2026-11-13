@@ -1,6 +1,7 @@
 """PDF do Relatório de Tramitação."""
 from __future__ import annotations
 
+import html
 from datetime import datetime
 from io import BytesIO
 
@@ -18,6 +19,7 @@ from reportlab.platypus import (
 )
 
 from ..schemas.relatorio_tramitacao import RelatorioTramitacaoResposta
+from .pdf_emissao import Emissao, canvas_numerado
 
 APRIMORA = HexColor("#1e3a5f")
 GRAY = HexColor("#6b7280")
@@ -44,7 +46,8 @@ def _fmt_dt(d: datetime | None) -> str:
     return d.strftime("%d/%m/%Y %H:%M")
 
 
-def gerar_tramitacao_pdf(r: RelatorioTramitacaoResposta) -> bytes:
+def gerar_tramitacao_pdf(r: RelatorioTramitacaoResposta, emissao: Emissao | None = None) -> bytes:
+    emissao = emissao or Emissao()
     buf = BytesIO()
     doc = SimpleDocTemplate(
         buf,
@@ -69,23 +72,22 @@ def gerar_tramitacao_pdf(r: RelatorioTramitacaoResposta) -> bytes:
     normal = ParagraphStyle("normal", parent=styles["Normal"], fontSize=9, leading=11)
 
     story: list = []
-    story.append(Paragraph("APRIMORA — Relatório de tramitação", h1))
-    story.append(Paragraph(f"Emitido em {datetime.now().strftime('%d/%m/%Y %H:%M')}", small))
+    story.append(Paragraph(html.escape(emissao.titulo("Relatório de tramitação")), h1))
+    story.append(Paragraph(html.escape(emissao.linha()), small))
     story.append(Spacer(1, 0.3 * cm))
 
-    f = r.filtros_aplicados
-    filtros_txt = []
-    if r.nome_unidade:
-        filtros_txt.append(f"<b>Unidade:</b> {r.nome_unidade}")
-    if f.desde:
-        filtros_txt.append(f"<b>Desde:</b> {f.desde.strftime('%d/%m/%Y')}")
-    if f.ate:
-        filtros_txt.append(f"<b>Até:</b> {f.ate.strftime('%d/%m/%Y')}")
-    if f.apenas_ativos:
-        filtros_txt.append("<b>Apenas ativos</b>")
-    if not filtros_txt:
-        filtros_txt.append("Sem filtros")
-    story.append(Paragraph(" · ".join(filtros_txt), normal))
+    # Recorte — o mesmo texto da tela e do CSV (SI-34), escapado.
+    for linha in r.descricao_filtros:
+        story.append(Paragraph(html.escape(linha), normal))
+    if r.cortado:
+        story.append(
+            Paragraph(
+                f"O recorte tem {r.qtd_processos} processos; este PDF detalha os "
+                f"{r.qtd_listados} mais recentes, e atrasos, tempos e médias abaixo "
+                "são desses. Para todos, exporte o CSV.",
+                small,
+            )
+        )
     story.append(Spacer(1, 0.3 * cm))
 
     # Resumo
@@ -185,7 +187,7 @@ def gerar_tramitacao_pdf(r: RelatorioTramitacaoResposta) -> bytes:
             story.append(et_tab)
         story.append(Spacer(1, 0.3 * cm))
 
-    doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
+    doc.build(story, canvasmaker=canvas_numerado(emissao))
     return buf.getvalue()
 
 

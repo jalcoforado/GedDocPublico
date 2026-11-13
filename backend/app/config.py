@@ -222,7 +222,11 @@ class Settings(BaseSettings):
     # Obtenha em https://console.cloud.google.com/apis/credentials (OAuth 2.0 Web Application)
     google_oauth_client_id: str = ""
     google_oauth_client_secret: str = ""
-    google_oauth_redirect_uri: str = "http://localhost:8000/api/v2/auth/google/callback"
+    # Tem de ser o endereço que o NAVEGADOR usa (o nginx, :8090 em dev), não o
+    # backend direto (:8000): o callback responde com redirecionamentos
+    # relativos (/minuta-error, /m/protocolo/...) que só existem no frontend.
+    # Igual, caractere por caractere, ao cadastrado no Google Cloud (SI-32).
+    google_oauth_redirect_uri: str = "http://localhost:8090/api/v2/auth/google/callback"
     google_credentials_file: str = "/app/keys/google-credentials.json"
 
     # Login gov.br do cidadão (SSO OIDC — `services/govbr_sso.py`).

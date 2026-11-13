@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { SkeletonRow } from "@/components/ui/skeleton";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { Table, TBody, TD, TH, THead, TR, TRLink } from "@/components/ui/table";
 import type { EscopoProcesso } from "@/lib/api";
 import {
   api,
@@ -197,12 +197,12 @@ export default function ProcessosPage() {
         title={filters.caixa ? `Caixas de trabalho — ${rotuloDaCaixa(filters.caixa)}` : "Caixas de trabalho"}
         description="Escolha a caixa nas abas abaixo; filtre dentro dela e abra o processo. Tecle / para busca global."
         actions={
-          <Link href="/m/protocolo/processos/novo">
-            <Button>
+          <Button asChild>
+            <Link href="/m/protocolo/processos/novo">
               <Plus className="h-4 w-4" aria-hidden="true" />
               Novo processo
-            </Button>
-          </Link>
+            </Link>
+          </Button>
         }
       />
 
@@ -321,11 +321,16 @@ export default function ProcessosPage() {
               </TR>
             )}
             {processosQ.data?.items.map((p) => (
-              <TR key={p.id}>
+              <TRLink key={p.id} href={`/m/protocolo/processos/${p.id}`}>
                 <TD className="font-mono text-xs tabular-nums">
                   <div className="flex items-center gap-1">
                     <FavoritoStar processo={p} size="sm" />
-                    <div>
+                    {/* O número é link para o processo, em text-primary como nas
+                        outras tabelas (antes só o "Abrir" da ponta levava). */}
+                    <Link
+                      href={`/m/protocolo/processos/${p.id}`}
+                      className="rounded text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
                       {p.situacao === "rascunho" ? (
                         <span className="font-sans italic text-muted-foreground">
                           Rascunho
@@ -340,7 +345,7 @@ export default function ProcessosPage() {
                       ) : (
                         p.numero_processo
                       )}
-                    </div>
+                    </Link>
                   </div>
                   <MarcadoresDaLinha marcadores={p.marcadores} />
                 </TD>
@@ -405,7 +410,7 @@ export default function ProcessosPage() {
                     Abrir →
                   </Link>
                 </TD>
-              </TR>
+              </TRLink>
             ))}
           </TBody>
         </Table>

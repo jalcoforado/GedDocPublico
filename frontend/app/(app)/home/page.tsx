@@ -9,6 +9,7 @@ import {
   Bus,
   CheckCheck,
   FileText,
+  Home,
   type LucideIcon,
   PenLine,
   Star,
@@ -16,7 +17,10 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
+import { Panorama } from "@/components/home/Panorama";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
@@ -78,6 +82,7 @@ export default function HomePage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        icon={Home}
         title="Início"
         description={
           <>
@@ -86,8 +91,8 @@ export default function HomePage() {
           </>
         }
         actions={
-          // "Abrir processo" e a lista de módulos moram no menu lateral, que
-          // desde o menu único também aparece aqui.
+          // A lista de módulos mora no menu lateral, que desde o menu único
+          // também aparece aqui.
           <div className="flex flex-wrap gap-2">
             <Button asChild variant="secondary">
               <Link href="/para-assinar">
@@ -115,10 +120,11 @@ export default function HomePage() {
             <Skeleton aria-hidden="true" role="presentation" className="h-44 rounded-card" variant="shimmer" />
           </div>
         ) : !veProtocolo && !vePagamentos && !veFrota && !veTransporte ? (
-          <p className="text-sm text-foreground-muted">
-            Nenhum módulo com pendências para o seu perfil. Os módulos que você alcança estão no
-            menu ao lado.
-          </p>
+          <EmptyState
+            icon={CheckCheck}
+            title="Nenhum módulo com pendências para o seu perfil"
+            description="Os módulos que você alcança estão no menu ao lado."
+          />
         ) : (
           (() => {
             // Um módulo só vira faixa de largura inteira: um cartão sozinho
@@ -135,6 +141,19 @@ export default function HomePage() {
           })()
         )}
       </section>
+
+      {modulosQ.data && (
+        <Panorama
+          acesso={{
+            // O panorama do Protocolo vem do dashboard executivo, que tem
+            // permissão própria (`dashboard`) além da de processos.
+            protocolo: contratado("protocolo") && can("dashboard"),
+            pagamentos: vePagamentos,
+            frota: veFrota,
+            transporte: veTransporte,
+          }}
+        />
+      )}
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Notificacoes />
@@ -188,67 +207,105 @@ function Cartao({
         </p>
       ) : faixa ? (
         <ul className="grid grid-cols-2 divide-border lg:grid-cols-4 lg:divide-x">
-          {linhas.map((l) => (
-            <li key={l.rotulo} className="flex flex-col gap-1.5 px-5 py-4">
-              <span
-                className={cn(
-                  "text-xs uppercase tracking-wide text-foreground-subtle",
-                  (l.valor ?? 0) > 0 && l.tom === "danger" && "font-medium text-danger-soft-foreground",
-                  (l.valor ?? 0) > 0 && l.tom === "warning" && "font-medium text-warning-soft-foreground",
-                )}
-              >
-                {l.rotulo}
-              </span>
-              {carregando || l.valor === undefined ? (
-                <span className="font-display text-2xl text-foreground-subtle">…</span>
-              ) : l.valor > 0 ? (
-                <Link
-                  href={l.href}
-                  aria-label={`${l.rotulo}: ${l.valor} — abrir a lista`}
+          {linhas.map((l) => {
+            const ativo = !carregando && l.valor !== undefined && l.valor > 0;
+            const conteudo = (
+              <>
+                <span
                   className={cn(
-                    "self-start font-display text-2xl font-semibold tabular-nums underline-offset-4 hover:underline",
-                    l.tom === "danger" && "text-danger-soft-foreground",
-                    l.tom === "warning" && "text-warning-soft-foreground",
-                    !l.tom && "text-foreground",
+                    "text-xs uppercase tracking-wide text-foreground-subtle",
+                    ativo && l.tom === "danger" && "font-medium text-danger-soft-foreground",
+                    ativo && l.tom === "warning" && "font-medium text-warning-soft-foreground",
                   )}
                 >
-                  {l.valor}
-                </Link>
-              ) : (
-                <span className="font-display text-2xl tabular-nums text-foreground-subtle">0</span>
-              )}
-            </li>
-          ))}
+                  {l.rotulo}
+                </span>
+                <span
+                  className={cn(
+                    "font-display text-2xl tabular-nums",
+                    !ativo && "text-foreground-subtle",
+                    ativo && "font-semibold",
+                    ativo && l.tom === "danger" && "text-danger-soft-foreground",
+                    ativo && l.tom === "warning" && "text-warning-soft-foreground",
+                    ativo && !l.tom && "text-foreground",
+                  )}
+                >
+                  {carregando || l.valor === undefined ? "…" : l.valor}
+                </span>
+              </>
+            );
+            return (
+              <li key={l.rotulo}>
+                {ativo ? (
+                  <Link
+                    href={l.href}
+                    aria-label={`${l.rotulo}: ${l.valor} — abrir a lista`}
+                    className="flex h-full flex-col gap-1.5 px-5 py-4 transition-colors duration-fast hover:bg-muted/60 focus-visible:bg-muted/60"
+                  >
+                    {conteudo}
+                  </Link>
+                ) : (
+                  <div className="flex flex-col gap-1.5 px-5 py-4">{conteudo}</div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       ) : (
         <ul className="divide-y divide-border">
-          {linhas.map((l) => (
-            <li key={l.rotulo} className="flex items-center justify-between gap-3 px-5 py-3.5 text-sm">
-              {/* O rótulo fica neutro: a cor do alerta vai só na contagem. Rótulo
-                  e número tingidos juntos, em âmbar e vermelho, viravam uma
-                  coluna colorida que brigava com o resto da tela. */}
-              <span className="text-foreground">{l.rotulo}</span>
-              {carregando || l.valor === undefined ? (
-                <span className="text-foreground-subtle">…</span>
-              ) : l.valor > 0 ? (
-                <Link
-                  href={l.href}
-                  aria-label={`${l.rotulo}: ${l.valor} — abrir a lista`}
-                  className={cn(
-                    "min-w-8 rounded-full px-2 text-center font-semibold tabular-nums underline-offset-2 hover:underline",
-                    l.tom === "danger" && "bg-danger-soft text-danger-soft-foreground",
-                    l.tom === "warning" && "bg-warning-soft text-warning-soft-foreground",
-                    !l.tom && "bg-muted text-foreground",
-                  )}
-                >
-                  {l.valor}
-                </Link>
-              ) : (
-                // Zero não leva a lugar nenhum: não há lista para abrir.
-                <span className="min-w-8 text-center tabular-nums text-foreground-subtle">0</span>
-              )}
-            </li>
-          ))}
+          {linhas.map((l) => {
+            const pronto = !carregando && l.valor !== undefined;
+            // O rótulo fica neutro: a cor do alerta vai só na contagem. Rótulo
+            // e número tingidos juntos, em âmbar e vermelho, viravam uma
+            // coluna colorida que brigava com o resto da tela.
+            const conteudo = (
+              <>
+                <span className="text-foreground">{l.rotulo}</span>
+                {!pronto ? (
+                  <span className="text-foreground-subtle">…</span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5">
+                    <span
+                      className={cn(
+                        "min-w-8 rounded-full px-2 text-center tabular-nums",
+                        l.valor! > 0 && "font-semibold",
+                        l.valor! > 0 && l.tom === "danger" && "bg-danger-soft text-danger-soft-foreground",
+                        l.valor! > 0 && l.tom === "warning" && "bg-warning-soft text-warning-soft-foreground",
+                        l.valor! > 0 && !l.tom && "bg-muted text-foreground",
+                        l.valor === 0 && "text-foreground-subtle",
+                      )}
+                    >
+                      {l.valor}
+                    </span>
+                    {l.valor! > 0 && (
+                      <ArrowRight
+                        className="h-3.5 w-3.5 text-foreground-subtle transition-transform duration-fast group-hover:translate-x-0.5 group-hover:text-foreground"
+                        aria-hidden="true"
+                      />
+                    )}
+                  </span>
+                )}
+              </>
+            );
+            return (
+              <li key={l.rotulo}>
+                {pronto && l.valor! > 0 ? (
+                  // A linha inteira é o alvo do clique (antes só o número, um
+                  // alvo de 30px num cartão de 600px).
+                  <Link
+                    href={l.href}
+                    aria-label={`${l.rotulo}: ${l.valor} — abrir a lista`}
+                    className="group flex items-center justify-between gap-3 px-5 py-3.5 text-sm transition-colors duration-fast hover:bg-muted/60 focus-visible:bg-muted/60"
+                  >
+                    {conteudo}
+                  </Link>
+                ) : (
+                  // Zero não leva a lugar nenhum: não há lista para abrir.
+                  <div className="flex items-center justify-between gap-3 px-5 py-3.5 text-sm">{conteudo}</div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>
@@ -378,9 +435,9 @@ function Notificacoes() {
         <h2 className="font-display text-base font-semibold text-foreground">
           Notificações não lidas
           {naoLidas > 0 && (
-            <span className="ml-2 rounded-full bg-danger-soft px-2 text-xs font-semibold tabular-nums text-danger-soft-foreground">
+            <Badge intent="danger" className="ml-2 tabular-nums">
               {naoLidas}
-            </span>
+            </Badge>
           )}
         </h2>
         {itens.length > 0 && (
@@ -479,38 +536,37 @@ function Acompanhando() {
           ver aqui onde ele está.
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-card border border-border bg-surface-1 shadow-card">
-          <Table>
-            <THead>
-              <TR>
-                <TH>Processo</TH>
-                <TH>Assunto</TH>
-                <TH>Onde está agora</TH>
+        // A Table já é um cartão (borda, fundo, sombra): sem casca em volta.
+        <Table>
+          <THead>
+            <TR>
+              <TH>Processo</TH>
+              <TH>Assunto</TH>
+              <TH>Onde está agora</TH>
+            </TR>
+          </THead>
+          <TBody>
+            {itens.map((p) => (
+              <TR key={p.id}>
+                <TD className="font-mono text-xs tabular-nums">
+                  <Link
+                    href={`/m/protocolo/processos/${p.id}`}
+                    className="font-medium text-primary underline-offset-2 hover:underline"
+                  >
+                    {p.nup ?? p.numero_processo}
+                  </Link>
+                </TD>
+                <TD>
+                  <div className="line-clamp-1 text-sm">{p.assunto ?? "—"}</div>
+                </TD>
+                <TD className="text-sm">
+                  {p.local_atual ?? <span className="text-foreground-muted">sem unidade registrada</span>}
+                  {!p.ativo && <span className="ml-1 text-xs text-foreground-muted">(inativo)</span>}
+                </TD>
               </TR>
-            </THead>
-            <TBody>
-              {itens.map((p) => (
-                <TR key={p.id}>
-                  <TD className="font-mono text-xs tabular-nums">
-                    <Link
-                      href={`/m/protocolo/processos/${p.id}`}
-                      className="font-medium text-foreground underline underline-offset-2 hover:no-underline"
-                    >
-                      {p.nup ?? p.numero_processo}
-                    </Link>
-                  </TD>
-                  <TD>
-                    <div className="line-clamp-1 text-sm">{p.assunto ?? "—"}</div>
-                  </TD>
-                  <TD className="text-sm">
-                    {p.local_atual ?? <span className="text-foreground-muted">sem unidade registrada</span>}
-                    {!p.ativo && <span className="ml-1 text-xs text-foreground-muted">(inativo)</span>}
-                  </TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
-        </div>
+            ))}
+          </TBody>
+        </Table>
       )}
     </section>
   );

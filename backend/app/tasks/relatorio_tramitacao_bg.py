@@ -10,14 +10,20 @@ from datetime import datetime
 from typing import Any
 
 from ..config import get_settings, tenant_jobs_dir
-from ..models import Job
+from ..models import Job, Usuario
 from ..schemas.relatorio import RelatorioFiltro
+from ..services.pdf_emissao import emissao_de
 from ..services.pdf_relatorio_tramitacao import gerar_tramitacao_pdf
 from ..services.relatorios_tramitacao import gerar_tramitacao
 from ._task_db import task_session_scope
 from .celery_app import celery_app
 
 settings = get_settings()
+
+# Task enfileirada antes do SI-34 chega sem os níveis. Na dúvida, o recorte
+# mais estreito — nunca o de super-usuário (`None`), que listaria tudo.
+_SEM_NIVEIS = object()
+_NIVEIS_NA_FALTA = ["ostensivo"]
 
 
 @celery_app.task(name="app.tasks.relatorio_tramitacao_bg.run", bind=True)
@@ -28,9 +34,14 @@ def run(
     max_processos: int,
     tenant_id: int,
     tenant_slug: str,
+    niveis_permitidos: Any = _SEM_NIVEIS,
 ) -> str | None:
+    if niveis_permitidos is _SEM_NIVEIS:
+        niveis_permitidos = _NIVEIS_NA_FALTA
     return asyncio.run(
-        _run_async(self, job_id, filtros, max_processos, tenant_id, tenant_slug)
+        _run_async(
+            self, job_id, filtros, max_processos, tenant_id, tenant_slug, niveis_permitidos
+        )
     )
 
 
@@ -41,6 +52,7 @@ async def _run_async(
     max_processos: int,
     tenant_id: int,
     tenant_slug: str,
+    niveis_permitidos: list[str] | None,
 ) -> str | None:
     async with task_session_scope(tenant_id=tenant_id) as (_engine, Session):
         async with Session() as db:
@@ -55,10 +67,15 @@ async def _run_async(
         try:
             f = RelatorioFiltro.model_validate(filtros)
             async with Session() as db:
+                # Cabeçalho do PDF em nome de quem pediu (dono do job).
+                job = await db.get(Job, job_id)
+                dono = await db.get(Usuario, job.id_usuario) if job else None
+                emissao = await emissao_de(db, tenant_id=tenant_id, usuario=dono)
                 resposta = await gerar_tramitacao(
-                    db, f, tenant_id=tenant_id, max_processos=max_processos
+                    db, f, tenant_id=tenant_id, max_processos=max_processos,
+                    niveis_permitidos=niveis_permitidos,
                 )
-            pdf_bytes = gerar_tramitacao_pdf(resposta)
+            pdf_bytes = gerar_tramitacao_pdf(resposta, emissao)
 
             out_dir = tenant_jobs_dir(tenant_slug) / str(job_id)
             out_dir.mkdir(parents=True, exist_ok=True)

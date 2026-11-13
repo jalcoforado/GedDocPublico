@@ -2,12 +2,14 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Banknote, ChevronDown, ChevronRight, FileText, Paperclip, Send, Upload, XCircle,
+  Banknote, ChevronDown, ChevronRight, FileText, Paperclip, Send, Trash2, Upload, XCircle,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { fmtData, fmtDataHora, fmtMoeda } from "@/components/pagamentos/format";
 import { RitoPagamento } from "@/components/pagamentos/RitoPagamento";
+import { useValidacaoCampos } from "@/components/pagamentos/useValidacaoCampos";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -55,6 +57,13 @@ const SITUACAO_LOTE_ROTULO: Record<SituacaoLote, string> = {
   ENVIADO: "Enviado ao banco",
   PROCESSADO: "Processado",
   CANCELADO: "Cancelado",
+};
+
+/** Situação da parcela dentro do lote, por rótulo (a tabela mostrava o código). */
+const SITUACAO_PARCELA_LOTE: Record<string, string> = {
+  PENDENTE: "Pendente",
+  PAGA: "Paga",
+  FALHOU: "Falhou",
 };
 
 export default function TesourariaPage() {
@@ -146,7 +155,11 @@ function TabSelecionar({ onLoteCriado }: { onLoteCriado: () => void }) {
   return (
     <div className="space-y-4 pb-24">
       <div className="max-w-sm">
-        <FormField label="Conta pagadora" required>
+        <FormField
+          label="Conta pagadora"
+          required
+          hint="Só contas ativas. As parcelas liberadas para ela aparecem abaixo."
+        >
           <Select
             value={contaId === "" ? "" : String(contaId)}
             onChange={(e) => {
@@ -154,7 +167,7 @@ function TabSelecionar({ onLoteCriado }: { onLoteCriado: () => void }) {
               setSelecionadas([]);
             }}
           >
-            <option value="">Selecione…</option>
+            <option value="">Escolha a conta</option>
             {contas.map((c: ContaBancaria) => (
               <option key={c.id} value={c.id}>
                 {c.nome} — {c.banco}/{c.agencia}
@@ -194,11 +207,11 @@ function TabSelecionar({ onLoteCriado }: { onLoteCriado: () => void }) {
                   {p.nome_fornecedor ?? `Débito #${p.id_debito}`} · parcela {p.numero}
                 </p>
                 {p.descricao_debito && (
-                  <p className="truncate text-xs text-muted-foreground">
+                  <p className="truncate text-xs text-foreground-muted">
                     Solicitação #{p.id_debito} — {p.descricao_debito}
                   </p>
                 )}
-                <p className="truncate text-xs text-muted-foreground">
+                <p className="truncate text-xs text-foreground-muted">
                   vencimento {fmtData(p.vencimento)}
                   {p.data_prevista_pagamento && <> · previsto {fmtData(p.data_prevista_pagamento)}</>}
                 </p>
@@ -217,8 +230,8 @@ function TabSelecionar({ onLoteCriado }: { onLoteCriado: () => void }) {
             <span className="font-semibold">{selecionadas.length}</span> selecionada(s) — Σ{" "}
             <span className="font-semibold tabular-nums">{fmtMoeda(String(somaSelecionadas))}</span>
           </p>
-          <Button onClick={() => criarLoteM.mutate()} disabled={criarLoteM.isPending}>
-            {criarLoteM.isPending ? "Criando…" : "Criar lote"}
+          <Button onClick={() => criarLoteM.mutate()} loading={criarLoteM.isPending}>
+            Criar lote com {selecionadas.length === 1 ? "1 parcela" : `${selecionadas.length} parcelas`}
           </Button>
         </div>
       )}
@@ -260,13 +273,13 @@ function TabLotes() {
             aria-expanded={expandido === lote.id}
           >
             {expandido === lote.id ? (
-              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <ChevronDown className="h-4 w-4 shrink-0 text-foreground-muted" aria-hidden="true" />
             ) : (
-              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <ChevronRight className="h-4 w-4 shrink-0 text-foreground-muted" aria-hidden="true" />
             )}
             <span className="min-w-0 flex-1">
               <span className="font-semibold text-foreground">{lote.numero}</span>{" "}
-              <span className="text-xs text-muted-foreground">criado em {fmtDataHora(lote.criado_em)}</span>
+              <span className="text-xs text-foreground-muted">criado em {fmtDataHora(lote.criado_em)}</span>
             </span>
             <Badge intent={SITUACAO_LOTE_INTENT[lote.situacao]}>{SITUACAO_LOTE_ROTULO[lote.situacao]}</Badge>
             <span className="shrink-0 whitespace-nowrap text-sm font-semibold tabular-nums text-foreground">
@@ -288,6 +301,10 @@ function LoteDetalheInline({ loteId }: { loteId: number }) {
   const [comprovanteArquivo, setComprovanteArquivo] = useState<File | null>(null);
   // Um lote sai do banco por um meio só. Era gravado "TED" para todo retorno.
   const [formaPagamento, setFormaPagamento] = useState<FormaPagamentoLote>("TED");
+  const vProgramar = useValidacaoCampos(
+    { data: !dataProgramada && "Escolha o dia em que o banco deve pagar o lote." },
+    { data: `lote-${loteId}-data` },
+  );
 
   const loteQ = useQuery({
     queryKey: ["pag-lote", loteId],
@@ -375,15 +392,16 @@ function LoteDetalheInline({ loteId }: { loteId: number }) {
                   <Badge
                     intent={p.situacao === "PAGA" ? "success" : p.situacao === "FALHOU" ? "danger" : "neutral"}
                   >
-                    {p.situacao}
+                    {SITUACAO_PARCELA_LOTE[p.situacao] ?? p.situacao}
                   </Badge>
-                  {p.motivo_falha && <p className="text-xs text-muted-foreground">{p.motivo_falha}</p>}
+                  {p.motivo_falha && <p className="text-xs text-foreground-muted">{p.motivo_falha}</p>}
                 </TD>
                 {lote.situacao === "ENVIADO" && (
                   <TD>
                     {p.situacao === "PENDENTE" ? (
                       <div className="flex items-center gap-2">
                         <Select
+                          aria-label={`Resultado da parcela #${p.id_parcela}`}
                           value={retornos[p.id_parcela]?.resultado ?? "PAGA"}
                           onChange={(e) =>
                             setRetornos((cur) => ({
@@ -400,7 +418,8 @@ function LoteDetalheInline({ loteId }: { loteId: number }) {
                         </Select>
                         {retornos[p.id_parcela]?.resultado === "FALHOU" && (
                           <Input
-                            placeholder="Motivo da falha"
+                            aria-label={`Motivo da falha da parcela #${p.id_parcela}`}
+                            placeholder="Ex.: Conta do favorecido encerrada"
                             value={retornos[p.id_parcela]?.motivo ?? ""}
                             onChange={(e) =>
                               setRetornos((cur) => ({
@@ -412,19 +431,23 @@ function LoteDetalheInline({ loteId }: { loteId: number }) {
                         )}
                       </div>
                     ) : (
-                      <span className="text-xs text-muted-foreground">já resolvida</span>
+                      <span className="text-xs text-foreground-muted">já resolvida</span>
                     )}
                   </TD>
                 )}
                 {lote.situacao === "RASCUNHO" && (
                   <TD className="text-right">
-                    <Button
-                      variant="ghost" size="sm"
-                      onClick={() => removerParcelaM.mutate(p.id_parcela)}
-                      disabled={removerParcelaM.isPending}
-                    >
-                      Remover
-                    </Button>
+                    <AcoesDaLinha
+                      acoes={[
+                        {
+                          label: "Remover",
+                          icon: Trash2,
+                          perigo: true,
+                          onClick: () => removerParcelaM.mutate(p.id_parcela),
+                          disabled: removerParcelaM.isPending,
+                        },
+                      ]}
+                    />
                   </TD>
                 )}
               </TR>
@@ -435,13 +458,23 @@ function LoteDetalheInline({ loteId }: { loteId: number }) {
 
       {lote.situacao === "RASCUNHO" && (
         <div className="flex flex-wrap items-end gap-3">
-          <FormField label="Data programada" required>
-            <Input type="date" value={dataProgramada} onChange={(e) => setDataProgramada(e.target.value)} />
+          <FormField label="Data programada" required error={vProgramar.erro("data")} hint="Dia em que o banco deve pagar.">
+            <Input
+              id={`lote-${loteId}-data`}
+              type="date"
+              value={dataProgramada}
+              onChange={(e) => setDataProgramada(e.target.value)}
+            />
           </FormField>
-          <Button onClick={() => programarM.mutate()} disabled={!dataProgramada || programarM.isPending}>
-            Programar
+          <Button
+            onClick={() => {
+              if (vProgramar.conferir()) programarM.mutate();
+            }}
+            loading={programarM.isPending}
+          >
+            Programar lote
           </Button>
-          <Button variant="danger" onClick={() => cancelarM.mutate()} disabled={cancelarM.isPending}>
+          <Button variant="danger-outline" onClick={() => cancelarM.mutate()} disabled={cancelarM.isPending}>
             <XCircle className="mr-1 h-4 w-4" aria-hidden="true" />
             Cancelar lote
           </Button>
@@ -454,7 +487,7 @@ function LoteDetalheInline({ loteId }: { loteId: number }) {
             <Send className="mr-1 h-4 w-4" aria-hidden="true" />
             {enviarM.isPending ? "Enviando…" : "Enviar ao banco"}
           </Button>
-          <Button variant="danger" onClick={() => cancelarM.mutate()} disabled={cancelarM.isPending}>
+          <Button variant="danger-outline" onClick={() => cancelarM.mutate()} disabled={cancelarM.isPending}>
             <XCircle className="mr-1 h-4 w-4" aria-hidden="true" />
             Cancelar lote
           </Button>
@@ -464,7 +497,7 @@ function LoteDetalheInline({ loteId }: { loteId: number }) {
       {lote.situacao === "ENVIADO" && (
         <div className="space-y-3 border-t border-border pt-3">
           <div className="flex flex-wrap items-end gap-2">
-            <FormField label="Forma de pagamento" hint="Como o banco pagou as parcelas deste lote">
+            <FormField label="Forma de pagamento" hint="Como o banco pagou as parcelas deste lote.">
               <Select
                 value={formaPagamento}
                 onChange={(e) => setFormaPagamento(e.target.value as FormaPagamentoLote)}
@@ -475,12 +508,12 @@ function LoteDetalheInline({ loteId }: { loteId: number }) {
                 <option value="OUTRO">Outro</option>
               </Select>
             </FormField>
-            <Button onClick={() => retornoM.mutate()} disabled={retornoM.isPending}>
-              {retornoM.isPending ? "Registrando…" : "Registrar retorno"}
+            <Button onClick={() => retornoM.mutate()} loading={retornoM.isPending}>
+              Registrar retorno
             </Button>
           </div>
           <div className="flex flex-wrap items-end gap-2">
-            <FormField label="Comprovante da remessa" hint="PDF do protocolo bancário, opcional">
+            <FormField label="Comprovante da remessa" opcional hint="PDF do protocolo bancário.">
               <input
                 type="file"
                 onChange={(e) => setComprovanteArquivo(e.target.files?.[0] ?? null)}
@@ -582,7 +615,7 @@ function TabOps() {
         </TBody>
       </Table>
       {ordens.length > MAX_ORDENS && (
-        <p className="px-4 py-2 text-xs text-muted-foreground">
+        <p className="px-4 py-2 text-xs text-foreground-muted">
           + {ordens.length - MAX_ORDENS} anteriores
         </p>
       )}

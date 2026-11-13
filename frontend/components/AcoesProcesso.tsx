@@ -10,8 +10,11 @@ import { Button } from "@/components/ui/button";
 import { ArquivarDialog } from "@/components/ArquivarDialog";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
+import { CampoComUnidade } from "@/components/ui/campo-com-unidade";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
+import { EscolhaSegmentada } from "@/components/ui/escolha-segmentada";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
@@ -180,14 +183,11 @@ function AcoesTramitacao({ processo }: { processo: ProcessoDetail }) {
         title="Confirmar recebimento"
         footer={
           <>
-            <Button variant="secondary" onClick={() => setModal(null)}>
+            <Button variant="ghost" onClick={() => setModal(null)}>
               Cancelar
             </Button>
-            <Button
-              onClick={() => receberM.mutate()}
-              disabled={receberM.isPending}
-            >
-              {receberM.isPending ? "Recebendo..." : "Confirmar recebimento"}
+            <Button onClick={() => receberM.mutate()} loading={receberM.isPending}>
+              {receberM.isPending ? "Recebendo…" : "Confirmar recebimento"}
             </Button>
           </>
         }
@@ -342,6 +342,19 @@ function AcoesRascunho({ processo }: { processo: ProcessoDetail }) {
   );
 }
 
+/** Mensagem de erro do servidor dentro do diálogo. */
+function ErroDialogo({ err }: { err: string | null }) {
+  if (!err) return null;
+  return (
+    <p
+      role="alert"
+      className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
+    >
+      {err}
+    </p>
+  );
+}
+
 function EncaminharDialog({
   open,
   onClose,
@@ -378,6 +391,12 @@ function EncaminharDialog({
           destinosQ.data!.ids_unidade!.includes(u.id),
         )
       : (unidadesQ.data?.items ?? []);
+  // Dezenas de unidades: combo com busca, não um <select> para rolar.
+  const destinoOptions: ComboboxOption[] = unidadesOptions.map((u) => ({
+    value: u.id,
+    label: u.unidade_trabalho,
+  }));
+  const prioridades = prioridadesQ.data ?? [];
 
   const [form, setForm] = useState<EncaminharInput>({
     id_unidade_destino: 0,
@@ -386,6 +405,10 @@ function EncaminharDialog({
     data_prazo: null,
     despacho: "",
   });
+  // Erro sob o campo só depois de tentar encaminhar.
+  const [tentou, setTentou] = useState(false);
+  const faltaDestino = tentou && !form.id_unidade_destino;
+  const faltaPrioridade = tentou && !form.id_prioridade;
 
   const m = useMutation({
     mutationFn: (data: EncaminharInput) =>
@@ -406,14 +429,25 @@ function EncaminharDialog({
       data_prazo: null,
       despacho: "",
     });
+    setTentou(false);
     setErr(null);
+  }
+
+  function fechar() {
+    reset();
+    onClose();
   }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
+    setTentou(true);
     if (!form.id_unidade_destino || !form.id_prioridade) {
-      setErr("Selecione unidade destino e prioridade.");
+      const alvo = !form.id_unidade_destino
+        ? document.getElementById("dest")
+        : (document.getElementById("prio") ??
+          document.querySelector<HTMLElement>('input[name="prio"]'));
+      alvo?.focus();
       return;
     }
     m.mutate({
@@ -423,134 +457,147 @@ function EncaminharDialog({
     });
   }
 
+  const origem = processo.local_atual ?? processo.unidade_proprietaria ?? null;
+
   return (
     <Dialog
       open={open}
-      onClose={() => {
-        reset();
-        onClose();
-      }}
+      onClose={fechar}
       title={`Encaminhar ${nomeDoProcesso(processo)}`}
+      description={origem ? `Sai de ${origem}.` : undefined}
       size="md"
       footer={
         <>
-          <Button
-            variant="secondary"
-            onClick={() => {
-              reset();
-              onClose();
-            }}
-          >
+          <Button variant="ghost" onClick={fechar}>
             Cancelar
           </Button>
-          <Button onClick={submit} disabled={m.isPending}>
-            {m.isPending ? "Encaminhando..." : "Encaminhar"}
+          <Button onClick={submit} loading={m.isPending}>
+            {m.isPending ? "Encaminhando…" : "Encaminhar"}
           </Button>
         </>
       }
     >
-      <form onSubmit={submit} className="space-y-3">
+      <form onSubmit={submit} noValidate className="space-y-4">
         {processo.situacao === "rascunho" && (
           <p className="rounded-md bg-warning-soft px-3 py-2 text-sm text-warning-soft-foreground">
             Encaminhar abre o processo: ele ganha número agora e deixa de ser rascunho.
           </p>
         )}
-        <div>
-          <Label htmlFor="dest">Unidade destino *</Label>
-          <Select
+        <FormField
+          label="Unidade de destino"
+          required
+          hint={
+            destinosQ.data?.restrito ? (
+              <span className="text-warning-soft-foreground">{destinosQ.data.motivo}</span>
+            ) : (
+              "Quem recebe o processo. Busque pelo nome."
+            )
+          }
+          error={faltaDestino ? "Escolha para qual unidade o processo vai." : undefined}
+        >
+          <Combobox
             id="dest"
-            value={form.id_unidade_destino || ""}
-            onChange={(e) =>
-              setForm({ ...form, id_unidade_destino: Number(e.target.value) })
+            options={destinoOptions}
+            value={form.id_unidade_destino || null}
+            onChange={(v) =>
+              setForm({ ...form, id_unidade_destino: typeof v === "number" ? v : 0 })
             }
-            required
-          >
-            <option value="">—</option>
-            {unidadesOptions.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.unidade_trabalho}
-              </option>
-            ))}
-          </Select>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Origem: {processo.local_atual ?? processo.unidade_proprietaria ?? "—"}
-          </p>
-          {destinosQ.data?.restrito && (
-            <p className="mt-1 text-xs text-warning-soft-foreground">
-              {destinosQ.data.motivo}
-            </p>
-          )}
-        </div>
-        <div className="grid grid-cols-2 gap-3">
+            placeholder="Buscar unidade…"
+            searchPlaceholder="Nome da unidade…"
+            emptyText="Nenhuma unidade com esse nome."
+            loading={unidadesQ.isLoading || destinosQ.isLoading}
+          />
+        </FormField>
+
+        {/* Poucas prioridades: todas à vista. Se o catálogo crescer, volta a
+            ser lista. */}
+        {prioridades.length >= 2 && prioridades.length <= 4 ? (
           <div>
-            <Label htmlFor="prio">Prioridade *</Label>
+            <EscolhaSegmentada
+              nome="prio"
+              titulo="Prioridade"
+              moldura={false}
+              valor={form.id_prioridade ? String(form.id_prioridade) : ""}
+              onChange={(v) => setForm({ ...form, id_prioridade: Number(v) })}
+              opcoes={prioridades.map((p) => ({ valor: String(p.id), rotulo: p.prioridade }))}
+            />
+            {faltaPrioridade && (
+              <p className="mt-1 text-xs font-medium text-danger-soft-foreground">
+                Escolha a prioridade.
+              </p>
+            )}
+          </div>
+        ) : (
+          <FormField
+            label="Prioridade"
+            required
+            error={faltaPrioridade ? "Escolha a prioridade." : undefined}
+          >
             <Select
               id="prio"
               value={form.id_prioridade || ""}
               onChange={(e) =>
                 setForm({ ...form, id_prioridade: Number(e.target.value) })
               }
-              required
             >
-              <option value="">—</option>
-              {prioridadesQ.data?.map((p) => (
+              <option value="">Escolha…</option>
+              {prioridades.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.prioridade}
                 </option>
               ))}
             </Select>
-          </div>
-          <div>
-            <Label htmlFor="folhas">Quantidade de folhas</Label>
-            <Input
+          </FormField>
+        )}
+
+        <GradeCampos>
+          <FormField label="Quantidade de folhas" opcional hint="Do processo físico, se houver.">
+            <CampoComUnidade
               id="folhas"
               type="number"
               min={0}
+              sufixo="folhas"
               value={form.quantidade_folhas ?? 0}
               onChange={(e) =>
                 setForm({ ...form, quantidade_folhas: Number(e.target.value) })
               }
             />
-          </div>
-        </div>
-        <div>
-          <Label htmlFor="prazo">Data prazo</Label>
-          <Input
-            id="prazo"
-            type="date"
-            value={form.data_prazo ?? ""}
-            onChange={(e) => setForm({ ...form, data_prazo: e.target.value || null })}
-          />
-        </div>
-        <div>
-          <div className="flex items-center justify-between gap-2">
-            <Label htmlFor="desp">Despacho (opcional)</Label>
-            {!form.despacho && (
+          </FormField>
+          <FormField label="Prazo" opcional hint="Até quando o destino deve responder.">
+            <Input
+              id="prazo"
+              type="date"
+              value={form.data_prazo ?? ""}
+              onChange={(e) => setForm({ ...form, data_prazo: e.target.value || null })}
+            />
+          </FormField>
+        </GradeCampos>
+
+        <FormField
+          label="Despacho"
+          opcional
+          hint="Vai junto com o processo e fica no histórico."
+          acao={
+            !form.despacho ? (
               <button
                 type="button"
                 onClick={() => setForm({ ...form, despacho: DESPACHO_PADRAO })}
-                className="rounded text-xs font-medium text-primary underline-offset-2 hover:underline"
+                className="font-medium text-primary underline-offset-2 hover:underline"
               >
                 Usar texto padrão
               </button>
-            )}
-          </div>
+            ) : undefined
+          }
+        >
           <Textarea
             id="desp"
             value={form.despacho ?? ""}
             onChange={(e) => setForm({ ...form, despacho: e.target.value })}
             rows={3}
-            placeholder="Texto do despacho que acompanha o encaminhamento"
+            placeholder="Ex.: Encaminho para análise e parecer."
           />
-        </div>
-        {err && (
-          <div
-            role="alert"
-            className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
-          >
-            {err}
-          </div>
-        )}
+        </FormField>
+        <ErroDialogo err={err} />
       </form>
     </Dialog>
   );
@@ -586,52 +633,43 @@ function CancelarDialog({
     onError: (e: Error) => setErr(e.message),
   });
 
+  function fechar() {
+    setDespacho("");
+    onClose();
+  }
+
   return (
     <Dialog
       open={open}
-      onClose={() => {
-        setDespacho("");
-        onClose();
-      }}
-      title="Cancelar encaminhamento pendente"
+      onClose={fechar}
+      title="Cancelar encaminhamento"
       footer={
         <>
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setDespacho("");
-              onClose();
-            }}
-          >
+          <Button variant="ghost" onClick={fechar}>
             Voltar
           </Button>
-          <Button onClick={() => m.mutate()} disabled={m.isPending}>
-            {m.isPending ? "Cancelando..." : "Confirmar cancelamento"}
+          <Button onClick={() => m.mutate()} loading={m.isPending}>
+            {m.isPending ? "Cancelando…" : "Confirmar cancelamento"}
           </Button>
         </>
       }
     >
-      <p className="text-sm">
-        O encaminhamento ainda não foi recebido. Ao cancelar, o processo permanece na
-        unidade de origem e o cancelamento fica registrado no histórico.
-      </p>
-      <div className="mt-3">
-        <Label htmlFor="cancdesp">Justificativa (opcional)</Label>
-        <Textarea
-          id="cancdesp"
-          value={despacho}
-          onChange={(e) => setDespacho(e.target.value)}
-          rows={3}
-        />
+      <div className="space-y-4">
+        <p className="text-sm">
+          O encaminhamento ainda não foi recebido. Ao cancelar, o processo permanece na
+          unidade de origem e o cancelamento fica registrado no histórico.
+        </p>
+        <FormField label="Justificativa" opcional hint="Fica registrada no histórico do processo.">
+          <Textarea
+            id="cancdesp"
+            value={despacho}
+            onChange={(e) => setDespacho(e.target.value)}
+            rows={3}
+            placeholder="Ex.: Encaminhado para a unidade errada."
+          />
+        </FormField>
+        <ErroDialogo err={err} />
       </div>
-      {err && (
-        <div
-          role="alert"
-          className="mt-3 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
-        >
-          {err}
-        </div>
-      )}
     </Dialog>
   );
 }
@@ -657,6 +695,7 @@ function RecusarDialog({
   onDone: () => void;
 }) {
   const [motivo, setMotivo] = useState("");
+  const [tentou, setTentou] = useState(false);
   const motivoValido = motivo.trim().length >= MOTIVO_MINIMO;
 
   const m = useMutation({
@@ -664,6 +703,7 @@ function RecusarDialog({
     onSuccess: () => {
       onDone();
       setMotivo("");
+      setTentou(false);
       onClose();
     },
     onError: (e: Error) => setErr(e.message),
@@ -671,7 +711,19 @@ function RecusarDialog({
 
   function fechar() {
     setMotivo("");
+    setTentou(false);
     onClose();
+  }
+
+  // O botão não fica desabilitado esperando o motivo: clicar sem ele mostra,
+  // sob o campo, o que falta — um botão cinza sem explicação não diz nada.
+  function confirmar() {
+    setTentou(true);
+    if (!motivoValido) {
+      document.getElementById("recusamotivo")?.focus();
+      return;
+    }
+    m.mutate();
   }
 
   return (
@@ -681,41 +733,41 @@ function RecusarDialog({
       title="Recusar encaminhamento"
       footer={
         <>
-          <Button variant="secondary" onClick={fechar}>
+          <Button variant="ghost" onClick={fechar}>
             Voltar
           </Button>
-          <Button onClick={() => m.mutate()} disabled={m.isPending || !motivoValido}>
-            {m.isPending ? "Recusando..." : "Confirmar recusa"}
+          <Button onClick={confirmar} loading={m.isPending}>
+            {m.isPending ? "Recusando…" : "Confirmar recusa"}
           </Button>
         </>
       }
     >
-      <p className="text-sm">
-        O processo não entra nesta unidade: volta para{" "}
-        <b>{unidadeOrigem ?? "a unidade de origem"}</b>, que é avisada e vê o motivo.
-      </p>
-      <div className="mt-3">
-        <Label htmlFor="recusamotivo">Motivo da recusa</Label>
-        <Textarea
-          id="recusamotivo"
-          value={motivo}
-          onChange={(e) => setMotivo(e.target.value)}
-          rows={3}
-          maxLength={2000}
-          aria-describedby="recusamotivo-ajuda"
-        />
-        <p id="recusamotivo-ajuda" className="mt-1 text-xs text-muted-foreground">
-          Obrigatório. Diga por que o processo não é desta unidade ou o que falta.
+      <div className="space-y-4">
+        <p className="text-sm">
+          O processo não entra nesta unidade: volta para{" "}
+          <b>{unidadeOrigem ?? "a unidade de origem"}</b>, que é avisada e vê o motivo.
         </p>
-      </div>
-      {err && (
-        <p
-          role="alert"
-          className="mt-3 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
+        <FormField
+          label="Motivo da recusa"
+          required
+          hint="Diga por que o processo não é desta unidade ou o que falta."
+          error={
+            tentou && !motivoValido
+              ? `Escreva o motivo, com pelo menos ${MOTIVO_MINIMO} letras.`
+              : undefined
+          }
         >
-          {err}
-        </p>
-      )}
+          <Textarea
+            id="recusamotivo"
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value)}
+            rows={3}
+            maxLength={2000}
+            placeholder="Ex.: O assunto é da Secretaria de Saúde, não desta unidade."
+          />
+        </FormField>
+        <ErroDialogo err={err} />
+      </div>
     </Dialog>
   );
 }

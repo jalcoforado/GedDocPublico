@@ -21,13 +21,55 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Acao, Movimentacao, Processo, Tenant
+from ..models import Acao, Assunto, Manifestante, Movimentacao, Processo, Tenant, UnidadeTrabalho
 from ..schemas.processo import ProcessoCreate
 from .numeracao_processo import gerar_numero_processo
 
 
 class AberturaError(Exception):
     pass
+
+
+async def conferir_referencias_do_tenant(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    id_assunto: int,
+    id_manifestante: int,
+    id_unidade_proprietaria: int,
+    erro: type[Exception] = AberturaError,
+) -> None:
+    """Assunto, manifestante e unidade têm de ser da prefeitura de quem grava.
+
+    São FKs "soft" quanto ao tenant: a FK do Postgres aceita o id de outra
+    prefeitura, e a RLS — que seria a rede de segurança — não filtra nada
+    enquanto o runtime conectar como `ged_user` (achado F-12). A tela só
+    oferece itens da própria prefeitura, mas a API chamada direto não passava
+    por filtro nenhum (SI-27).
+
+    Responde como valor inválido de formulário (400, com o nome do campo), e
+    não 404: o item não existe *para esta prefeitura*, e a mensagem é a mesma
+    para "de outra prefeitura" e "não existe", então não confirma nada.
+
+    Usada pela criação (aqui) e pela edição de rascunho
+    (`rascunho_processo.editar_rascunho`, com `erro=RascunhoError`).
+    """
+    for modelo, id_, nome in (
+        (Assunto, id_assunto, "Assunto"),
+        (Manifestante, id_manifestante, "Manifestante"),
+        (UnidadeTrabalho, id_unidade_proprietaria, "Unidade proprietária"),
+    ):
+        existe = (
+            await db.execute(
+                select(modelo.id).where(
+                    modelo.id == id_,
+                    modelo.tenant_id == tenant_id,
+                    modelo.excluido.is_(False),
+                )
+            )
+        ).scalar_one_or_none()
+        if existe is None:
+            raise erro(f"{nome} não encontrado(a).")
 
 
 async def abrir_processo(
@@ -37,6 +79,16 @@ async def abrir_processo(
     tenant_id: int,
     usuario_id: int,
 ) -> Processo:
+    # 0. Referências da mesma prefeitura (SI-27). ANTES de gerar o número:
+    # pedido recusado não pode gastar um número da sequência.
+    await conferir_referencias_do_tenant(
+        db,
+        tenant_id=tenant_id,
+        id_assunto=payload.id_assunto,
+        id_manifestante=payload.id_manifestante,
+        id_unidade_proprietaria=payload.id_unidade_proprietaria,
+    )
+
     # 1. Gera número de processo via função PG (mesma lógica do PHP) — só
     # para processo não-rascunho. O CHECK ck_processo_situacao_numero exige
     # que já esteja resolvido antes do INSERT (avaliado por statement, não

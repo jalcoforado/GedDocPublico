@@ -150,11 +150,15 @@ describe("ações em lote", () => {
     fireEvent.click(barra().getByRole("button", { name: "Encaminhar…" }));
 
     const confirmar = await screen.findByRole("button", { name: "Confirmar encaminhamento" });
-    expect(confirmar).toBeDisabled();
+    // Padrão de formulário: sem destino, clicar mostra o que falta e não envia.
+    fireEvent.click(confirmar);
+    expect(screen.getByText("Escolha para qual unidade os processos vão.")).toBeInTheDocument();
+    expect(screen.getByText("Escolha a prioridade.")).toBeInTheDocument();
+    expect(loteMock).not.toHaveBeenCalled();
     await screen.findByRole("option", { name: "Procuradoria" });
-    fireEvent.change(screen.getByLabelText("Unidade de destino"), { target: { value: "9" } });
+    fireEvent.change(screen.getByLabelText(/Unidade de destino/), { target: { value: "9" } });
     await screen.findByRole("option", { name: "Normal" });
-    fireEvent.change(screen.getByLabelText("Prioridade"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText(/Prioridade/), { target: { value: "2" } });
     fireEvent.click(confirmar);
 
     await waitFor(() => expect(loteMock).toHaveBeenCalledWith({
@@ -168,9 +172,11 @@ describe("ações em lote", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Selecionar 2026/001" }));
     fireEvent.click(barra().getByRole("button", { name: "Arquivar…" }));
     const confirmar = await screen.findByRole("button", { name: "Confirmar arquivamento" });
-    fireEvent.change(screen.getByLabelText("Motivo do arquivamento"), { target: { value: "ok" } });
-    expect(confirmar).toBeDisabled();
-    fireEvent.change(screen.getByLabelText("Motivo do arquivamento"), {
+    fireEvent.change(screen.getByLabelText(/Motivo do arquivamento/), { target: { value: "ok" } });
+    fireEvent.click(confirmar);
+    expect(screen.getByText(/pelo menos 3 letras/)).toBeInTheDocument();
+    expect(loteMock).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText(/Motivo do arquivamento/), {
       target: { value: "Demanda atendida" } });
     fireEvent.click(confirmar);
     await waitFor(() => expect(loteMock).toHaveBeenCalledWith({

@@ -13,7 +13,7 @@ export default function NovasolicitacaoPage() {
           { label: "Pagamentos", href: "/m/pagamentos" },
           { label: "Solicitações", href: "/m/pagamentos/solicitacoes" },
         ]}
-        title="Nova Solicitação de Pagamento"
+        title="Nova solicitação de pagamento"
         description="Preencha os dados da solicitação. Você poderá editar enquanto estiver em rascunho."
         icon={FilePlus}
       />

@@ -1,16 +1,34 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertOctagon, Inbox, Plus } from "lucide-react";
+import {
+  AlertOctagon,
+  Ban,
+  CheckCircle2,
+  Inbox,
+  Pencil,
+  Play,
+  Plus,
+  SearchX,
+  ShieldAlert,
+  Trash2,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { hojeLocal, rotuloVeiculo, useErrosDoFormulario } from "@/components/frota/formulario";
+import { fmtData } from "@/components/pagamentos/format";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { EscolhaSegmentada, type OpcaoEscolha } from "@/components/ui/escolha-segmentada";
+import { FilterBar } from "@/components/ui/filter-bar";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { KpiCard } from "@/components/ui/kpi-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
@@ -38,6 +56,14 @@ const GRAVIDADES: { value: OcorrenciaGravidade; label: string }[] = [
   { value: "alta", label: "Alta" },
   { value: "critica", label: "Crítica" },
 ];
+// Quatro gravidades: à vista no formulário, cada uma com o que quer dizer —
+// "média" sozinha não diz a ninguém quando usar.
+const GRAVIDADES_ESCOLHA: OpcaoEscolha<OcorrenciaGravidade>[] = [
+  { valor: "baixa", rotulo: "Baixa", descricao: "Não atrapalha o uso do veículo." },
+  { valor: "media", rotulo: "Média", descricao: "Precisa de atenção, mas o veículo segue rodando." },
+  { valor: "alta", rotulo: "Alta", descricao: "Compromete o uso: resolver logo." },
+  { valor: "critica", rotulo: "Crítica", descricao: "Risco ou veículo parado: resolver já. Entra no alerta de críticas abertas." },
+];
 const TIPO_LABEL: Record<string, string> = Object.fromEntries(TIPOS.map((t) => [t.value, t.label]));
 const GRAV_LABEL: Record<string, string> = Object.fromEntries(GRAVIDADES.map((g) => [g.value, g.label]));
 const GRAV_INTENT: Record<string, "neutral" | "info" | "warning" | "danger"> = {
@@ -53,11 +79,12 @@ const STATUS: { value: string; label: string }[] = [
   { value: "cancelada", label: "Cancelada" },
 ];
 const STATUS_LABEL: Record<string, string> = Object.fromEntries(STATUS.map((s) => [s.value, s.label]));
-const STATUS_INTENT: Record<string, "info" | "neutral" | "success" | "danger"> = {
-  aberta: "info",
-  em_tratamento: "neutral",
+// Mesma régua de cor das demais telas da Frota (ver components/frota/rotulos.ts).
+const STATUS_INTENT: Record<string, "info" | "neutral" | "success" | "warning"> = {
+  aberta: "warning",
+  em_tratamento: "info",
   resolvida: "success",
-  cancelada: "danger",
+  cancelada: "neutral",
 };
 
 interface OcorrForm {
@@ -84,25 +111,6 @@ function nullify(v: string): string | null {
   const t = v.trim();
   return t === "" ? null : t;
 }
-function fmtData(d: string | null): string {
-  if (!d) return "—";
-  return new Date(`${d}T00:00:00`).toLocaleDateString("pt-BR");
-}
-
-function StatCard({ label, value, intent }: { label: string; value: number; intent?: string }) {
-  return (
-    <div className="rounded-lg border border-border bg-surface-1 p-4">
-      <p className="text-sm text-foreground-muted">{label}</p>
-      <p
-        className={`mt-1 text-xl font-semibold tabular-nums ${
-          intent === "danger" && value > 0 ? "text-danger-soft-foreground" : "text-foreground"
-        }`}
-      >
-        {value}
-      </p>
-    </div>
-  );
-}
 
 export default function OcorrenciasPage() {
   const { can } = useAuth();
@@ -118,6 +126,10 @@ export default function OcorrenciasPage() {
   const [editing, setEditing] = useState<VeiculoOcorrencia | null>(null);
   const [form, setForm] = useState<OcorrForm>(EMPTY);
   const [err, setErr] = useState<string | null>(null);
+  const campos = useErrosDoFormulario({
+    veiculo: !editing && form.id_veiculo == null ? "Escolha o veículo." : undefined,
+    descricao: form.descricao.trim() ? undefined : "Conte o que aconteceu.",
+  });
   const [resolvendo, setResolvendo] = useState<VeiculoOcorrencia | null>(null);
   const [resForm, setResForm] = useState({ data_resolucao: "", providencias: "" });
 
@@ -194,8 +206,9 @@ export default function OcorrenciasPage() {
   }
   function openNew() {
     setEditing(null);
-    setForm(EMPTY);
+    setForm({ ...EMPTY, data_ocorrencia: hojeLocal() });
     setErr(null);
+    campos.limpar();
     setDialogOpen(true);
   }
   function openEdit(o: VeiculoOcorrencia) {
@@ -210,6 +223,7 @@ export default function OcorrenciasPage() {
       providencias: o.providencias ?? "",
     });
     setErr(null);
+    campos.limpar();
     setDialogOpen(true);
   }
   function closeDialog() {
@@ -219,14 +233,7 @@ export default function OcorrenciasPage() {
   }
   function salvar() {
     setErr(null);
-    if (!editing && form.id_veiculo == null) {
-      setErr("Selecione o veículo.");
-      return;
-    }
-    if (form.descricao.trim() === "") {
-      setErr("Descrição é obrigatória.");
-      return;
-    }
+    if (!campos.podeEnviar()) return;
     const comum = {
       id_motorista: form.id_motorista ?? null,
       tipo: form.tipo,
@@ -264,25 +271,55 @@ export default function OcorrenciasPage() {
         }
       />
 
-      <div className="grid grid-cols-3 gap-3">
-        <StatCard label="Abertas" value={cards.abertas} />
-        <StatCard label="Críticas (abertas)" value={cards.criticas} intent="danger" />
-        <StatCard label="Resolvidas" value={cards.resolvidas} />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <KpiCard
+          label="Abertas"
+          value={cards.abertas}
+          hint="aberta ou em tratamento"
+          icon={AlertOctagon}
+          intent={cards.abertas > 0 ? "warning" : "default"}
+        />
+        <KpiCard
+          label="Críticas abertas"
+          value={cards.criticas}
+          icon={ShieldAlert}
+          intent={cards.criticas > 0 ? "danger" : "default"}
+        />
+        <KpiCard label="Resolvidas" value={cards.resolvidas} icon={CheckCircle2} intent="success" />
       </div>
 
-      <div>
-        <Label htmlFor="f_status">Status</Label>
-        <Select id="f_status" value={statusFiltro} onChange={(e) => setStatusFiltro(e.target.value)}>
-          <option value="">Todos</option>
-          {STATUS.map((s) => (
-            <option key={s.value} value={s.value}>
-              {s.label}
-            </option>
-          ))}
-        </Select>
-      </div>
+      <FilterBar>
+        <FilterBar.Group label="Status">
+          <Select aria-label="Status" value={statusFiltro} onChange={(e) => setStatusFiltro(e.target.value)}>
+            <option value="">Todos</option>
+            {STATUS.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </Select>
+        </FilterBar.Group>
+        {statusFiltro !== "" && (
+          <FilterBar.Actions>
+            <Button variant="ghost" onClick={() => setStatusFiltro("")}>
+              Limpar
+            </Button>
+          </FilterBar.Actions>
+        )}
+      </FilterBar>
 
-      {!listaQ.isLoading && (listaQ.data?.length ?? 0) === 0 ? (
+      {!listaQ.isLoading && (listaQ.data?.length ?? 0) === 0 && statusFiltro !== "" ? (
+        <EmptyState
+          icon={SearchX}
+          title="Nenhuma ocorrência encontrada"
+          description="Nenhuma ocorrência está com o status escolhido."
+          action={
+            <Button variant="secondary" onClick={() => setStatusFiltro("")}>
+              Limpar filtros
+            </Button>
+          }
+        />
+      ) : !listaQ.isLoading && (listaQ.data?.length ?? 0) === 0 ? (
         <EmptyState
           icon={Inbox}
           title="Nenhuma ocorrência"
@@ -334,54 +371,52 @@ export default function OcorrenciasPage() {
                     </Badge>
                   </TD>
                   <TD className="text-right">
-                    <div className="inline-flex flex-wrap justify-end gap-2">
-                      {canEdit && o.status === "aberta" && (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => actionM.mutate({ id: o.id, acao: "iniciar" })}
-                        >
-                          Tratar
-                        </Button>
-                      )}
-                      {canEdit && tratavel && (
-                        <Button
-                          size="sm"
-                          onClick={() => {
+                    {/* O próximo passo fica à vista (Tratar, depois Resolver); o
+                        resto vai para o ⋯. */}
+                    <AcoesDaLinha
+                      acoes={[
+                        {
+                          label: "Tratar",
+                          icon: Play,
+                          oculta: !(canEdit && o.status === "aberta"),
+                          onClick: () => actionM.mutate({ id: o.id, acao: "iniciar" }),
+                        },
+                        {
+                          label: "Resolver",
+                          icon: CheckCircle2,
+                          oculta: !(canEdit && tratavel),
+                          onClick: () => {
                             setResolvendo(o);
-                            setResForm({ data_resolucao: "", providencias: o.providencias ?? "" });
-                          }}
-                        >
-                          Resolver
-                        </Button>
-                      )}
-                      {canEdit && tratavel && (
-                        <Button variant="secondary" size="sm" onClick={() => openEdit(o)}>
-                          Editar
-                        </Button>
-                      )}
-                      {canEdit && tratavel && (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={async () => {
+                            setResForm({ data_resolucao: hojeLocal(), providencias: o.providencias ?? "" });
+                          },
+                        },
+                        {
+                          label: "Editar",
+                          icon: Pencil,
+                          oculta: !(canEdit && tratavel),
+                          onClick: () => openEdit(o),
+                        },
+                        {
+                          label: "Cancelar",
+                          icon: Ban,
+                          perigo: true,
+                          oculta: !(canEdit && tratavel),
+                          onClick: async () => {
                             const ok = await confirm({
                               title: "Cancelar ocorrência",
                               message: "Cancelar esta ocorrência?",
                               confirmLabel: "Cancelar ocorrência",
                             });
                             if (ok) actionM.mutate({ id: o.id, acao: "cancelar" });
-                          }}
-                        >
-                          Cancelar
-                        </Button>
-                      )}
-                      {canDelete && (
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          disabled={deleteM.isPending}
-                          onClick={async () => {
+                          },
+                        },
+                        {
+                          label: "Excluir",
+                          icon: Trash2,
+                          perigo: true,
+                          oculta: !canDelete,
+                          disabled: deleteM.isPending,
+                          onClick: async () => {
                             const ok = await confirm({
                               title: "Excluir ocorrência",
                               message: "Excluir esta ocorrência? Esta ação não pode ser desfeita.",
@@ -389,12 +424,10 @@ export default function OcorrenciasPage() {
                               intent: "danger",
                             });
                             if (ok) deleteM.mutate(o.id);
-                          }}
-                        >
-                          Excluir
-                        </Button>
-                      )}
-                    </div>
+                          },
+                        },
+                      ]}
+                    />
                   </TD>
                 </TR>
               );
@@ -407,151 +440,167 @@ export default function OcorrenciasPage() {
         open={dialogOpen}
         onClose={closeDialog}
         title={editing ? "Editar ocorrência" : "Nova ocorrência"}
+        description={
+          editing
+            ? `${placaDe.get(editing.id_veiculo) ?? `Veículo #${editing.id_veiculo}`} · ${fmtData(editing.data_ocorrencia)}`
+            : "Avaria, multa, sinistro ou outro fato com um veículo da frota."
+        }
         size="lg"
         footer={
           <>
-            <Button variant="secondary" onClick={closeDialog}>
+            <Button variant="ghost" onClick={closeDialog}>
               Cancelar
             </Button>
-            <Button onClick={salvar} disabled={saveM.isPending}>
-              {saveM.isPending ? "Salvando..." : "Salvar"}
+            <Button type="submit" form="form-ocorrencia" loading={saveM.isPending}>
+              {editing ? "Salvar alterações" : "Registrar ocorrência"}
             </Button>
           </>
         }
       >
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <form
+          id="form-ocorrencia"
+          noValidate
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            salvar();
+          }}
+        >
           {!editing && (
-            <div className="sm:col-span-2">
-              <Label htmlFor="veiculo" required>
-                Veículo
-              </Label>
+            <FormField label="Veículo" required error={campos.erro("veiculo")}>
               <Select
                 id="veiculo"
                 value={form.id_veiculo ?? ""}
                 onChange={(e) => set("id_veiculo", e.target.value ? Number(e.target.value) : null)}
+                onBlur={campos.tocar("veiculo")}
               >
-                <option value="">Selecione...</option>
+                <option value="">Selecione o veículo</option>
                 {(veiculosQ.data ?? []).map((v) => (
                   <option key={v.id} value={v.id}>
-                    {v.placa} {v.marca ? `— ${v.marca}` : ""}
+                    {rotuloVeiculo(v)}
                   </option>
                 ))}
               </Select>
-            </div>
+            </FormField>
           )}
-          <div>
-            <Label htmlFor="motorista">Motorista</Label>
+          <GradeCampos>
+            <FormField label="Tipo" required>
+              <Select id="tipo" value={form.tipo} onChange={(e) => set("tipo", e.target.value as OcorrenciaTipo)}>
+                {TIPOS.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+            <FormField
+              label="Data"
+              hint={!editing && form.data_ocorrencia === hojeLocal() ? "Já vem com a data de hoje." : "Quando aconteceu."}
+            >
+              <Input
+                id="data"
+                type="date"
+                value={form.data_ocorrencia}
+                onChange={(e) => set("data_ocorrencia", e.target.value)}
+              />
+            </FormField>
+          </GradeCampos>
+          <EscolhaSegmentada
+            nome="gravidade"
+            titulo="Gravidade"
+            moldura={false}
+            valor={form.gravidade}
+            opcoes={GRAVIDADES_ESCOLHA}
+            onChange={(g) => set("gravidade", g)}
+          />
+          <FormField label="O que aconteceu" required error={campos.erro("descricao")}>
+            <Textarea
+              id="descricao"
+              rows={3}
+              value={form.descricao}
+              onChange={(e) => set("descricao", e.target.value)}
+              onBlur={campos.tocar("descricao")}
+              placeholder="Ex.: Retrovisor direito quebrado ao manobrar no pátio da Secretaria"
+            />
+          </FormField>
+          <FormField label="Motorista envolvido" opcional>
             <Select
               id="motorista"
               value={form.id_motorista ?? ""}
               onChange={(e) => set("id_motorista", e.target.value ? Number(e.target.value) : null)}
             >
-              <option value="">—</option>
+              <option value="">Nenhum ou não se sabe</option>
               {(motoristasQ.data ?? []).map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.nome}
                 </option>
               ))}
             </Select>
-          </div>
-          <div>
-            <Label htmlFor="data">Data</Label>
-            <Input
-              id="data"
-              type="date"
-              value={form.data_ocorrencia}
-              onChange={(e) => set("data_ocorrencia", e.target.value)}
-            />
-          </div>
-          <div>
-            <Label htmlFor="tipo" required>
-              Tipo
-            </Label>
-            <Select id="tipo" value={form.tipo} onChange={(e) => set("tipo", e.target.value as OcorrenciaTipo)}>
-              {TIPOS.map((t) => (
-                <option key={t.value} value={t.value}>
-                  {t.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="gravidade">Gravidade</Label>
-            <Select
-              id="gravidade"
-              value={form.gravidade}
-              onChange={(e) => set("gravidade", e.target.value as OcorrenciaGravidade)}
-            >
-              {GRAVIDADES.map((g) => (
-                <option key={g.value} value={g.value}>
-                  {g.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div className="sm:col-span-2">
-            <Label htmlFor="descricao" required>
-              Descrição
-            </Label>
-            <Textarea
-              id="descricao"
-              rows={2}
-              value={form.descricao}
-              onChange={(e) => set("descricao", e.target.value)}
-            />
-          </div>
-          <div className="sm:col-span-2">
-            <Label htmlFor="prov">Providências</Label>
+          </FormField>
+          <FormField label="Providências" opcional hint="O que já foi feito ou está combinado.">
             <Textarea
               id="prov"
               rows={2}
               value={form.providencias}
               onChange={(e) => set("providencias", e.target.value)}
+              placeholder="Ex.: Orçamento pedido à oficina; boletim de ocorrência registrado"
             />
-          </div>
+          </FormField>
           {err && (
-            <div role="alert" className="sm:col-span-2 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground">
+            <Alert intent="danger" title="Não foi possível salvar">
               {err}
-            </div>
+            </Alert>
           )}
-        </div>
+        </form>
       </Dialog>
 
       <Dialog
         open={resolvendo != null}
         onClose={() => setResolvendo(null)}
         title="Resolver ocorrência"
+        description={
+          resolvendo
+            ? `${placaDe.get(resolvendo.id_veiculo) ?? `Veículo #${resolvendo.id_veiculo}`} · ${TIPO_LABEL[resolvendo.tipo] ?? resolvendo.tipo} · ${resolvendo.descricao}`
+            : undefined
+        }
         footer={
           <>
-            <Button variant="secondary" onClick={() => setResolvendo(null)}>
+            <Button variant="ghost" onClick={() => setResolvendo(null)}>
               Cancelar
             </Button>
-            <Button onClick={resolver} disabled={resolverM.isPending}>
-              {resolverM.isPending ? "Resolvendo..." : "Resolver"}
+            <Button type="submit" form="form-resolver" loading={resolverM.isPending}>
+              Marcar como resolvida
             </Button>
           </>
         }
       >
-        <div className="space-y-4">
-          <div>
-            <Label htmlFor="r_data">Data de resolução</Label>
+        <form
+          id="form-resolver"
+          noValidate
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            resolver();
+          }}
+        >
+          <FormField label="Data de resolução" hint="Já vem com a data de hoje.">
             <Input
               id="r_data"
               type="date"
               value={resForm.data_resolucao}
               onChange={(e) => setResForm((f) => ({ ...f, data_resolucao: e.target.value }))}
             />
-          </div>
-          <div>
-            <Label htmlFor="r_prov">Providências</Label>
+          </FormField>
+          <FormField label="Providências" opcional hint="Como foi resolvida — fica no histórico do veículo.">
             <Textarea
               id="r_prov"
               rows={3}
               value={resForm.providencias}
               onChange={(e) => setResForm((f) => ({ ...f, providencias: e.target.value }))}
+              placeholder="Ex.: Retrovisor trocado na oficina; multa paga e recurso arquivado"
             />
-          </div>
-        </div>
+          </FormField>
+        </form>
       </Dialog>
     </div>
   );

@@ -7,7 +7,7 @@
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AutoridadeAprovarPayload, ContaElegivel } from "@/lib/api";
 
@@ -85,7 +85,8 @@ async function abrirAprovacao() {
     </QueryClientProvider>,
   );
   fireEvent.click(await screen.findByRole("button", { name: "Aprovar e ordenar pagamento" }));
-  return screen.findByRole("button", { name: "Confirmar" });
+  // O botão do diálogo diz o verbo da ação (era "Confirmar").
+  return screen.findByRole("button", { name: "Aprovar e ordenar" });
 }
 
 beforeEach(() => {
@@ -94,14 +95,23 @@ beforeEach(() => {
   aprovarMock.mockClear();
 });
 
+// A primeira importação do detalhe (muitos módulos) passava dos 5 s do
+// teste em máquina carregada; aquecer aqui tira o custo de dentro dos testes.
+beforeAll(async () => {
+  await import("@/components/pagamentos/DetalheDebitoContent");
+}, 60_000);
+
 describe("aprovar e ordenar pagamento", () => {
   it("lista as contas da fonte do débito e não confirma sem conta escolhida", async () => {
     const confirmar = await abrirAprovacao();
     await screen.findByRole("option", { name: /Conta Movimento/ });
     expect(contasMock).toHaveBeenCalledWith(7);
-    expect(confirmar).toBeDisabled();
+    // Campo faltando não trava o botão: o clique é que mostra o que falta.
+    expect(screen.queryByText("Escolha a conta de onde sai o pagamento.")).toBeNull();
     fireEvent.click(confirmar);
     expect(aprovarMock).not.toHaveBeenCalled();
+    expect(await screen.findByText("Escolha a conta de onde sai o pagamento.")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Conta pagadora/)).toHaveFocus();
   });
 
   it("com conta que cobre o valor, envia a conta pagadora", async () => {
@@ -123,15 +133,18 @@ describe("aprovar e ordenar pagamento", () => {
     await screen.findByRole("option", { name: /Conta Convênio/ });
     fireEvent.change(screen.getByLabelText(/Conta pagadora/), { target: { value: "4" } });
     expect(await screen.findByText(/não cobre o valor/)).toBeInTheDocument();
-    expect(confirmar).toBeDisabled();
+    fireEvent.click(confirmar);
+    expect(await screen.findByText(/Escolha outra ou autorize como exceção/)).toBeInTheDocument();
+    expect(aprovarMock).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByLabelText(/Autorizar mesmo assim/));
-    expect(confirmar).toBeDisabled();
+    fireEvent.click(confirmar);
+    expect(await screen.findByText(/Explique por que autorizar sem saldo/)).toBeInTheDocument();
+    expect(aprovarMock).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText(/Justificativa da exceção/), {
       target: { value: "Decisão judicial com prazo." },
     });
-    expect(confirmar).toBeEnabled();
     fireEvent.click(confirmar);
     await waitFor(() =>
       expect(aprovarMock).toHaveBeenCalledWith(20, {

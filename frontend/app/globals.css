@@ -216,6 +216,18 @@
     --info-soft: var(--blue-100);
     --info-soft-foreground: var(--blue-700);
 
+    /* === Gráficos ===
+       Categórica, na ordem em que as séries recebem cor: o laranja da marca
+       abre, o marinho vem em seguida (os dois da identidade), depois tons
+       distantes no círculo para a 3ª..6ª série não se confundirem. Consumidos
+       só por `lib/chart-theme.ts` — tela nenhuma escolhe cor de série. */
+    --grafico-1: var(--laranja-500);
+    --grafico-2: 224 55% 40%;
+    --grafico-3: 174 62% 32%;
+    --grafico-4: 262 40% 52%;
+    --grafico-5: 38 92% 48%;
+    --grafico-6: 220 9% 55%;
+
     /* === Border radius (v2 preservado — badges/inputs/cards/modais/heroes) === */
     --radius-sm: 0.25rem; /* 4px — badges, inputs internos */
     --radius-md: 0.375rem; /* 6px — buttons, inputs */
@@ -336,6 +348,14 @@
     --info-soft: var(--blue-900);
     --info-soft-foreground: 214 95% 88%;
 
+    /* Séries clareiam para o fundo marinho. */
+    --grafico-1: var(--laranja-400);
+    --grafico-2: 222 75% 68%;
+    --grafico-3: 172 55% 48%;
+    --grafico-4: 262 60% 72%;
+    --grafico-5: 40 95% 60%;
+    --grafico-6: 220 10% 62%;
+
     --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
     --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.5), 0 1px 2px -1px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
@@ -435,10 +455,14 @@
   /* === Entrada da tela ===
      As seções sobem e aparecem uma depois da outra (40ms de intervalo, até a
      sexta), em vez de a tela inteira surgir de uma vez. Só opacidade e
-     transform, que o compositor anima; quem pediu menos movimento não vê. */
+     transform, que o compositor anima; quem pediu menos movimento não vê.
+     `backwards`, não `both`: com `both` a seção ficava presa no último quadro
+     (transform: none) e, para o navegador, continuava "transformada" — vira o
+     bloco de contenção de todo `position: fixed` dentro dela, e o fundo
+     escuro de um diálogo aberto ali cobria só a seção, não a tela. */
   @media (prefers-reduced-motion: no-preference) {
     .pagina > :is(.space-y-3, .space-y-4, .space-y-5, .space-y-6) > * {
-      animation: secao-entra 420ms var(--ease-out-expo) both;
+      animation: secao-entra 420ms var(--ease-out-expo) backwards;
     }
     .pagina > :is(.space-y-3, .space-y-4, .space-y-5, .space-y-6) > :nth-child(2) { animation-delay: 40ms; }
     .pagina > :is(.space-y-3, .space-y-4, .space-y-5, .space-y-6) > :nth-child(3) { animation-delay: 80ms; }
@@ -454,6 +478,96 @@
   ::view-transition-new(root) {
     animation: none;
     mix-blend-mode: normal;
+  }
+
+  /* === Listas de escolha (<select>) no padrão das listas do sistema ===
+     A lista aberta de um `<select>` era a do sistema operacional — fundo
+     branco, destaque azul-claro, fonte de outra família —, destoando dos
+     campos de busca (Combobox) logo ao lado, sobretudo no escuro. Onde o
+     navegador aceita estilizar a lista (`appearance: base-select`, Chrome e
+     Edge atuais), ela abre como as outras: cartão com borda, linha
+     destacada ao passar, a escolhida em negrito com o ✓ na cor da marca.
+     Onde não aceita, continua a nativa — o campo funciona igual. Vale para
+     todo `<select>` simples sem tocar nas telas: a API (`<option>`,
+     `onChange`, `required`) não muda. */
+  /* Caixas de marcar e botões de opção na cor da marca — eram o azul do
+     navegador, a única cor fora da paleta nas listas de seleção em lote. */
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: hsl(var(--brand));
+  }
+
+  @supports (appearance: base-select) {
+    select:not([multiple]):not([size]),
+    select:not([multiple]):not([size])::picker(select) {
+      appearance: base-select;
+    }
+    select:not([multiple]):not([size]) {
+      align-items: center;
+      gap: 0.5rem;
+      white-space: nowrap;
+    }
+    select:not([multiple]):not([size])::picker-icon {
+      color: hsl(var(--foreground-muted));
+      transition: rotate 150ms ease;
+    }
+    select:not([multiple]):not([size]):open::picker-icon {
+      rotate: 180deg;
+    }
+    /* Nada escolhido ainda ("Escolha a conta"): o texto fica apagado, como
+       o placeholder dos outros campos. */
+    select:not([multiple]):not([size]):has(> option[value=""]:checked) {
+      color: hsl(var(--foreground-subtle));
+    }
+    select:not([multiple]):not([size])::picker(select) {
+      margin-block: 4px;
+      padding-block: 0.25rem;
+      max-block-size: min(22rem, 70dvh);
+      border: 1px solid hsl(var(--border));
+      border-radius: var(--dropdown-radius);
+      background: hsl(var(--card));
+      color: hsl(var(--foreground));
+      box-shadow: var(--dropdown-shadow);
+    }
+    select:not([multiple]):not([size]) option {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.875rem;
+      line-height: 1.25rem;
+      color: hsl(var(--foreground));
+      background: transparent;
+      cursor: pointer;
+      white-space: normal;
+    }
+    select:not([multiple]):not([size]) option:is(:hover, :focus-visible) {
+      background: hsl(var(--muted));
+      outline: none;
+    }
+    select:not([multiple]):not([size]) option:checked {
+      font-weight: 600;
+    }
+    select:not([multiple]):not([size]) option::checkmark {
+      order: 1;
+      margin-inline-start: auto;
+      color: hsl(var(--brand));
+    }
+    select:not([multiple]):not([size]) option[value=""] {
+      color: hsl(var(--foreground-subtle));
+    }
+    select:not([multiple]):not([size]) option:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    select:not([multiple]):not([size]) optgroup legend {
+      padding: 0.5rem 0.75rem 0.25rem;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: hsl(var(--foreground-subtle));
+    }
   }
 
   /* === Workflow editor — handles visíveis === */

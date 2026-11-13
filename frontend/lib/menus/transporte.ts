@@ -94,7 +94,7 @@ export const menuTransporte: MenuModulo = {
           perm: "transporte_regulado",
         },
         {
-          label: "Relatórios",
+          label: "Relatório de alvarás",
           href: "/m/transporte/relatorio",
           icon: BarChart3,
           perm: "transporte_regulado",

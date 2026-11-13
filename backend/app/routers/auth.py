@@ -46,7 +46,7 @@ from ..schemas.auth import (
 )
 from ..services import conta_email, conta_tokens
 from ..services.conta import ContaError, alterar_senha
-from ..services.google_oauth_flow import GoogleOAuthFlow
+from ..services.google_oauth_flow import GoogleOAuthFlow, OutroUsuarioError
 from ..services.minutas import criar_google_doc_para_minuta
 from ..services.permissoes import listar_lotacoes, load_permissions, resolver_unidade_ativa
 
@@ -440,6 +440,44 @@ async def alterar_senha_endpoint(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+def _erro_google(codigo: str, processo_id: object = None) -> RedirectResponse:
+    """Tela de erro da conexão com o Google, com o caminho de volta ao processo."""
+    url = f"/minuta-error?error={codigo}"
+    if isinstance(processo_id, int) and processo_id > 0:
+        url += f"&processo={processo_id}"
+    return RedirectResponse(url=url, status_code=307)
+
+
+@router.get("/google/status")
+async def google_status(
+    usuario: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+) -> dict:
+    """SI-32 — o que a tela precisa para oferecer (ou não) o Google Docs.
+
+    `configurado`: o servidor tem client ID/secret. Sem isso, o botão
+    "Conectar" levaria a um erro — a tela explica em vez de oferecer.
+    `conectado`: este usuário tem credencial válida (não revogada).
+    """
+    configurado = GoogleOAuthFlow(redis).configurado
+    cred = (
+        await db.execute(
+            select(GoogleCredencial).where(
+                GoogleCredencial.tenant_id == tenant_id,
+                GoogleCredencial.id_usuario == usuario.id,
+                GoogleCredencial.revogado.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    return {
+        "configurado": configurado,
+        "conectado": cred is not None,
+        "conectado_em": cred.criado_em.isoformat() if cred else None,
+    }
+
+
 @router.get("/google")
 async def initiate_google_oauth(
     minuta_id: int,
@@ -457,23 +495,20 @@ async def initiate_google_oauth(
       credencial e volta pro processo.
     - processo_id (required): ID do processo associado
 
-    Retorna: 307 Redirect para Google consent screen
+    Retorna: 307 Redirect para Google consent screen. Sem client ID/secret no
+    servidor, 307 para a tela de erro (navegação do browser — um 500 em JSON
+    aparecia cru na tela).
     """
     oauth_flow = GoogleOAuthFlow(redis)
+    if not oauth_flow.configurado:
+        return _erro_google("google_nao_configurado", processo_id)
 
-    try:
-        auth_url = await oauth_flow.generate_oauth_url(
-            user_id=user.id,
-            tenant_id=tenant_id,
-            minuta_id=minuta_id,
-            processo_id=processo_id,
-        )
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erro ao iniciar OAuth: {str(e)}",
-        )
-
+    auth_url = await oauth_flow.generate_oauth_url(
+        user_id=user.id,
+        tenant_id=tenant_id,
+        minuta_id=minuta_id,
+        processo_id=processo_id,
+    )
     return RedirectResponse(url=auth_url, status_code=307)
 
 
@@ -495,44 +530,39 @@ async def handle_google_oauth_callback(
     - error: erro retornado pelo Google (ex: access_denied)
 
     Em caso de sucesso:
-    1. Valida e troca código por tokens (GoogleOAuthFlow)
-    2. Auto-cria Google Doc via criar_google_doc_para_minuta
-    3. Redireciona para o Google Docs editor
+    1. Confere que o state é DESTE usuário/tenant e troca o código por tokens
+       (com o code_verifier do PKCE guardado no state)
+    2. minuta_id=0: só volta para o processo; senão, cria o Google Doc e
+       redireciona para o editor
 
-    Em caso de erro:
-    1. Redireciona para /minuta-error com código de erro
+    Em caso de erro: /minuta-error com o código e o processo de volta.
     """
-    # Rejeição do usuário
-    if error == "access_denied":
-        return RedirectResponse(
-            url="/minuta-error?error=access_denied",
-            status_code=307,
-        )
-
-    # Validação de params obrigatórios
-    if not code or not state:
-        return RedirectResponse(
-            url="/minuta-error?error=google_api_error",
-            status_code=307,
-        )
-
     oauth_flow = GoogleOAuthFlow(redis)
+    contexto = await oauth_flow.ler_contexto(state) if state else None
+    processo_volta = (contexto or {}).get("processo_id")
+
+    # Recusa no Google (ou outro erro dele): o state não vale mais.
+    if error:
+        if state:
+            await oauth_flow.descartar_state(state)
+        return _erro_google(
+            "access_denied" if error == "access_denied" else "google_api_error",
+            processo_volta,
+        )
+
+    if not code or not state:
+        return _erro_google("google_api_error", processo_volta)
 
     try:
-        # Troca código por tokens, valida state, salva credenciais
-        context = await oauth_flow.handle_callback(code, state, db=db)
+        context = await oauth_flow.handle_callback(
+            code, state, db=db, usuario_id=user.id, tenant_id=tenant_id
+        )
+    except OutroUsuarioError:
+        return _erro_google("conta_diferente", None)
     except ValueError as e:
-        error_msg = str(e)
-        if "Sessão expirou" in error_msg:
-            return RedirectResponse(
-                url="/minuta-error?error=state_expired",
-                status_code=307,
-            )
-        else:
-            return RedirectResponse(
-                url="/minuta-error?error=google_api_error",
-                status_code=307,
-            )
+        if "Sessão expirou" in str(e):
+            return _erro_google("state_expired", processo_volta)
+        return _erro_google("google_api_error", processo_volta)
 
     # minuta_id=0 é o "só conectar a conta" (RedigirDocumentoDialog permite
     # conectar antes de criar qualquer minuta) — sem minuta pra vincular, não
@@ -554,18 +584,10 @@ async def handle_google_oauth_callback(
             minuta_id=minuta_id,
             usuario_id=user.id,
         )
-        # Redireciona para o Google Docs editor
         return RedirectResponse(url=minuta.google_doc_url, status_code=307)
-    except HTTPException:
-        return RedirectResponse(
-            url="/minuta-error?error=google_api_error",
-            status_code=307,
-        )
     except Exception:
-        return RedirectResponse(
-            url="/minuta-error?error=google_api_error",
-            status_code=307,
-        )
+        logger.exception("Falha ao criar o Google Doc da minuta %s", minuta_id)
+        return _erro_google("google_api_error", context.get("processo_id"))
 
 
 @router.get("/users/me/google-credential")

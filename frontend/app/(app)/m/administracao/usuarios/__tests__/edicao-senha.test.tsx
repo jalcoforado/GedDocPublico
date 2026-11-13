@@ -33,6 +33,8 @@ vi.mock("@/lib/api", () => ({
     unidades: { list: vi.fn() },
     grupos: { list: vi.fn() },
   },
+  // O campo de unidade é o UnidadePicker, que lê a árvore do organograma.
+  organogramaApi: { tree: vi.fn().mockResolvedValue([]) },
   NIVEL_SIGILO_LABEL: {
     ostensivo: "Ostensivo",
     interno: "Interno",
@@ -139,7 +141,7 @@ describe("UsuariosPage — edição: copy e payload da senha (SEC-1 follow-up)",
     // controlado por estado React que recria via spread a cada keystroke —
     // userEvent.type acaba descartando caracteres em condições de corrida
     // com o re-render do diálogo.
-    const cargo = screen.getByLabelText(/^Cargo$/i) as HTMLInputElement;
+    const cargo = screen.getByLabelText(/^Cargo/i) as HTMLInputElement;
     fireEvent.change(cargo, { target: { value: "Coordenador" } });
 
     fireEvent.click(screen.getByRole("button", { name: /Salvar/i }));

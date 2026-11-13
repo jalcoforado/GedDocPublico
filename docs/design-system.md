@@ -80,6 +80,75 @@ a partir de um degrau de rampa.
 - **Density**: uma só, a confortável — `--density-*` é a régua de espaço
   (main, cards, linhas de tabela, inputs). O modo compacto saiu em 2026-11-06.
 
+## Padrão de tela (desde 2026-11-10)
+
+Toda tela interna segue o mesmo esqueleto. Quem abre uma tela nova copia
+daqui; quem acha uma tela fora dele, conserta.
+
+1. **Cabeçalho = `PageHeader`**, sempre com `icon` (o mesmo do menu/hub),
+   `title` em português de gente e `description` de uma frase. Nada de `<h1>`
+   solto, nem título laranja: o título é `text-titulo` (o laranja fica na
+   trilha e nas ações). Botões da tela vão em `actions`.
+2. **Ação de criar** = `Button` primário com `<Plus />` e o nome da coisa, no
+   gênero certo: "Nova cidade", "Novo fornecedor" — nunca "Novo" seco.
+   Cadastro feito com `CrudPage` passa `icon`, `description` e `novoLabel`.
+3. **Ações da linha = `AcoesDaLinha`** (`components/ui/acoes-da-linha.tsx`):
+   até 2 botões discretos à vista, o resto no ⋯ "Mais ações", a destrutiva
+   (`perigo`) sempre por último e em `danger-outline` — vermelho cheio só no
+   botão que CONFIRMA, dentro do diálogo. A coluna nunca quebra em duas linhas.
+4. **Números = `KpiCard`** (rótulo, valor, ícone, `intent`). Sem caixa crua
+   com número, sem número centralizado colorido, sem enfeite de bolinha.
+5. **Filtros = `FilterBar`** acima da tabela, com "Limpar" quando há filtro.
+6. **Vazio = `EmptyState`** com ícone, uma frase do que é e, se couber, a
+   ação de criar. Texto solto ("Nenhum registro") não.
+7. **Valores formatados**: dinheiro `R$ 1.234,56`, data `dd/mm/aaaa`,
+   enum por rótulo ("Transporte escolar", não `transporte_escolar`).
+8. **Status = `Badge`** com `intent` semântico (success/warning/danger/info/
+   neutral). A mesma situação tem a mesma cor em todas as telas.
+9. **Links dentro de tabela** (número do processo, placa) em `text-primary`
+   com sublinhado no hover — não azul, não vermelho.
+10. **Gráfico** pega cor de `lib/chart-theme.ts` (`SERIES`, `GRAFICO`), nunca
+    hex. O tema escuro vem de graça.
+
+## Padrão de formulário (desde 2026-11-10)
+
+Formulário bom é o que a pessoa preenche sem precisar perguntar nada.
+
+1. **Campo = `FormField`** (`components/ui/form-field.tsx`): rótulo, controle,
+   dica e erro com a fiação ARIA pronta. Nada de `<Label>` + `<Input>` +
+   `<p>` montados à mão.
+2. **Rótulo curto e de gente** ("Valor total", não "Valor total (R$)"). A
+   unidade vai no campo, com `CampoComUnidade` (`prefixo="R$"`,
+   `sufixo="km"`). O placeholder é EXEMPLO ("Ex.: OF-123/2026"), nunca o
+   rótulo repetido nem a instrução.
+3. **Obrigatório = asterisco** (`required`). Num grupo de obrigatórios, o
+   campo que não é ganha `opcional`. A dica diz o formato ou para que serve,
+   numa linha.
+4. **Erro só depois da tentativa**: ao sair do campo ou ao enviar, nunca ao
+   abrir a tela. A mensagem diz como consertar ("Use o formato
+   000.000.000-00"), não só que está errado. Ao enviar com erro: foco no
+   primeiro inválido (`focarPrimeiroInvalido`) e, se forem vários, um resumo
+   no topo com link para cada um.
+5. **Uma coluna**, lida de cima para baixo. Duas (`GradeCampos`) só para
+   pares que andam juntos: cidade + UF, início + fim, quantidade + unidade.
+6. **Poucas opções à vista**: 2 a 4 opções → `EscolhaSegmentada` (todas
+   nomeadas, com a consequência da escolha embaixo), não `<select>`. Lista
+   longa ou que cresce → `Combobox` com busca. Ligar/desligar → checkbox.
+7. **Formulário longo = etapas**: `SectionCard` com `step` e `id`, na
+   ordem em que a pessoa pensa (quem → o quê → detalhes). Com 3 etapas ou
+   mais, `LayoutFormulario` + `RoteiroFormulario` ao lado: o que já está
+   feito ✓ e o que falta, cada item levando ao campo.
+8. **Ações em `BarraAcoesFormulario`** (fixa embaixo): Cancelar (ghost) →
+   secundária ("Salvar como rascunho") → principal com o VERBO do
+   formulário ("Abrir processo", "Criar solicitação"; "Salvar" só em
+   edição). À esquerda, o status: o que falta (`resumoDoQueFalta`) ou
+   "rascunho salvo".
+9. **Botão principal nunca desabilitado por validação**: clicar é o que
+   mostra o que falta. Desabilitado só enquanto envia (`loading`).
+10. **Diálogo** para cadastro curto (≤ 8 campos, `CrudPage`); página
+    própria para o resto. Título do diálogo diz o que se edita ("Editar
+    cidade").
+
 ## Do / Don't
 
 | ✔ Do | ✘ Don't |

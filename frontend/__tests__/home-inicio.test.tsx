@@ -267,7 +267,7 @@ describe("notificações", () => {
     expect(screen.queryByRole("button", { name: /Marcar todas/ })).toBeNull();
   });
 
-  it("leva às assinaturas — módulos e 'Abrir processo' estão no menu lateral", async () => {
+  it("leva às assinaturas — os módulos estão no menu lateral", async () => {
     await abrir();
     expect(screen.getByRole("link", { name: /Para assinar/ })).toHaveAttribute("href", "/para-assinar");
     expect(screen.queryByRole("link", { name: /Meus módulos/ })).toBeNull();

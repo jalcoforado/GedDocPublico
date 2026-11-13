@@ -101,9 +101,6 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
     ...contratados.filter((s) => !MENUS[s].grupos.some((g) => g.quieto)).map(secao),
     ...contratados.filter((s) => MENUS[s].grupos.some((g) => g.quieto)).map(secao),
   ];
-  // "Abrir processo" (ação principal do Protocolo) no alto da barra, em
-  // qualquer tela, quando o Protocolo está contratado.
-  const acao = contratados.includes("protocolo") ? MENUS.protocolo.acaoPrincipal : undefined;
   // PR3a — link de plataforma só aparece para admin de plataforma (allowlist).
   const adminMeQ = useQuery({
     queryKey: ["admin-me"],
@@ -316,7 +313,7 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
         {/* A marca do município mora no cabeçalho, que passa por cima da
             barra (2026-11-06). Aqui ela só aparece na GAVETA do celular, que
             cobre o cabeçalho — num cartão claro, porque a marca de prefeitura
-            tem texto escuro e a barra é verde. */}
+            tem texto escuro e a barra é marinho. */}
         <div className="flex items-center justify-between gap-2 border-b border-sidebar-border px-4 py-3 md:hidden">
           <Link
             href="/home"
@@ -335,27 +332,18 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
           </button>
         </div>
 
-        {/* Ação principal do módulo (`MenuModulo.acaoPrincipal`): fora dos
-            grupos, acima deles — não é uma tela para navegar, é o que se veio
-            fazer. Sem a permissão de criar, não aparece. */}
-        {acao && can(acao.perm, acao.action) && (
-          <div className={cn("px-4 pb-1 pt-5", colapsada && "md:px-2")}>
-            <Link
-              href={acao.href}
-              title={colapsada ? acao.label : undefined}
-              className={cn(
-                "flex h-11 items-center justify-center gap-2 rounded-button bg-accent px-3 text-sm font-semibold text-accent-foreground shadow-button transition-colors duration-fast hover:bg-accent-light",
-                colapsada && "md:px-0",
-              )}
-            >
-              <acao.icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-              <span className={cn(colapsada && "md:sr-only")}>{acao.label}</span>
-            </Link>
-          </div>
-        )}
-
-        {/* Items */}
-        <div className={cn("flex flex-1 flex-col gap-5 overflow-y-auto px-4 py-4", colapsada && "md:gap-2 md:px-2")}>
+        {/* Items. A máscara esmaece 12px nas pontas: rolada, a lista some aos
+            poucos em vez de ser cortada a meio rótulo. Em repouso não toca em
+            nada — o py-4 (16px) é maior que o esmaecimento. O botão "Abrir
+            processo" que ficava acima daqui saiu em 2026-11-10 (Heitor): abrir
+            processo segue a um clique no Painel, nas Caixas e no Ctrl+K. */}
+        <div
+          className={cn(
+            "flex flex-1 flex-col gap-5 overflow-y-auto px-4 py-4",
+            "[mask-image:linear-gradient(to_bottom,transparent,black_12px,black_calc(100%-12px),transparent)]",
+            colapsada && "md:gap-2 md:px-2",
+          )}
+        >
           {NAV.map((group) => {
             const visible = group.items
               .filter((item) => canSeeItem(item, can))

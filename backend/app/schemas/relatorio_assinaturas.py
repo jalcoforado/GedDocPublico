@@ -1,15 +1,25 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel
 
+from .relatorio import ModoUnidade
 
 StatusSolicitacao = Literal["pendente", "concluida", "cancelada"]
 
 
 class AssinaturasFiltro(BaseModel):
-    desde: datetime | None = None
-    ate: datetime | None = None
+    # SI-34 — o mesmo recorte dos outros relatórios, sobre o PROCESSO da
+    # solicitação (unidade, assunto, tipo), mais os filtros próprios.
+    id_unidade: int | None = None
+    modo_unidade: ModoUnidade = "envolvida"
+    id_assunto: int | None = None
+    id_tipo_processo: int | None = None
+    id_servico: int | None = None
+    # Dias LOCAIS (Brasília), inclusive; pela data do pedido ou da conclusão.
+    desde: date | None = None
+    ate: date | None = None
+    data_base: Literal["pedido", "conclusao"] = "pedido"
     id_solicitante: int | None = None
     id_assinante: int | None = None
     status: StatusSolicitacao | None = None
@@ -47,6 +57,7 @@ class SolicitacaoRow(BaseModel):
     id_solicitante: int
     nome_solicitante: str | None
     status: StatusSolicitacao
+    # Hora local (Brasília), sem fuso.
     dt_inicio: datetime
     dt_fim: datetime | None
     minutos_decorridos: int | None  # dt_fim - dt_inicio (ou now - dt_inicio se pendente)
@@ -59,7 +70,10 @@ class SolicitacaoRow(BaseModel):
 
 class RelatorioAssinaturasResposta(BaseModel):
     filtros_aplicados: AssinaturasFiltro
+    descricao_filtros: list[str]
+    # Totais e agregados contam o recorte INTEIRO; só a lista tem teto.
     totais: AssinaturasTotais
     por_assinante: list[AssinanteAgregado]
     por_solicitante: list[SolicitanteAgregado]
     solicitacoes: list[SolicitacaoRow]
+    cortado: bool = False

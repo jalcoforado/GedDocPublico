@@ -11,18 +11,25 @@ import {
   Landmark,
   Link2,
   ListChecks,
+  Undo2,
+  X,
 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
 import { BotaoExportarCsv } from "@/components/pagamentos/BotoesExportar";
 import { fmtData, fmtDataHora, fmtMoeda } from "@/components/pagamentos/format";
+import { useValidacaoCampos } from "@/components/pagamentos/useValidacaoCampos";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Input } from "@/components/ui/input";
+import { EscolhaSegmentada } from "@/components/ui/escolha-segmentada";
+import { FilterBar } from "@/components/ui/filter-bar";
+import { FormField } from "@/components/ui/form-field";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { Select } from "@/components/ui/select";
@@ -116,6 +123,30 @@ export default function ConciliacaoPage() {
   });
 
   const contas = contasQ.data ?? [];
+  const vImport = useValidacaoCampos(
+    {
+      id_conta: form.id_conta === null && "Escolha a conta do extrato.",
+      conteudo:
+        !form.conteudo.trim() &&
+        (form.formato === "CSV"
+          ? "Escolha o arquivo ou cole o conteúdo do extrato."
+          : "Escolha o arquivo do extrato."),
+      nome_arquivo: !form.nome_arquivo.trim() && "Dê um nome ao extrato, ex.: extrato-julho.csv.",
+    },
+    {
+      id_conta: "imp-conta",
+      conteudo: form.formato === "CSV" ? "imp-conteudo" : "imp-arquivo",
+      nome_arquivo: "imp-nome",
+    },
+  );
+  const vDesfazer = useValidacaoCampos(
+    { motivo: !motivoDesfazer.trim() && "Explique por que desfazer — fica registrado." },
+    { motivo: "motivo-desfazer" },
+  );
+  const vManual = useValidacaoCampos(
+    { mov: movEscolhida === null && "Escolha o pagamento que corresponde a este lançamento." },
+    { mov: "mov-alvo" },
+  );
   const extratos = extratosQ.data ?? [];
   const lancamentos = lancamentosQ.data ?? [];
   const sugestoes = sugestoesQ.data ?? [];
@@ -242,13 +273,14 @@ export default function ConciliacaoPage() {
         icon={Landmark}
         breadcrumbs={[{ label: "Pagamentos", href: "/m/pagamentos" }, { label: "Conciliação" }]}
         title="Conciliação bancária"
-        description="Importe o extrato da conta e case cada lançamento com o pagamento correspondente. Quando todas as movimentações de um débito pago ficam conciliadas, ele passa a CONCILIADO automaticamente."
+        description="Importe o extrato da conta e case cada lançamento com o pagamento; o débito com tudo casado fica conciliado sozinho."
         actions={
           <Button
             onClick={() => {
               setForm(formVazio());
               setErroImport(null);
               setRelatoImport(null);
+              vImport.reiniciar();
               setImportOpen(true);
             }}
           >
@@ -258,14 +290,11 @@ export default function ConciliacaoPage() {
         }
       />
 
-      <SectionCard title="Extratos importados">
-        <div className="mb-4 flex items-center gap-3">
-          <Label htmlFor="filtro-conta" className="whitespace-nowrap text-sm">
-            Conta
-          </Label>
+      <FilterBar>
+        <FilterBar.Group className="min-w-64">
+          <Label htmlFor="filtro-conta">Conta</Label>
           <Select
             id="filtro-conta"
-            className="max-w-xs"
             value={contaFiltro ?? ""}
             onChange={(e) => {
               const v = e.target.value;
@@ -280,10 +309,27 @@ export default function ConciliacaoPage() {
               </option>
             ))}
           </Select>
-        </div>
+        </FilterBar.Group>
+        {contaFiltro !== null && (
+          <FilterBar.Actions>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setContaFiltro(null);
+                setExtratoSel(null);
+              }}
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+              Limpar
+            </Button>
+          </FilterBar.Actions>
+        )}
+      </FilterBar>
+
+      <SectionCard title="Extratos importados">
 
         {extratosQ.isLoading ? (
-          <Carregando className="text-sm text-muted" />
+          <Carregando className="text-sm text-foreground-muted" />
         ) : extratos.length === 0 ? (
           <EmptyState
             icon={FileUp}
@@ -330,7 +376,7 @@ export default function ConciliacaoPage() {
         <>
           <SectionCard
             title="Sugestões de baixa"
-            description="EXATA = mesmo valor e mesma data. PROVÁVEL = mesmo valor, até 3 dias de diferença — confira antes de conciliar."
+            description="Exata: mesmo valor e mesma data. Provável: mesmo valor, até 3 dias de diferença — confira antes de conciliar."
           >
             {exatas > 0 && (
               <div className="mb-4 flex justify-end">
@@ -345,7 +391,7 @@ export default function ConciliacaoPage() {
               </div>
             )}
             {sugestoesQ.isLoading ? (
-              <Carregando className="text-sm text-muted" />
+              <Carregando className="text-sm text-foreground-muted" />
             ) : sugestoes.length === 0 ? (
               <EmptyState
                 icon={ListChecks}
@@ -364,7 +410,7 @@ export default function ConciliacaoPage() {
                     <TH className="text-right">Valor</TH>
                     <TH>Pagamento correspondente</TH>
                     <TH>Correspondência</TH>
-                    <TH />
+                    <TH className="text-right">Ações</TH>
                   </TR>
                 </THead>
                 <TBody>
@@ -372,12 +418,12 @@ export default function ConciliacaoPage() {
                     <TR key={s.id_lancamento}>
                       <TD>
                         <div className="font-medium">{s.lancamento_historico}</div>
-                        <div className="text-xs text-muted">{fmtData(s.lancamento_data)}</div>
+                        <div className="text-xs text-foreground-muted">{fmtData(s.lancamento_data)}</div>
                       </TD>
                       <TD className="text-right tabular-nums">{fmtMoeda(s.lancamento_valor)}</TD>
                       <TD>
                         <div>{s.nome_fornecedor ?? "—"}</div>
-                        <div className="text-xs text-muted">
+                        <div className="text-xs text-foreground-muted">
                           {fmtData(s.movimentacao_data)}
                           {s.id_debito ? ` · débito #${s.id_debito}` : ""}
                         </div>
@@ -388,20 +434,20 @@ export default function ConciliacaoPage() {
                         </Badge>
                       </TD>
                       <TD className="text-right">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={conciliar.isPending}
-                          onClick={() =>
-                            conciliar.mutate({
-                              id_lancamento: s.id_lancamento,
-                              id_movimentacao: s.id_movimentacao,
-                            })
-                          }
-                        >
-                          <Link2 className="mr-1 h-3.5 w-3.5" />
-                          Conciliar
-                        </Button>
+                        <AcoesDaLinha
+                          acoes={[
+                            {
+                              label: "Conciliar",
+                              icon: Link2,
+                              disabled: conciliar.isPending,
+                              onClick: () =>
+                                conciliar.mutate({
+                                  id_lancamento: s.id_lancamento,
+                                  id_movimentacao: s.id_movimentacao,
+                                }),
+                            },
+                          ]}
+                        />
                       </TD>
                     </TR>
                   ))}
@@ -427,7 +473,7 @@ export default function ConciliacaoPage() {
               </div>
             )}
             {lancamentosQ.isLoading ? (
-              <Carregando className="text-sm text-muted" />
+              <Carregando className="text-sm text-foreground-muted" />
             ) : (
               <Table>
                 <THead>
@@ -439,7 +485,7 @@ export default function ConciliacaoPage() {
                     <TH className="text-right">Valor</TH>
                     <TH>Tipo</TH>
                     <TH>Situação</TH>
-                    <TH />
+                    <TH className="text-right">Ações</TH>
                   </TR>
                 </THead>
                 <TBody>
@@ -457,31 +503,32 @@ export default function ConciliacaoPage() {
                         </Badge>
                       </TD>
                       <TD className="text-right">
-                        {!l.conciliado && l.tipo === "DEBITO" && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => {
-                              setManual(l);
-                              setMovEscolhida(null);
-                            }}
-                          >
-                            Conciliar manualmente
-                          </Button>
-                        )}
-                        {l.conciliado && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            aria-label={`Desfazer conciliação de ${l.historico}`}
-                            onClick={() => {
-                              setADesfazer(l);
-                              setMotivoDesfazer("");
-                            }}
-                          >
-                            Desfazer
-                          </Button>
-                        )}
+                        <AcoesDaLinha
+                          acoes={[
+                            {
+                              label: "Conciliar manualmente",
+                              icon: Link2,
+                              oculta: l.conciliado || l.tipo !== "DEBITO",
+                              onClick: () => {
+                                setManual(l);
+                                setMovEscolhida(null);
+                                vManual.reiniciar();
+                              },
+                            },
+                            {
+                              label: "Desfazer",
+                              icon: Undo2,
+                              perigo: true,
+                              ariaLabel: `Desfazer conciliação de ${l.historico}`,
+                              oculta: !l.conciliado,
+                              onClick: () => {
+                                setADesfazer(l);
+                                setMotivoDesfazer("");
+                                vDesfazer.reiniciar();
+                              },
+                            },
+                          ]}
+                        />
                       </TD>
                     </TR>
                   ))}
@@ -508,13 +555,10 @@ export default function ConciliacaoPage() {
                 Cancelar
               </Button>
               <Button
-                onClick={() => importar.mutate()}
-                disabled={
-                  importar.isPending ||
-                  !form.id_conta ||
-                  !form.nome_arquivo.trim() ||
-                  !form.conteudo.trim()
-                }
+                onClick={() => {
+                  if (vImport.conferir()) importar.mutate();
+                }}
+                loading={importar.isPending}
               >
                 Importar
               </Button>
@@ -534,13 +578,13 @@ export default function ConciliacaoPage() {
 
             <dl className="grid grid-cols-2 gap-3 text-sm">
               <div className="rounded-card border border-border bg-surface-1 p-3">
-                <dt className="text-xs text-muted">Ignorados por ID externo</dt>
+                <dt className="text-xs text-foreground-muted">Ignorados por ID externo</dt>
                 <dd className="text-lg font-semibold tabular-nums">
                   {relatoImport.ignorados_por_id_externo} ignorado(s)
                 </dd>
               </div>
               <div className="rounded-card border border-border bg-surface-1 p-3">
-                <dt className="text-xs text-muted">Possíveis duplicatas</dt>
+                <dt className="text-xs text-foreground-muted">Possíveis duplicatas</dt>
                 <dd className="text-lg font-semibold tabular-nums">
                   {relatoImport.possiveis_duplicatas} possível duplicata(s)
                 </dd>
@@ -559,7 +603,7 @@ export default function ConciliacaoPage() {
             )}
 
             {relatoImport.ignorados_por_id_externo > 0 && (
-              <p className="text-xs text-muted">
+              <p className="text-xs text-foreground-muted">
                 Linhas ignoradas por ID externo já tinham o mesmo identificador do banco
                 (FITID/documento) importado antes nesta conta — não foram duplicadas.
               </p>
@@ -567,46 +611,67 @@ export default function ConciliacaoPage() {
           </div>
         ) : (
           <div className="space-y-4">
-            <div>
-              <Label htmlFor="imp-conta">Conta</Label>
+            <FormField label="Conta" required error={vImport.erro("id_conta")}>
               <Select
                 id="imp-conta"
                 value={form.id_conta ?? ""}
-                onChange={(e) =>
+                onChange={(e) => {
                   setForm((s) => ({
                     ...s,
                     id_conta: e.target.value === "" ? null : Number(e.target.value),
-                  }))
-                }
+                  }));
+                  vImport.tocar("id_conta")();
+                }}
               >
-                <option value="">Selecione…</option>
+                <option value="">Escolha a conta</option>
                 {contas.map((c) => (
                   <option key={c.id_conta} value={c.id_conta}>
                     {c.nome}
                   </option>
                 ))}
               </Select>
-            </div>
+            </FormField>
 
-            <div>
-              <Label htmlFor="imp-formato">Formato do arquivo</Label>
-              <Select
-                id="imp-formato"
-                value={form.formato}
-                onChange={(e) => {
-                  const formato = e.target.value as FormatoExtrato;
-                  setForm((s) => ({ ...s, formato, conteudo: "", nome_arquivo: "" }));
-                  if (arquivoRef.current) arquivoRef.current.value = "";
-                }}
-              >
-                <option value="CSV">CSV</option>
-                <option value="OFX">OFX</option>
-                <option value="CNAB240">CNAB240</option>
-              </Select>
-            </div>
+            {/* Três formatos, todos à vista: o banco diz qual exporta. Trocar
+                o formato limpa o arquivo já lido (o de antes não serve). */}
+            <EscolhaSegmentada
+              nome="imp-formato"
+              titulo="Formato do arquivo"
+              valor={form.formato}
+              onChange={(formato) => {
+                setForm((s) => ({ ...s, formato, conteudo: "", nome_arquivo: "" }));
+                if (arquivoRef.current) arquivoRef.current.value = "";
+              }}
+              opcoes={[
+                {
+                  valor: "CSV",
+                  rotulo: "CSV",
+                  descricao: "Planilha exportada pelo banco, ou colada no campo abaixo.",
+                },
+                { valor: "OFX", rotulo: "OFX", descricao: "Extrato OFX (versão 1.x SGML ou 2.x XML)." },
+                {
+                  valor: "CNAB240",
+                  rotulo: "CNAB240",
+                  descricao: "Retorno CNAB240 (layout FEBRABAN, registros de 240 posições).",
+                },
+              ]}
+              moldura={false}
+            />
 
-            <div>
-              <Label htmlFor="imp-arquivo">Arquivo</Label>
+            <FormField
+              label="Arquivo"
+              required={form.formato !== "CSV"}
+              error={form.formato !== "CSV" ? vImport.erro("conteudo") : undefined}
+              hint={
+                form.formato === "CSV" ? (
+                  <>
+                    Colunas: <code>{MODELO_CSV}</code>. Separador <code>;</code> ou{" "}
+                    <code>,</code>; cabeçalho opcional; tipo <code>CREDITO</code> ou{" "}
+                    <code>DEBITO</code>.
+                  </>
+                ) : undefined
+              }
+            >
               <Input
                 id="imp-arquivo"
                 ref={arquivoRef}
@@ -617,36 +682,30 @@ export default function ConciliacaoPage() {
                   if (f) lerArquivo(f);
                 }}
               />
-              {form.formato === "CSV" && (
-                <p className="mt-1 text-xs text-muted">
-                  Colunas: <code>{MODELO_CSV}</code>. Separador <code>;</code> ou{" "}
-                  <code>,</code>; cabeçalho opcional; tipo <code>CREDITO</code> ou{" "}
-                  <code>DEBITO</code>.
-                </p>
-              )}
-              {form.formato === "OFX" && (
-                <p className="mt-1 text-xs text-muted">Extrato OFX (versão 1.x SGML ou 2.x XML).</p>
-              )}
-              {form.formato === "CNAB240" && (
-                <p className="mt-1 text-xs text-muted">
-                  Retorno CNAB240 (layout FEBRABAN, registros de 240 posições).
-                </p>
-              )}
-            </div>
+            </FormField>
 
-            <div>
-              <Label htmlFor="imp-nome">Nome do arquivo</Label>
+            <FormField
+              label="Nome do extrato"
+              required
+              error={vImport.erro("nome_arquivo")}
+              hint="Vem do arquivo escolhido. É como o extrato aparece na lista."
+            >
               <Input
                 id="imp-nome"
                 value={form.nome_arquivo}
                 onChange={(e) => setForm((s) => ({ ...s, nome_arquivo: e.target.value }))}
-                placeholder="extrato-julho.csv"
+                onBlur={vImport.tocar("nome_arquivo")}
+                placeholder="Ex.: extrato-julho.csv"
               />
-            </div>
+            </FormField>
 
             {form.formato === "CSV" && (
-              <div>
-                <Label htmlFor="imp-conteudo">Conteúdo</Label>
+              <FormField
+                label="Conteúdo"
+                opcional
+                error={vImport.erro("conteudo")}
+                hint="Também pode colar o conteúdo aqui em vez de escolher um arquivo."
+              >
                 <Textarea
                   id="imp-conteudo"
                   rows={8}
@@ -655,19 +714,16 @@ export default function ConciliacaoPage() {
                   onChange={(e) => setForm((s) => ({ ...s, conteudo: e.target.value }))}
                   placeholder={`${MODELO_CSV}\n01/07/2026;PAGAMENTO FORNECEDOR;DOC123;ACME LTDA;1234,56;DEBITO`}
                 />
-                <p className="mt-1 text-xs text-muted">
-                  Também pode colar o conteúdo aqui em vez de escolher um arquivo.
-                </p>
-              </div>
+              </FormField>
             )}
 
-            <p className="text-xs text-muted">
+            <p className="text-xs text-foreground-muted">
               Reimportar o mesmo arquivo na mesma conta é recusado — a checagem é por hash
               do conteúdo.
             </p>
 
             {erroImport && (
-              <p className="text-sm text-danger" role="alert">
+              <p className="text-sm text-danger-soft-foreground" role="alert">
                 {erroImport}
               </p>
             )}
@@ -687,8 +743,10 @@ export default function ConciliacaoPage() {
             </Button>
             <Button
               variant="danger"
-              onClick={() => desfazer.mutate()}
-              disabled={!motivoDesfazer.trim() || desfazer.isPending}
+              onClick={() => {
+                if (vDesfazer.conferir()) desfazer.mutate();
+              }}
+              loading={desfazer.isPending}
             >
               Desfazer conciliação
             </Button>
@@ -702,17 +760,22 @@ export default function ConciliacaoPage() {
               pendente e pode ser conciliado de novo. Se a solicitação de pagamento ligada a ele
               estava como conciliada, ela volta a &ldquo;paga&rdquo;.
             </p>
-            <div className="space-y-1">
-              <Label htmlFor="motivo-desfazer" required>Justificativa</Label>
+            <FormField
+              label="Justificativa"
+              required
+              error={vDesfazer.erro("motivo")}
+              hint="Fica registrada no histórico da conciliação. Até 255 caracteres."
+            >
               <Textarea
                 id="motivo-desfazer"
                 value={motivoDesfazer}
                 onChange={(e) => setMotivoDesfazer(e.target.value)}
+                onBlur={vDesfazer.tocar("motivo")}
                 maxLength={255}
-                placeholder="Explique o motivo..."
+                placeholder="Ex.: Casado com o pagamento errado — o certo é o de 12/07."
                 className="min-h-24"
               />
-            </div>
+            </FormField>
           </div>
         )}
       </Dialog>
@@ -727,14 +790,14 @@ export default function ConciliacaoPage() {
               Cancelar
             </Button>
             <Button
-              disabled={!movEscolhida || conciliar.isPending}
-              onClick={() =>
-                manual &&
-                conciliar.mutate({
-                  id_lancamento: manual.id,
-                  id_movimentacao: movEscolhida!,
-                })
-              }
+              loading={conciliar.isPending}
+              onClick={() => {
+                if (manual && vManual.conferir())
+                  conciliar.mutate({
+                    id_lancamento: manual.id,
+                    id_movimentacao: movEscolhida!,
+                  });
+              }}
             >
               Conciliar
             </Button>
@@ -745,14 +808,18 @@ export default function ConciliacaoPage() {
           <div className="space-y-4">
             <div className="rounded-card border border-border bg-surface-1 p-3 text-sm">
               <div className="font-medium">{manual.historico}</div>
-              <div className="text-muted">
+              <div className="text-foreground-muted">
                 {fmtData(manual.data)} · {fmtMoeda(manual.valor)}
                 {manual.favorecido ? ` · ${manual.favorecido}` : ""}
               </div>
             </div>
 
-            <div>
-              <Label htmlFor="mov-alvo">Pagamento a vincular</Label>
+            <FormField
+              label="Pagamento a vincular"
+              required
+              error={vManual.erro("mov")}
+              hint="Só saídas de pagamento desta conta. As já conciliadas são recusadas pelo servidor."
+            >
               <Select
                 id="mov-alvo"
                 value={movEscolhida ?? ""}
@@ -760,7 +827,7 @@ export default function ConciliacaoPage() {
                   setMovEscolhida(e.target.value === "" ? null : Number(e.target.value))
                 }
               >
-                <option value="">Selecione…</option>
+                <option value="">Escolha o pagamento</option>
                 {movsPagamento.map((m) => (
                   <option key={m.id} value={m.id}>
                     {fmtData(m.data)} — {fmtMoeda(m.valor)}
@@ -768,11 +835,7 @@ export default function ConciliacaoPage() {
                   </option>
                 ))}
               </Select>
-              <p className="mt-1 text-xs text-muted">
-                Só saídas de pagamento desta conta. As já conciliadas são recusadas pelo
-                servidor.
-              </p>
-            </div>
+            </FormField>
 
           </div>
         )}

@@ -56,7 +56,18 @@ export function Popover({
   children,
   className,
 }: PopoverProps) {
-  const { refs, floatingStyles } = useFloating({
+  // `open` liga o `isPositioned`: até a primeira conta de posição o painel
+  // nasce em (0,0), no alto da tela, e com a animação de entrada aparecia ali
+  // por um instante antes de pular para baixo do campo. Fica transparente até
+  // estar no lugar (opacidade, não `visibility`: continua na árvore de
+  // acessibilidade desde o primeiro quadro).
+  const { refs, floatingStyles, isPositioned } = useFloating({
+    open,
+    // Posição por top/left, não por `transform`: a animação de entrada
+    // (scale-in) também anima `transform` e, enquanto rodava (~150 ms),
+    // apagava o translate — o painel abria no canto (0,0) da tela e só
+    // depois pulava para baixo do campo. Era o "aparece lá em cima primeiro".
+    transform: false,
     placement,
     strategy: "fixed",
     whileElementsMounted: autoUpdate,
@@ -87,7 +98,14 @@ export function Popover({
       onClose();
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        // Escape fecha só o painel. Sem isto o mesmo Escape chegava ao
+        // `window`, onde o Dialog ouve, e fechava o diálogo inteiro junto —
+        // perdendo o que já estava preenchido. (Listener do document roda
+        // antes do do window na subida.)
+        e.stopPropagation();
+        onClose();
+      }
     }
     document.addEventListener("mousedown", onDocMouseDown);
     document.addEventListener("keydown", onKey);
@@ -99,13 +117,26 @@ export function Popover({
 
   if (!open || typeof document === "undefined") return null;
 
+  // Aberto de dentro de um diálogo, o painel sobe para `z-popover`: no
+  // `z-dropdown` (abaixo de `z-modal`) a lista de um campo de busca abria
+  // ATRÁS do diálogo. Fora de diálogo continua em `z-dropdown`, sob o
+  // cabeçalho fixo (ver `margens`).
+  const dentroDeDialogo = !!anchorRef.current?.closest('[role="dialog"]');
+
   return createPortal(
     <div
       ref={refs.setFloating}
       data-popover=""
-      style={floatingStyles}
+      style={
+        isPositioned
+          ? floatingStyles
+          : // Transparente, sem animação e sem receber clique — a entrada
+            // (scale-in) só começa quando o painel já está no lugar.
+            { ...floatingStyles, opacity: 0, animation: "none", pointerEvents: "none" }
+      }
       className={cn(
-        "z-dropdown flex flex-col overflow-hidden rounded-dropdown border border-border bg-card shadow-dropdown origin-top animate-scale-in",
+        dentroDeDialogo ? "z-popover" : "z-dropdown",
+        "flex flex-col overflow-hidden rounded-dropdown border border-border bg-card shadow-dropdown origin-top animate-scale-in",
         className,
       )}
     >

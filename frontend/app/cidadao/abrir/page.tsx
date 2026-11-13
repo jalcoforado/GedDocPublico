@@ -3,23 +3,22 @@
 import { Carregando } from "@/components/ui/carregando";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import {
-  ArrowLeft,
-  ArrowRight,
-  Check,
-  CheckCircle2,
-  FileText,
-  Paperclip,
-  Upload,
-  X,
-} from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Paperclip, PenSquare } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
+import { problemaDoArquivo, tamanhoLegivel } from "@/components/cidadao/formato";
+import { marcarProtocoloRecebido } from "@/components/cidadao/ProtocoloRecebido";
+import { SeletorArquivo } from "@/components/cidadao/SeletorArquivo";
+import { useErrosDepoisDaTentativa } from "@/components/cidadao/useErrosDepoisDaTentativa";
+import { Alert } from "@/components/ui/alert";
+import { BarraAcoesFormulario } from "@/components/ui/barra-acoes-formulario";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
+import { EscolhaSegmentada } from "@/components/ui/escolha-segmentada";
+import { FormField, focarPrimeiroInvalido } from "@/components/ui/form-field";
+import { PageHeader } from "@/components/ui/page-header";
+import { SectionCard } from "@/components/ui/section-card";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
@@ -28,34 +27,29 @@ import { useRequireCidadao } from "@/lib/cidadao-auth";
 import { cn } from "@/lib/utils";
 
 type Step = 1 | 2 | 3;
+const MIN_CHARS = 10;
 
-// Tem de espelhar `max_upload_size_mb` do backend (app/config.py, hoje 20 e
-// também no MAX_UPLOAD_SIZE_MB do compose). Anunciava 25: o portal aceitava um
-// arquivo de 22 MB, subia tudo e só então o servidor recusava com "Arquivo
-// excede 20 MB". Ao mudar o limite no backend, mudar aqui junto.
-const MAX_UPLOAD_MB = 20;
-const ALLOWED_EXT = [
-  "pdf", "png", "jpg", "jpeg", "gif", "webp",
-  "doc", "docx", "xls", "xlsx", "odt", "ods",
+const ETAPAS: { n: Step; label: string }[] = [
+  { n: 1, label: "O pedido" },
+  { n: 2, label: "Anexo" },
+  { n: 3, label: "Conferir" },
 ];
 
-function extOf(name: string): string {
-  const i = name.lastIndexOf(".");
-  return i >= 0 ? name.slice(i + 1).toLowerCase() : "";
-}
+/**
+ * O que cada espécie quer dizer, em palavras de quem não é do protocolo.
+ * Chave = `codigo` da espécie (o backend oferece Requerimento, Petição e
+ * Declaração ao portal). Espécie sem texto aqui aparece só com o nome.
+ */
+const ESPECIE_EM_PALAVRAS: Record<string, string> = {
+  REQUERIMENTO: "Para pedir algo à prefeitura: um documento, um serviço, uma autorização.",
+  PETICAO: "Para um pedido formal a uma autoridade, explicando os seus motivos.",
+  DECLARACAO: "Para informar ou declarar um fato à prefeitura.",
+};
 
 function StepIndicator({ step }: { step: Step }) {
-  const items: { n: Step; label: string }[] = [
-    { n: 1, label: "Dados" },
-    { n: 2, label: "Documento" },
-    { n: 3, label: "Confirmação" },
-  ];
   return (
-    <ol
-      aria-label="Etapas"
-      className="flex items-center justify-between gap-1 sm:gap-2"
-    >
-      {items.map((it, idx) => {
+    <ol aria-label="Etapas" className="flex items-center gap-2">
+      {ETAPAS.map((it, idx) => {
         const done = step > it.n;
         const active = step === it.n;
         return (
@@ -66,10 +60,10 @@ function StepIndicator({ step }: { step: Step }) {
           >
             <div
               className={cn(
-                "flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-xs font-semibold transition-colors",
+                "flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-xs font-semibold transition-colors duration-fast",
                 done && "border-primary bg-primary text-primary-foreground",
-                active && !done && "border-primary bg-card text-primary",
-                !done && !active && "border-border bg-card text-muted-foreground",
+                active && "border-primary bg-card text-primary ring-2 ring-primary/20",
+                !done && !active && "border-border bg-card text-foreground-muted",
               )}
               aria-hidden="true"
             >
@@ -77,18 +71,17 @@ function StepIndicator({ step }: { step: Step }) {
             </div>
             <span
               className={cn(
-                "hidden text-xs font-medium sm:inline",
-                active ? "text-foreground" : "text-muted-foreground",
+                "whitespace-nowrap text-xs font-medium",
+                active ? "text-foreground" : "text-foreground-muted",
               )}
             >
+              <span className="sr-only">Etapa {it.n} de {ETAPAS.length}: </span>
               {it.label}
+              {done && <span className="sr-only"> (feita)</span>}
             </span>
-            {idx < items.length - 1 && (
+            {idx < ETAPAS.length - 1 && (
               <div
-                className={cn(
-                  "h-px flex-1 transition-colors",
-                  done ? "bg-primary" : "bg-border",
-                )}
+                className={cn("h-px min-w-3 flex-1 transition-colors duration-fast", done ? "bg-primary" : "bg-border")}
                 aria-hidden="true"
               />
             )}
@@ -99,10 +92,40 @@ function StepIndicator({ step }: { step: Step }) {
   );
 }
 
+function Resumo({
+  rotulo,
+  onAlterar,
+  children,
+}: {
+  rotulo: string;
+  onAlterar?: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b border-border py-3 first:pt-0 last:border-0 last:pb-0">
+      <div className="min-w-0">
+        <dt className="text-xs font-medium text-foreground-muted">{rotulo}</dt>
+        <dd className="mt-0.5 whitespace-pre-wrap break-words text-sm text-foreground">{children}</dd>
+      </div>
+      {onAlterar && (
+        <button
+          type="button"
+          onClick={onAlterar}
+          aria-label={`Alterar: ${rotulo}`}
+          className="-mr-2 inline-flex min-h-9 shrink-0 items-center rounded-md px-2 text-sm font-medium text-primary transition-colors duration-fast hover:bg-muted"
+        >
+          Alterar
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function CidadaoAbrirPage() {
   const router = useRouter();
   const toast = useToast();
   const { cidadao, loading } = useRequireCidadao();
+  const passoRef = useRef<HTMLDivElement>(null);
 
   const [step, setStep] = useState<Step>(1);
 
@@ -132,9 +155,9 @@ export default function CidadaoAbrirPage() {
 
   const enviarM = useMutation({
     mutationFn: async () => {
-      if (!idAssunto) throw new Error("Escolha um assunto");
-      if (corpo.trim().length < 10)
-        throw new Error("Descrição precisa ter no mínimo 10 caracteres");
+      if (!idAssunto) throw new Error("Escolha sobre o que é o pedido.");
+      if (corpo.trim().length < MIN_CHARS)
+        throw new Error(`A descrição precisa ter pelo menos ${MIN_CHARS} letras.`);
       const created = await api.cidadao.abrirProcesso({
         id_assunto: idAssunto,
         corpo,
@@ -146,13 +169,14 @@ export default function CidadaoAbrirPage() {
           await api.cidadao.uploadAnexo(created.id, file, file.name);
         } catch (e) {
           toast.error(
-            `Processo aberto, mas falha ao anexar documento: ${(e as Error).message}`,
+            `O processo foi aberto, mas o documento não subiu: ${(e as Error).message}. Você pode anexá-lo de novo na página do processo.`,
           );
         }
       }
       return created;
     },
     onSuccess: (data) => {
+      marcarProtocoloRecebido(data.id);
       toast.success(
         data.nup ? `Protocolado: ${data.nup}` : `Protocolado: ${data.numero_processo}`,
       );
@@ -161,90 +185,132 @@ export default function CidadaoAbrirPage() {
     onError: (e: Error) => setErr(e.message),
   });
 
-  if (loading) return <Carregando className="text-sm text-muted-foreground" />;
+  const trimmedLen = corpo.trim().length;
+  const v = useErrosDepoisDaTentativa({
+    assunto: idAssunto ? null : "Escolha o tema do pedido. Se nenhum servir, escolha o mais parecido.",
+    corpo:
+      trimmedLen >= MIN_CHARS
+        ? null
+        : trimmedLen === 0
+          ? "Conte o que você precisa."
+          : `Escreva um pouco mais: faltam ${MIN_CHARS - trimmedLen} letras.`,
+  });
+
+  if (loading) return <Carregando className="text-sm text-foreground-muted" />;
   if (!cidadao) return null;
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+  function handleFile(f: File | null) {
     setFileErr(null);
-    const f = e.target.files?.[0] ?? null;
     if (!f) {
       setFile(null);
       return;
     }
-    const ext = extOf(f.name);
-    if (!ALLOWED_EXT.includes(ext)) {
-      setFileErr(
-        `Tipo .${ext} não permitido. Use: ${ALLOWED_EXT.join(", ")}`,
-      );
-      setFile(null);
-      return;
-    }
-    if (f.size > MAX_UPLOAD_MB * 1024 * 1024) {
-      setFileErr(`Arquivo excede ${MAX_UPLOAD_MB} MB`);
+    const problema = problemaDoArquivo(f);
+    if (problema) {
+      setFileErr(problema);
       setFile(null);
       return;
     }
     setFile(f);
   }
 
-  const canAdvance1 = !!idAssunto && corpo.trim().length >= 10;
-  const canAdvance2 = !fileErr; // arquivo é opcional
+  function irPara(n: Step) {
+    setStep(n);
+    // Nova etapa começa do topo — no celular, o botão fica lá embaixo.
+    setTimeout(() => passoRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+  }
+
+  function avancarDo1() {
+    if (!v.tentar(["assunto", "corpo"])) {
+      setTimeout(() => focarPrimeiroInvalido(passoRef.current ?? document), 0);
+      return;
+    }
+    irPara(2);
+  }
+
   const assuntoSelecionado: CidadaoAssunto | undefined = assuntosQ.data?.find(
     (a) => a.id === idAssunto,
   );
-  const especieSelecionada: CidadaoEspecie | undefined = especiesQ.data?.find(
-    (e) => e.id === idEspecie,
-  );
+  const especies = especiesQ.data ?? [];
+  const especieSelecionada: CidadaoEspecie | undefined = especies.find((e) => e.id === idEspecie);
+  const faltando = [
+    !idAssunto && "o tema",
+    trimmedLen < MIN_CHARS && "a descrição",
+  ].filter(Boolean) as string[];
 
   return (
     <div className="mx-auto max-w-2xl space-y-4">
       <Link
         href="/cidadao/processos"
-        className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+        className="inline-flex min-h-9 items-center gap-1 rounded text-sm text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <ArrowLeft className="h-4 w-4" />
-        Voltar
+        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+        Voltar para Meus processos
       </Link>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Abrir novo processo</CardTitle>
-          <div className="mt-4">
-            <StepIndicator step={step} />
-          </div>
-        </CardHeader>
-        <CardContent>
-          {step === 1 && (
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="assunto" required>
-                  Assunto
-                </Label>
-                <Select
-                  id="assunto"
-                  value={idAssunto ?? ""}
-                  onChange={(e) =>
-                    setIdAssunto(e.target.value ? Number(e.target.value) : null)
-                  }
-                  required
-                >
-                  <option value="">Selecione...</option>
-                  {assuntosQ.data?.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.assunto}
-                      {a.tipo_processo ? ` (${a.tipo_processo})` : ""}
-                    </option>
-                  ))}
-                </Select>
-              </div>
+      <PageHeader
+        icon={PenSquare}
+        title="Abrir processo"
+        description="Faça um pedido à prefeitura. No fim você recebe um número para acompanhar."
+      />
 
-              <div>
-                <Label>Tipo do documento</Label>
-                <p className="mb-2 text-xs text-muted-foreground">
-                  Como você está se manifestando? (opcional)
-                </p>
+      <StepIndicator step={step} />
+
+      <div ref={passoRef} className="scroll-mt-24 space-y-4">
+        {step === 1 && (
+          <SectionCard title="O que você precisa" description="Escolha o tema e conte, com as suas palavras, o que deseja.">
+            <FormField
+              label="Sobre o que é o seu pedido?"
+              required
+              error={v.erro("assunto")}
+              hint="Escolha o tema mais próximo. Se nenhum servir, escolha o mais parecido e explique na descrição."
+            >
+              <Select
+                id="assunto"
+                value={idAssunto ?? ""}
+                onChange={(e) => setIdAssunto(e.target.value ? Number(e.target.value) : null)}
+                onBlur={v.sair("assunto")}
+              >
+                <option value="">{assuntosQ.isLoading ? "Carregando os temas…" : "Escolha um tema…"}</option>
+                {assuntosQ.data?.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.assunto}
+                    {a.tipo_processo ? ` (${a.tipo_processo})` : ""}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+
+            {especies.length > 0 && especies.length <= 3 ? (
+              <EscolhaSegmentada
+                nome="especie"
+                titulo="Que tipo de pedido é este? (opcional)"
+                moldura={false}
+                valor={idEspecie ? String(idEspecie) : ""}
+                onChange={(val) => setIdEspecie(val ? Number(val) : null)}
+                opcoes={[
+                  {
+                    valor: "",
+                    rotulo: "Não sei",
+                    descricao: "Tudo bem: a prefeitura classifica o pedido para você.",
+                  },
+                  ...especies.map((e) => ({
+                    valor: String(e.id),
+                    rotulo: e.nome,
+                    descricao: ESPECIE_EM_PALAVRAS[e.codigo],
+                  })),
+                ]}
+              />
+            ) : especies.length > 3 ? (
+              // Muitas espécies: botões que quebram linha, um toque marca e outro desmarca.
+              <fieldset>
+                <legend className="mb-1 text-sm font-medium text-foreground">
+                  Que tipo de pedido é este?
+                  <span className="ml-1.5 text-xs font-normal text-foreground-subtle">opcional</span>
+                </legend>
+                <p className="mb-2 text-xs text-foreground-muted">Se não souber, deixe sem marcar — a prefeitura classifica.</p>
                 <div className="flex flex-wrap gap-2">
-                  {especiesQ.data?.map((e) => {
+                  {especies.map((e) => {
                     const active = idEspecie === e.id;
                     return (
                       <button
@@ -253,10 +319,10 @@ export default function CidadaoAbrirPage() {
                         onClick={() => setIdEspecie(active ? null : e.id)}
                         aria-pressed={active}
                         className={cn(
-                          "rounded-full border px-4 py-1.5 text-sm font-medium transition-colors",
+                          "min-h-11 rounded-full border px-4 text-sm font-medium transition-colors duration-fast",
                           active
                             ? "border-primary bg-primary text-primary-foreground"
-                            : "border-border bg-card text-foreground hover:border-primary/50",
+                            : "border-border bg-card text-foreground hover:border-primary/50 hover:bg-muted",
                         )}
                       >
                         {e.nome}
@@ -264,239 +330,152 @@ export default function CidadaoAbrirPage() {
                     );
                   })}
                 </div>
-              </div>
+              </fieldset>
+            ) : null}
 
-              <div>
-                <Label htmlFor="corpo" required>
-                  Descreva sua solicitação
-                </Label>
-                <Textarea
-                  id="corpo"
-                  value={corpo}
-                  onChange={(e) => setCorpo(e.target.value)}
-                  required
-                  minLength={10}
-                  rows={6}
-                  placeholder="Inclua o máximo de detalhes possível."
-                />
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Mínimo 10 caracteres ({corpo.trim().length}/10).
-                </p>
-              </div>
+            <FormField
+              label="Conte o que você precisa"
+              required
+              error={v.erro("corpo")}
+              hint={
+                <>
+                  Diga o quê, onde e desde quando — quanto mais claro, mais rápido o atendimento.{" "}
+                  <span className="tabular-nums">
+                    ({trimmedLen < MIN_CHARS ? `mínimo ${MIN_CHARS} letras, ${trimmedLen} até agora` : "ok"})
+                  </span>
+                </>
+              }
+            >
+              <Textarea
+                id="corpo"
+                value={corpo}
+                onChange={(e) => setCorpo(e.target.value)}
+                onBlur={v.sair("corpo")}
+                rows={6}
+                placeholder="Ex.: A lâmpada do poste em frente ao nº 120 da Rua das Flores está apagada há uma semana."
+              />
+            </FormField>
 
-              <div>
-                <Label htmlFor="obs">Observação adicional (opcional)</Label>
-                <Textarea
-                  id="obs"
-                  value={obs}
-                  onChange={(e) => setObs(e.target.value)}
-                  rows={3}
-                />
-              </div>
+            <FormField
+              label="Mais alguma informação?"
+              opcional
+              hint="Um ponto de referência, o melhor horário para falar com você…"
+            >
+              <Textarea id="obs" value={obs} onChange={(e) => setObs(e.target.value)} rows={3} />
+            </FormField>
+          </SectionCard>
+        )}
 
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <Button
-                  type="button"
-                  disabled={!canAdvance1}
-                  onClick={() => setStep(2)}
-                >
-                  Avançar
-                  <ArrowRight className="ml-1 h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          )}
+        {step === 2 && (
+          <SectionCard
+            title="Quer anexar um documento?"
+            description="Uma foto ou um arquivo que ajude a entender o pedido. Se não tiver, é só continuar."
+          >
+            <FormField
+              label="Documento"
+              opcional
+              error={fileErr ?? undefined}
+              hint="O arquivo segue junto com o pedido."
+            >
+              <SeletorArquivo id="file-input" arquivo={file} onEscolher={handleFile} />
+            </FormField>
+          </SectionCard>
+        )}
 
-          {step === 2 && (
-            <div className="space-y-4">
-              <div>
-                <Label>Documento (opcional)</Label>
-                <p className="mb-2 text-xs text-muted-foreground">
-                  Anexe um arquivo de até {MAX_UPLOAD_MB} MB. Será publicado junto
-                  com a solicitação. Formatos: {ALLOWED_EXT.join(", ")}.
-                </p>
-
-                {file ? (
-                  <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/30 p-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-                      <FileText className="h-5 w-5" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">
-                        {file.name}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {(file.size / 1024).toFixed(1)} KB · .{extOf(file.name)}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFile(null);
-                        setFileErr(null);
-                      }}
-                      className="text-muted-foreground hover:text-danger"
-                      aria-label="Remover arquivo"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                ) : (
-                  <label
-                    htmlFor="file-input"
-                    className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border bg-muted/20 px-4 py-8 text-center transition-colors hover:border-primary/50 hover:bg-muted/40"
-                  >
-                    <Upload className="h-8 w-8 text-muted-foreground" />
-                    <div className="text-sm font-medium text-foreground">
-                      Selecionar arquivo
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      ou pular esta etapa
-                    </div>
-                    <input
-                      id="file-input"
-                      type="file"
-                      onChange={handleFileChange}
-                      accept={ALLOWED_EXT.map((e) => `.${e}`).join(",")}
-                      className="sr-only"
-                    />
-                  </label>
-                )}
-
-                {fileErr && (
-                  <div
-                    role="alert"
-                    className="mt-2 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
-                  >
-                    {fileErr}
-                  </div>
-                )}
-              </div>
-
-              <div className="flex items-center justify-between gap-2 pt-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => setStep(1)}
-                >
-                  <ArrowLeft className="mr-1 h-4 w-4" />
-                  Voltar
-                </Button>
-                <Button
-                  type="button"
-                  disabled={!canAdvance2}
-                  onClick={() => setStep(3)}
-                >
-                  Avançar
-                  <ArrowRight className="ml-1 h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {step === 3 && (
-            <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Confirme os dados abaixo antes de enviar.
-              </p>
-
-              <dl className="space-y-3 rounded-lg border border-border bg-muted/20 p-4 text-sm">
-                <div>
-                  <dt className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Assunto
-                  </dt>
-                  <dd className="font-medium">
-                    {assuntoSelecionado?.assunto ?? "—"}
-                    {assuntoSelecionado?.tipo_processo
-                      ? ` (${assuntoSelecionado.tipo_processo})`
-                      : ""}
-                  </dd>
-                </div>
-                {especieSelecionada && (
-                  <div>
-                    <dt className="text-xs uppercase tracking-wide text-muted-foreground">
-                      Tipo de documento
-                    </dt>
-                    <dd>{especieSelecionada.nome}</dd>
-                  </div>
-                )}
-                <div>
-                  <dt className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Descrição
-                  </dt>
-                  <dd className="whitespace-pre-wrap">{corpo}</dd>
-                </div>
-                {obs && (
-                  <div>
-                    <dt className="text-xs uppercase tracking-wide text-muted-foreground">
-                      Observação
-                    </dt>
-                    <dd className="whitespace-pre-wrap">{obs}</dd>
-                  </div>
-                )}
-                <div>
-                  <dt className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Documento
-                  </dt>
-                  <dd className="flex items-center gap-2">
-                    {file ? (
-                      <>
-                        <Paperclip className="h-4 w-4 text-muted-foreground" />
-                        {file.name}{" "}
-                        <span className="text-xs text-muted-foreground">
-                          ({(file.size / 1024).toFixed(1)} KB)
-                        </span>
-                      </>
-                    ) : (
-                      <span className="text-muted-foreground">
-                        Nenhum arquivo anexado
-                      </span>
-                    )}
-                  </dd>
-                </div>
-              </dl>
-
-              {err && (
-                <div
-                  role="alert"
-                  className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
-                >
-                  {err}
-                </div>
+        {step === 3 && (
+          <SectionCard
+            title="Confira antes de enviar"
+            description="Se algo estiver errado, toque em Alterar. Depois de enviado, o pedido não pode ser editado."
+          >
+            <dl>
+              <Resumo rotulo="Sobre o quê" onAlterar={() => irPara(1)}>
+                {assuntoSelecionado?.assunto ?? "—"}
+                {assuntoSelecionado?.tipo_processo ? ` (${assuntoSelecionado.tipo_processo})` : ""}
+              </Resumo>
+              {especieSelecionada && (
+                <Resumo rotulo="Tipo de pedido" onAlterar={() => irPara(1)}>
+                  {especieSelecionada.nome}
+                </Resumo>
               )}
+              <Resumo rotulo="O que você precisa" onAlterar={() => irPara(1)}>
+                {corpo}
+              </Resumo>
+              {obs && (
+                <Resumo rotulo="Mais informações" onAlterar={() => irPara(1)}>
+                  {obs}
+                </Resumo>
+              )}
+              <Resumo rotulo="Documento" onAlterar={() => irPara(2)}>
+                {file ? (
+                  <span className="inline-flex items-center gap-2">
+                    <Paperclip className="h-4 w-4 shrink-0 text-foreground-muted" aria-hidden="true" />
+                    <span className="break-all">{file.name}</span>
+                    <span className="text-xs text-foreground-muted">({tamanhoLegivel(file.size)})</span>
+                  </span>
+                ) : (
+                  <span className="text-foreground-muted">Nenhum arquivo anexado</span>
+                )}
+              </Resumo>
+            </dl>
+          </SectionCard>
+        )}
 
-              <div className="flex items-center justify-between gap-2 pt-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => setStep(2)}
-                  disabled={enviarM.isPending}
-                >
-                  <ArrowLeft className="mr-1 h-4 w-4" />
-                  Voltar
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    setErr(null);
-                    enviarM.mutate();
-                  }}
-                  disabled={enviarM.isPending}
-                >
-                  {enviarM.isPending ? (
-                    "Enviando..."
-                  ) : (
-                    <>
-                      <CheckCircle2 className="mr-1 h-4 w-4" />
-                      Confirmar e enviar
-                    </>
-                  )}
-                </Button>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        {err && <Alert intent="danger">{err}</Alert>}
+      </div>
+
+      {/* Acima da barra de navegação do celular (ver `--barra-inferior` no layout). */}
+      <BarraAcoesFormulario
+        className="bottom-[var(--barra-inferior,0px)] sm:bottom-0"
+        status={
+          step === 1
+            ? faltando.length > 0
+              ? `Etapa 1 de 3 — falta ${faltando.join(" e ")}.`
+              : "Etapa 1 de 3 — pronta."
+            : step === 2
+              ? "Etapa 2 de 3 — o anexo é opcional."
+              : "Etapa 3 de 3 — tudo certo? Envie."
+        }
+      >
+        {step === 1 ? (
+          <Button asChild variant="ghost">
+            <Link href="/cidadao/processos">Cancelar</Link>
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => irPara(step === 3 ? 2 : 1)}
+            disabled={enviarM.isPending}
+          >
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            Voltar
+          </Button>
+        )}
+        {step === 1 && (
+          <Button type="button" onClick={avancarDo1}>
+            Continuar
+            <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        )}
+        {step === 2 && (
+          <Button type="button" onClick={() => irPara(3)}>
+            {file ? "Continuar" : "Continuar sem anexo"}
+            <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        )}
+        {step === 3 && (
+          <Button
+            type="button"
+            loading={enviarM.isPending}
+            onClick={() => {
+              setErr(null);
+              enviarM.mutate();
+            }}
+          >
+            {enviarM.isPending ? "Enviando…" : "Abrir processo"}
+          </Button>
+        )}
+      </BarraAcoesFormulario>
     </div>
   );
 }

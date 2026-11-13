@@ -7,7 +7,9 @@ import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
@@ -51,7 +53,7 @@ export default function VencendoPrazoPage() {
         description="Lista os processos cuja fase intermediária da temporalidade documental termina dentro da janela escolhida. Use pra planejar eliminação ou transferência ao arquivo permanente."
       />
 
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-4 shadow-xs">
+      <FilterBar>
         <div className="w-44">
           <Label htmlFor="dias-select" className="text-xs">
             Janela
@@ -68,16 +70,26 @@ export default function VencendoPrazoPage() {
             <option value={3650}>Próximos 10 anos</option>
           </Select>
         </div>
-        <label className="flex cursor-pointer items-center gap-2 text-sm">
-          <input
-            type="checkbox"
+        <label className="flex h-11 cursor-pointer items-center gap-2 text-sm">
+          <Checkbox
             checked={incluirPermanentes}
             onChange={(e) => setIncluirPermanentes(e.target.checked)}
-            className="h-4 w-4 accent-brand"
           />
           Incluir destino &ldquo;Guarda permanente&rdquo;
         </label>
-        <div className="ml-auto text-sm text-foreground-muted">
+        {/* Padrão: 12 meses, sem guarda permanente. */}
+        {(dias !== 365 || incluirPermanentes) && (
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setDias(365);
+              setIncluirPermanentes(false);
+            }}
+          >
+            Limpar
+          </Button>
+        )}
+        <div className="ml-auto flex h-11 items-center text-sm text-foreground-muted">
           {reportQ.isLoading ? (
             <Loader2 className="inline h-4 w-4 animate-spin" />
           ) : (
@@ -87,7 +99,7 @@ export default function VencendoPrazoPage() {
             </span>
           )}
         </div>
-      </div>
+      </FilterBar>
 
       <section className="overflow-hidden rounded-xl border border-border bg-card shadow-xs">
         {reportQ.isLoading && (
@@ -149,7 +161,7 @@ export default function VencendoPrazoPage() {
                         <span
                           className={
                             urgent
-                              ? "font-semibold text-warning"
+                              ? "font-semibold text-warning-soft-foreground"
                               : "text-foreground-muted"
                           }
                         >
