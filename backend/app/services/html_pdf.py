@@ -56,6 +56,29 @@ th, td {{ border: 1px solid #ccc; padding: 4px 8px; text-align: left; }}
 th {{ background: #f2f2f2; }}
 """
 
+# Público: a pré-visualização do editor (SI-30) recebe ESTE texto por
+# `GET /templates-documento/estilo-impressao` — uma fonte só, para a tela não
+# mostrar um documento e o PDF imprimir outro.
+CSS_DOCUMENTO = _CSS
+
+# Só da tela: a moldura da pré-visualização — papel branco A4 sobre fundo cinza,
+# com as margens do `@page` acima, e o destaque do `{{campo}}` que sobrou (sai
+# literal no PDF). Mora aqui, junto do estilo do documento, porque é aparência
+# do DOCUMENTO, não da aplicação (o tema escuro não pinta o papel).
+CSS_PRE_VISUALIZACAO = """
+html { background: #d9dce1; }
+body { margin: 0; padding: 16px 0; background: transparent; }
+.folha {
+    box-sizing: border-box; width: 21cm; min-height: 29.7cm;
+    margin: 0 auto; padding: 2.5cm 2cm; background: #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,.18), 0 8px 24px rgba(0,0,0,.08);
+}
+mark.campo-pendente {
+    background: #fde68a; color: #78350f; border-radius: 3px; padding: 0 2px;
+    outline: 1px dashed #d97706;
+}
+"""
+
 # Casa com a URL que `api.editorImagens.upload` devolve (routers/minutas.py::imagens_router).
 _IMG_SRC_RE = re.compile(
     r'src="[^"]*/api/v2/editor-imagens/([a-f0-9]{32}\.(png|jpe?g|gif|webp))"'
