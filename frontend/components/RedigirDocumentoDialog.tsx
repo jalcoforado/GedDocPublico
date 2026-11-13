@@ -355,6 +355,8 @@ export function RedigirDocumentoDialog({
                   rotulo: "Google Docs",
                   icon: ExternalLink,
                   descricao: "Abre o documento no Google Docs, numa nova aba.",
+                  // Sem a integração no servidor não há o que conectar (SI-32).
+                  disabled: !googleConfigurado,
                 },
               ]}
             />
