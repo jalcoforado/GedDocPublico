@@ -36,7 +36,7 @@ const CARDS = [
   {
     href: "/m/frota/solicitacoes",
     icon: ClipboardList,
-    title: "Solicitações de Veículo",
+    title: "Solicitações de veículo",
     desc: "Pedidos de uso de veículo: finalidade, destino, datas previstas e fluxo de aprovação.",
   },
   {

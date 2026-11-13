@@ -1,9 +1,8 @@
 {
   "_comentario": "Ratchet do design:check. Números só podem CAIR. Regrave com `npm run design:check -- --update` ao queimar débito — nunca para acomodar código novo.",
-  "total": 10,
+  "total": 9,
   "arquivos": {
     "app/(app)/m/administracao/organograma/page.tsx": 3,
-    "app/(app)/m/frota/solicitacoes/page.tsx": 1,
     "components/admin/TenantEditForm.tsx": 1,
     "components/organograma/OrganogramaDiagramView.tsx": 1,
     "components/organograma/OrganogramaListView.tsx": 1,

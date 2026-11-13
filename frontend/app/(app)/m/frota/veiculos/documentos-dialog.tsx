@@ -1,16 +1,21 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Inbox, Plus } from "lucide-react";
+import { Inbox, Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
+import { useErrosDoFormulario } from "@/components/frota/formulario";
+import { fmtData } from "@/components/pagamentos/format";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { EscolhaSegmentada, type OpcaoEscolha } from "@/components/ui/escolha-segmentada";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
@@ -32,11 +37,13 @@ const TIPOS: { value: TipoDocumento; label: string }[] = [
   { value: "vistoria", label: "Vistoria" },
   { value: "outro", label: "Outro" },
 ];
-const STATUS: { value: DocumentoStatus; label: string }[] = [
-  { value: "ativo", label: "Ativo" },
-  { value: "vencido", label: "Vencido" },
-  { value: "substituido", label: "Substituído" },
-  { value: "cancelado", label: "Cancelado" },
+// Quatro situações: à vista no formulário, com a consequência de cada uma
+// (só ativo e vencido entram nos alertas — services/frota.py).
+const STATUS_ESCOLHA: OpcaoEscolha<DocumentoStatus>[] = [
+  { valor: "ativo", rotulo: "Ativo", descricao: "Em vigor. Entra nos alertas de vencimento." },
+  { valor: "vencido", rotulo: "Vencido", descricao: "Passou da validade e segue nos alertas até ser renovado." },
+  { valor: "substituido", rotulo: "Substituído", descricao: "Trocado por um mais novo. Sai dos alertas." },
+  { valor: "cancelado", rotulo: "Cancelado", descricao: "Não vale mais. Sai dos alertas." },
 ];
 const TIPO_LABEL: Record<string, string> = Object.fromEntries(
   TIPOS.map((t) => [t.value, t.label]),
@@ -67,11 +74,6 @@ function nullify(v: string): string | null {
   return t === "" ? null : t;
 }
 
-function fmtData(d: string | null): string {
-  if (!d) return "—";
-  return new Date(`${d}T00:00:00`).toLocaleDateString("pt-BR");
-}
-
 /** Badge de vencimento calculado a partir de data_vencimento (cliente). */
 function badgeVencimento(venc: string): { intent: "danger" | "warning" | "success"; label: string } {
   const hoje = new Date();
@@ -82,6 +84,22 @@ function badgeVencimento(venc: string): { intent: "danger" | "warning" | "succes
   if (d < hoje) return { intent: "danger", label: "Vencido" };
   if (d <= em30) return { intent: "warning", label: "Vence em breve" };
   return { intent: "success", label: "Válido" };
+}
+
+/** Dica sob o vencimento: o que a data escolhida significa hoje. */
+function dicaVencimento(venc: string): { texto: string; className: string } {
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const dias = Math.round((new Date(`${venc}T00:00:00`).getTime() - hoje.getTime()) / 86_400_000);
+  if (Number.isNaN(dias)) return { texto: "", className: "" };
+  if (dias < 0) return { texto: "Esta data já passou: o documento está vencido.", className: "font-medium text-danger-soft-foreground" };
+  if (dias === 0) return { texto: "Vence hoje.", className: "font-medium text-warning-soft-foreground" };
+  if (dias <= 30)
+    return {
+      texto: `Vence em ${dias} ${dias === 1 ? "dia" : "dias"} — já aparece nos alertas.`,
+      className: "font-medium text-warning-soft-foreground",
+    };
+  return { texto: `Vence em ${dias} dias.`, className: "" };
 }
 
 interface Props {
@@ -103,6 +121,17 @@ export function DocumentosDialog({ veiculo, open, onClose }: Props) {
   const [editing, setEditing] = useState<VeiculoDocumento | null>(null);
   const [form, setForm] = useState<DocForm>(EMPTY);
   const [err, setErr] = useState<string | null>(null);
+  // Mesmas regras do backend: vencimento obrigatório; emissão, se houver, não
+  // depois dele (schemas/frota.py::VeiculoDocumentoBase).
+  const campos = useErrosDoFormulario({
+    data_emissao:
+      form.data_emissao && form.data_vencimento && form.data_emissao > form.data_vencimento
+        ? "A emissão não pode ser depois do vencimento."
+        : undefined,
+    data_vencimento: form.data_vencimento ? undefined : "Informe a data de vencimento.",
+  });
+  // A situação da data escolhida, já no campo: a mesma régua do selo da lista.
+  const vencimento = form.data_vencimento ? dicaVencimento(form.data_vencimento) : null;
 
   const docsQ = useQuery({
     queryKey: ["frota-documentos", veiculo?.id],
@@ -145,6 +174,7 @@ export function DocumentosDialog({ veiculo, open, onClose }: Props) {
     setEditing(null);
     setForm(EMPTY);
     setErr(null);
+    campos.limpar();
     setMode("form");
   }
 
@@ -160,6 +190,7 @@ export function DocumentosDialog({ veiculo, open, onClose }: Props) {
       observacoes: d.observacoes ?? "",
     });
     setErr(null);
+    campos.limpar();
     setMode("form");
   }
 
@@ -177,10 +208,7 @@ export function DocumentosDialog({ veiculo, open, onClose }: Props) {
 
   function salvar() {
     setErr(null);
-    if (!form.data_vencimento) {
-      setErr("Data de vencimento é obrigatória.");
-      return;
-    }
+    if (!campos.podeEnviar()) return;
     const payload = {
       tipo_documento: form.tipo_documento,
       numero: nullify(form.numero),
@@ -193,26 +221,24 @@ export function DocumentosDialog({ veiculo, open, onClose }: Props) {
     saveM.mutate(payload);
   }
 
-  const titulo = veiculo
-    ? mode === "form"
-      ? `${editing ? "Editar documento" : "Novo documento"} — ${veiculo.placa}`
-      : `Documentos — ${veiculo.placa}`
-    : "Documentos";
+  const titulo =
+    mode === "form" ? (editing ? "Editar documento" : "Novo documento") : "Documentos do veículo";
 
   return (
     <Dialog
       open={open}
       onClose={closeAll}
       title={titulo}
+      description={veiculo ? `Placa ${veiculo.placa}` : undefined}
       size="lg"
       footer={
         mode === "form" ? (
           <>
-            <Button variant="secondary" onClick={backToList}>
-              Voltar
+            <Button variant="ghost" onClick={backToList}>
+              Voltar à lista
             </Button>
-            <Button onClick={salvar} disabled={saveM.isPending}>
-              {saveM.isPending ? "Salvando..." : "Salvar"}
+            <Button type="submit" form="form-documento" loading={saveM.isPending}>
+              {editing ? "Salvar alterações" : "Cadastrar documento"}
             </Button>
           </>
         ) : (
@@ -269,18 +295,21 @@ export function DocumentosDialog({ veiculo, open, onClose }: Props) {
                         <Badge intent={b.intent}>{b.label}</Badge>
                       </TD>
                       <TD className="text-right">
-                        <div className="inline-flex gap-2">
-                          {canEdit && (
-                            <Button variant="secondary" size="sm" onClick={() => openEdit(d)}>
-                              Editar
-                            </Button>
-                          )}
-                          {canDelete && (
-                            <Button
-                              variant="danger"
-                              size="sm"
-                              disabled={deleteM.isPending}
-                              onClick={async () => {
+                        <AcoesDaLinha
+                          acoes={[
+                            {
+                              label: "Editar",
+                              icon: Pencil,
+                              oculta: !canEdit,
+                              onClick: () => openEdit(d),
+                            },
+                            {
+                              label: "Excluir",
+                              icon: Trash2,
+                              perigo: true,
+                              oculta: !canDelete,
+                              disabled: deleteM.isPending,
+                              onClick: async () => {
                                 const ok = await confirm({
                                   title: "Excluir documento",
                                   message: `Excluir o documento ${
@@ -290,12 +319,10 @@ export function DocumentosDialog({ veiculo, open, onClose }: Props) {
                                   intent: "danger",
                                 });
                                 if (ok) deleteM.mutate(d.id);
-                              }}
-                            >
-                              Excluir
-                            </Button>
-                          )}
-                        </div>
+                              },
+                            },
+                          ]}
+                        />
                       </TD>
                     </TR>
                   );
@@ -305,12 +332,17 @@ export function DocumentosDialog({ veiculo, open, onClose }: Props) {
           )}
         </div>
       ) : (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <Label htmlFor="tipo_documento" required>
-                Tipo de documento
-              </Label>
+        <form
+          id="form-documento"
+          noValidate
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            salvar();
+          }}
+        >
+          <GradeCampos>
+            <FormField label="Tipo de documento" required>
               <Select
                 id="tipo_documento"
                 value={form.tipo_documento}
@@ -322,71 +354,82 @@ export function DocumentosDialog({ veiculo, open, onClose }: Props) {
                   </option>
                 ))}
               </Select>
-            </div>
-            <div>
-              <Label htmlFor="doc_status">Status</Label>
-              <Select
-                id="doc_status"
-                value={form.status}
-                onChange={(e) => set("status", e.target.value as DocumentoStatus)}
-              >
-                {STATUS.map((s) => (
-                  <option key={s.value} value={s.value}>
-                    {s.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="numero">Número</Label>
-              <Input id="numero" value={form.numero} onChange={(e) => set("numero", e.target.value)} />
-            </div>
-            <div>
-              <Label htmlFor="orgao">Órgão emissor</Label>
+            </FormField>
+            <FormField label="Número" opcional>
               <Input
-                id="orgao"
-                value={form.orgao_emissor}
-                onChange={(e) => set("orgao_emissor", e.target.value)}
-                placeholder="ex.: DETRAN"
+                id="numero"
+                value={form.numero}
+                onChange={(e) => set("numero", e.target.value)}
+                placeholder="Ex.: 012345678901"
+                maxLength={60}
               />
-            </div>
-            <div>
-              <Label htmlFor="data_emissao">Data de emissão</Label>
+            </FormField>
+          </GradeCampos>
+          <FormField label="Órgão emissor" opcional>
+            <Input
+              id="orgao"
+              value={form.orgao_emissor}
+              onChange={(e) => set("orgao_emissor", e.target.value)}
+              placeholder="Ex.: DETRAN-CE"
+              maxLength={120}
+            />
+          </FormField>
+          <GradeCampos>
+            <FormField label="Emissão" opcional error={campos.erro("data_emissao")}>
               <Input
                 id="data_emissao"
                 type="date"
+                max={form.data_vencimento || undefined}
                 value={form.data_emissao}
                 onChange={(e) => set("data_emissao", e.target.value)}
+                onBlur={campos.tocar("data_emissao")}
               />
-            </div>
-            <div>
-              <Label htmlFor="data_vencimento" required>
-                Data de vencimento
-              </Label>
+            </FormField>
+            <FormField
+              label="Vencimento"
+              required
+              hint={
+                vencimento?.texto ? (
+                  <span className={vencimento.className}>{vencimento.texto}</span>
+                ) : (
+                  "É por ela que o sistema avisa o que vai vencer."
+                )
+              }
+              error={campos.erro("data_vencimento")}
+            >
               <Input
                 id="data_vencimento"
                 type="date"
                 value={form.data_vencimento}
                 onChange={(e) => set("data_vencimento", e.target.value)}
+                onBlur={campos.tocar("data_vencimento")}
               />
-            </div>
-            <div className="sm:col-span-2">
-              <Label htmlFor="doc_obs">Observações</Label>
-              <Textarea
-                id="doc_obs"
-                rows={3}
-                value={form.observacoes}
-                onChange={(e) => set("observacoes", e.target.value)}
-              />
-            </div>
-          </div>
+            </FormField>
+          </GradeCampos>
+          <EscolhaSegmentada
+            nome="status_documento"
+            titulo="Situação"
+            moldura={false}
+            valor={form.status}
+            opcoes={STATUS_ESCOLHA}
+            onChange={(s) => set("status", s)}
+          />
+          <FormField label="Observações" opcional>
+            <Textarea
+              id="doc_obs"
+              rows={3}
+              value={form.observacoes}
+              onChange={(e) => set("observacoes", e.target.value)}
+              placeholder="Ex.: apólice nº 77.123, cobertura total"
+            />
+          </FormField>
 
           {err && (
-            <div role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground">
+            <Alert intent="danger" title="Não foi possível salvar">
               {err}
-            </div>
+            </Alert>
           )}
-        </div>
+        </form>
       )}
     </Dialog>
   );
