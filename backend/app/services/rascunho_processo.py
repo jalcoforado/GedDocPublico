@@ -21,8 +21,9 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Acao, Assunto, Manifestante, Movimentacao, Processo, Tenant, UnidadeTrabalho
+from ..models import Acao, Movimentacao, Processo, Tenant
 from ..schemas.processo import RascunhoUpdate
+from .abertura_processo import conferir_referencias_do_tenant
 
 
 class RascunhoError(Exception):
@@ -59,22 +60,6 @@ async def _carregar_rascunho(
     return p
 
 
-async def _assert_do_tenant(db: AsyncSession, modelo, id_: int, *, tenant_id: int, nome: str):
-    """FK "soft" quanto ao tenant: a FK do Postgres aceitaria o id de outra
-    prefeitura. 400 com o nome do campo, como um valor inválido de formulário."""
-    existe = (
-        await db.execute(
-            select(modelo.id).where(
-                modelo.id == id_,
-                modelo.tenant_id == tenant_id,
-                modelo.excluido.is_(False),
-            )
-        )
-    ).scalar_one_or_none()
-    if existe is None:
-        raise RascunhoError(f"{nome} não encontrado(a).")
-
-
 async def editar_rascunho(
     db: AsyncSession,
     processo_id: int,
@@ -85,13 +70,14 @@ async def editar_rascunho(
 ) -> Processo:
     p = await _carregar_rascunho(db, processo_id, tenant_id=tenant_id, usuario_id=usuario_id)
 
-    await _assert_do_tenant(db, Assunto, payload.id_assunto, tenant_id=tenant_id, nome="Assunto")
-    await _assert_do_tenant(
-        db, Manifestante, payload.id_manifestante, tenant_id=tenant_id, nome="Manifestante"
-    )
-    await _assert_do_tenant(
-        db, UnidadeTrabalho, payload.id_unidade_proprietaria,
-        tenant_id=tenant_id, nome="Unidade proprietária",
+    # A mesma conferência da criação (SI-27): referências da mesma prefeitura.
+    await conferir_referencias_do_tenant(
+        db,
+        tenant_id=tenant_id,
+        id_assunto=payload.id_assunto,
+        id_manifestante=payload.id_manifestante,
+        id_unidade_proprietaria=payload.id_unidade_proprietaria,
+        erro=RascunhoError,
     )
 
     from .sigilo import SigiloError, resolver_nivel_criacao
