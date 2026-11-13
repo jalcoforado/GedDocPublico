@@ -84,16 +84,39 @@ describe("TenantsAdmin", () => {
     renderAdmin();
     await u.click(await screen.findByRole("button", { name: /nova prefeitura/i }));
     const dialog = await screen.findByRole("dialog");
-    // fireEvent.change: evita o focus-trap do Dialog com userEvent.type
-    fireEvent.change(within(dialog).getByPlaceholderText(/fortaleza/i), { target: { value: "fortaleza" } });
-    const inputs = within(dialog).getAllByRole("textbox");
-    // nome, e-mail, nome admin, cpf — preenche os obrigatórios restantes
-    fireEvent.change(inputs[1], { target: { value: "Prefeitura de Fortaleza" } });
-    fireEvent.change(inputs[2], { target: { value: "adm@fortaleza.local" } });
-    fireEvent.change(inputs[3], { target: { value: "Administrador" } });
-    fireEvent.change(inputs[4], { target: { value: "12345678901" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: /^Criar$/ }));
+    // fireEvent.change: evita o focus-trap do Dialog com userEvent.type.
+    // Campos pelo rótulo: o formulário agora vai da prefeitura ao admin.
+    fireEvent.change(within(dialog).getByLabelText(/^Nome\*?$/), {
+      target: { value: "Prefeitura de Fortaleza" },
+    });
+    // O slug é sugerido a partir do nome.
+    expect(within(dialog).getByLabelText(/^Endereço no sistema/)).toHaveValue("fortaleza");
+    fireEvent.change(within(dialog).getByLabelText(/^Nome completo/), { target: { value: "Administrador" } });
+    fireEvent.change(within(dialog).getByLabelText(/^E-mail/), { target: { value: "adm@fortaleza.local" } });
+    fireEvent.change(within(dialog).getByLabelText(/^CPF/), { target: { value: "123.456.789-01" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Criar prefeitura" }));
     await waitFor(() => expect(criarMock).toHaveBeenCalled());
+    expect(criarMock.mock.calls[0][0]).toMatchObject({
+      slug: "fortaleza",
+      nome: "Prefeitura de Fortaleza",
+      admin_email: "adm@fortaleza.local",
+      admin_nome: "Administrador",
+      admin_cpf: "12345678901",
+      plano: "basico",
+    });
     expect(await screen.findByText("TMP-senha-123")).toBeInTheDocument();
+  });
+
+  it("criar vazio mostra o que falta, foca o primeiro e não chama a API", async () => {
+    listMock.mockResolvedValue([]);
+    renderAdmin();
+    fireEvent.click(await screen.findByRole("button", { name: /nova prefeitura/i }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).queryByText("Informe o nome da prefeitura.")).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Criar prefeitura" }));
+    expect(await within(dialog).findByText("Informe o nome da prefeitura.")).toBeInTheDocument();
+    expect(within(dialog).getByText("Informe o CPF do administrador.")).toBeInTheDocument();
+    expect(document.activeElement).toBe(within(dialog).getByLabelText(/^Nome\*?$/));
+    expect(criarMock).not.toHaveBeenCalled();
   });
 });

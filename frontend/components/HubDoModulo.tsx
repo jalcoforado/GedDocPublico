@@ -1,8 +1,9 @@
 "use client";
 
-import { ArrowRight, type LucideIcon } from "lucide-react";
+import { ArrowRight, Lock, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 
+import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { useAuth } from "@/lib/auth";
 import { MENUS, canSeeItem } from "@/lib/menus";
@@ -37,10 +38,11 @@ export function HubDoModulo({
     <div className="space-y-8">
       <PageHeader icon={icone} title={titulo} description={descricao} />
       {grupos.length === 0 ? (
-        <p className="rounded-card border border-border bg-surface-1 px-4 py-3 text-sm text-foreground-muted">
-          Nenhuma destas telas está liberada para o seu perfil. Quem concede o acesso é o administrador
-          do órgão, em Administração › Grupos &amp; Permissões.
-        </p>
+        <EmptyState
+          icon={Lock}
+          title="Nenhuma destas telas está liberada para o seu perfil"
+          description="Quem concede o acesso é o administrador do órgão, em Administração › Grupos & Permissões."
+        />
       ) : (
         grupos.map((g) => (
           <section key={g.titulo} aria-label={g.titulo} className="space-y-4">

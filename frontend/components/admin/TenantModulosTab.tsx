@@ -157,8 +157,8 @@ export function TenantModulosTab({ tenantId }: { tenantId: number }) {
         })}
       </ul>
 
-      <Button type="button" onClick={handleSalvar} disabled={salvar.isPending}>
-        {salvar.isPending ? "Salvando…" : "Salvar"}
+      <Button type="button" onClick={handleSalvar} loading={salvar.isPending}>
+        {salvar.isPending ? "Salvando…" : "Salvar módulos"}
       </Button>
     </div>
   );
