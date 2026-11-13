@@ -115,14 +115,22 @@ export function RedigirDocumentoDialog({
     enabled: open && minutaAtualId !== undefined,
   });
 
+  // Preenche com a minuta carregada. Depende também de `open`: o diálogo fica
+  // montado e o efeito acima zera os campos a cada abertura — com a minuta já
+  // no cache, `minutaQ.data` é o MESMO objeto (o React Query reaproveita a
+  // referência quando nada mudou), e um efeito só em `[minutaQ.data]` não
+  // rodava de novo: "Editar" abria o documento em branco.
+  // O id confere com o pedido: na abertura, `minutaAtualId` ainda é o da vez
+  // anterior por um render — sem isso, o texto de outro documento piscava.
   useEffect(() => {
-    if (minutaQ.data) {
-      setTitulo(minutaQ.data.titulo);
-      setDestinatario(minutaQ.data.destinatario ?? "");
-      setCorpo(minutaQ.data.corpo_html ?? "");
-      setVersao(minutaQ.data.versao);
-    }
-  }, [minutaQ.data]);
+    const m = minutaQ.data;
+    if (!open || !m || m.id !== minutaAtualId) return;
+    if (minutaId !== undefined && m.id !== minutaId) return;
+    setTitulo(m.titulo);
+    setDestinatario(m.destinatario ?? "");
+    setCorpo(m.corpo_html ?? "");
+    setVersao(m.versao);
+  }, [open, minutaQ.data, minutaAtualId, minutaId]);
 
   const criarM = useMutation({
     mutationFn: () =>
