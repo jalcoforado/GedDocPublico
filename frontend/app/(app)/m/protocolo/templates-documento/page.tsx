@@ -372,7 +372,7 @@ export default function TemplatesDocumentoPage() {
             </div>
 
             {modo === "blocos" ? (
-              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]">
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
                 <MontadorTemplate
                   blocos={blocos}
                   onChange={mudarBlocos}
@@ -384,7 +384,7 @@ export default function TemplatesDocumentoPage() {
                     titulo=""
                     corpoHtml={form.corpo_html}
                     modelo
-                    className="h-[32rem]"
+                    className="h-[40rem]"
                   />
                 </div>
               </div>
