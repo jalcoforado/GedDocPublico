@@ -57,11 +57,11 @@ describe("Solicitar serviço (PR 4b)", () => {
 
     const corpo = screen.getByLabelText(/Descreva sua solicitação/i);
     fireEvent.change(corpo, { target: { value: "Preciso de uma certidão de IPTU para o imóvel." } });
-    fireEvent.click(screen.getByRole("button", { name: /Avançar/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Continuar/i }));
 
     // passo de confirmação mostra texto_confirmacao
     expect(await screen.findByText(/receberá um número de protocolo/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Confirmar e enviar/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Enviar solicitação/i }));
 
     await waitFor(() => expect(abrirMock).toHaveBeenCalled());
     // UX-1: body preservado intacto — contrato com backend.
@@ -72,17 +72,42 @@ describe("Solicitar serviço (PR 4b)", () => {
 
   // ===== UX-1 Fase B =====
 
-  it("UX-1: 'Avançar' fica desabilitado até atingir o mínimo de caracteres", async () => {
+  // Padrão de formulário (regra 9): o botão nunca fica desabilitado por
+  // validação — clicar é o que mostra o que falta. Antes ele ficava cinza
+  // sem dizer por quê.
+  it("Continuar com texto curto não avança e diz quanto falta, embaixo do campo", async () => {
     renderPage();
     await screen.findByText("Documentos necessários");
     const corpo = screen.getByLabelText(/Descreva sua solicitação/i);
-    const avancar = screen.getByRole("button", { name: /Avançar/i });
+    const continuar = screen.getByRole("button", { name: /Continuar/i });
 
-    expect(avancar).toBeDisabled();
+    // Ao abrir: nenhum erro.
+    expect(screen.queryByText(/faltam/i)).toBeNull();
+    expect(continuar).not.toBeDisabled();
+
     fireEvent.change(corpo, { target: { value: "curto" } });
-    expect(avancar).toBeDisabled();
+    fireEvent.click(continuar);
+    expect(await screen.findByText(/faltam 5 letras/i)).toBeInTheDocument();
+    expect(corpo).toHaveAttribute("aria-invalid", "true");
+    expect(screen.queryByRole("button", { name: /Enviar solicitação/i })).toBeNull();
+    expect(abrirMock).not.toHaveBeenCalled();
+
     fireEvent.change(corpo, { target: { value: "agora com mais de dez" } });
-    expect(avancar).not.toBeDisabled();
+    fireEvent.click(continuar);
+    expect(await screen.findByRole("button", { name: /Enviar solicitação/i })).toBeInTheDocument();
+  });
+
+  it("serviço pausado: Continuar fica desabilitado (indisponível, não validação)", async () => {
+    servicoMock.mockResolvedValue({
+      nome: "X", slug: "certidao-iptu", descricao_curta: null,
+      descricao_detalhada: null, publico_alvo: null, instrucoes_cidadao: null,
+      prazo_estimado_dias: null, unidade_responsavel: null,
+      documentos_exigidos: null, categoria: null, destaque: false,
+      ordem_exibicao: 0, texto_confirmacao: null, solicitar_habilitado: false,
+    });
+    renderPage();
+    await screen.findByText(/pausado pela prefeitura/i);
+    expect(screen.getByRole("button", { name: /Continuar/i })).toBeDisabled();
   });
 
   it("UX-1: contador mostra progresso atual / mínimo (10)", async () => {
@@ -99,8 +124,8 @@ describe("Solicitar serviço (PR 4b)", () => {
     await screen.findByText("Documentos necessários");
     const corpo = screen.getByLabelText(/Descreva sua solicitação/i);
     fireEvent.change(corpo, { target: { value: "Algum texto longo o suficiente" } });
-    fireEvent.click(screen.getByRole("button", { name: /Avançar/i }));
-    await screen.findByRole("button", { name: /Confirmar e enviar/i });
+    fireEvent.click(screen.getByRole("button", { name: /Continuar/i }));
+    await screen.findByRole("button", { name: /Enviar solicitação/i });
     fireEvent.click(screen.getByRole("button", { name: /^Voltar$/i }));
     // De volta ao passo 1 — o texto deve continuar lá.
     const c2 = screen.getByLabelText(/Descreva sua solicitação/i) as HTMLTextAreaElement;

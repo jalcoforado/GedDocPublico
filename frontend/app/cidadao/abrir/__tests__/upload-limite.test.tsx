@@ -57,14 +57,15 @@ async function irParaOPassoDoAnexo() {
       <AbrirProcessoPage />
     </QueryClientProvider>,
   );
-  fireEvent.change(await screen.findByLabelText(/Assunto/i), {
+  fireEvent.change(await screen.findByLabelText(/Sobre o que é o seu pedido/i), {
     target: { value: "1" },
   });
-  fireEvent.change(screen.getByLabelText(/Descreva sua solicitação/i), {
+  fireEvent.change(screen.getByLabelText(/Conte o que você precisa/i), {
     target: { value: "Preciso de uma certidão para fins de matrícula." },
   });
-  fireEvent.click(screen.getByRole("button", { name: /Avançar/i }));
-  return await screen.findByLabelText(/Documento \(opcional\)/i).catch(() => null);
+  fireEvent.click(screen.getByRole("button", { name: /Continuar/i }));
+  // O passo do anexo é o que tem o seletor de arquivo.
+  return await screen.findByText(/Quer anexar um documento/i);
 }
 
 beforeEach(() => {

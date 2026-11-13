@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import ServicosPublicosPage from "@/app/cidadao/servicos/page";
@@ -98,30 +98,32 @@ describe("Portal público — Carta de Serviços", () => {
     expect(screen.getByText(/Prazo estimado: até 1 dia(?!s)/i)).toBeInTheDocument();
   });
 
-  it("UX-1: card exibe legenda '* obrigatório' quando há doc obrigatório", async () => {
+  // O asterisco vermelho com a legenda "* obrigatório" em 10px saiu: o normal
+  // (obrigatório) não leva marca, e a exceção diz "(se tiver)" com palavras.
+  it("documento obrigatório aparece sem marca; o opcional diz '(se tiver)'", async () => {
     servicosMock.mockResolvedValue([
       servico({
-        documentos_exigidos: [{ nome: "RG", obrigatorio: true, descricao: null }],
+        documentos_exigidos: [
+          { nome: "RG", obrigatorio: true, descricao: null },
+          { nome: "Procuração", obrigatorio: false, descricao: "Se outra pessoa for buscar" },
+        ],
       }),
     ]);
     renderPage();
     await screen.findByText("Certidão de IPTU");
-    expect(screen.getByText(/obrigatório$/i)).toBeInTheDocument();
-    // <abbr title="Documento obrigatório">
-    expect(
-      screen.getByTitle(/Documento obrigatório/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText("RG").parentElement).not.toHaveTextContent(/se tiver/i);
+    expect(screen.getByText("Procuração").parentElement).toHaveTextContent(/(se tiver)/i);
+    expect(screen.getByText("Se outra pessoa for buscar")).toBeInTheDocument();
+    expect(screen.getAllByText(/(se tiver)/i)).toHaveLength(1);
+    // Nada da notação antiga.
+    expect(screen.queryByText(/obrigatório/i)).toBeNull();
   });
 
-  it("UX-1: card NÃO mostra legenda quando todos docs são opcionais", async () => {
-    servicosMock.mockResolvedValue([
-      servico({
-        documentos_exigidos: [{ nome: "RG", obrigatorio: false, descricao: null }],
-      }),
-    ]);
+  it("todos obrigatórios: nenhum item leva '(se tiver)'", async () => {
+    servicosMock.mockResolvedValue([servico()]);
     renderPage();
     await screen.findByText("Certidão de IPTU");
-    expect(screen.queryByText(/^\* obrigatório$/i)).toBeNull();
+    expect(screen.queryByText(/se tiver/i)).toBeNull();
   });
 
   it("UX-1: usa 'Documentos necessários' (não 'Documentos exigidos')", async () => {
@@ -162,5 +164,34 @@ describe("Portal público — Carta de Serviços", () => {
     expect(text).not.toMatch(/garantia|garantido/i);
     expect(text).not.toMatch(/prazo legal/i);
     expect(text).not.toMatch(/deferid[oa]|indeferid[oa]/i);
+  });
+});
+
+describe("Carta de Serviços — busca", () => {
+  const varios = () =>
+    [
+      "Certidão de IPTU", "Alvará de funcionamento", "Iluminação pública", "Poda de árvore",
+      "Coleta de entulho", "Segunda via de boleto", "Cadastro de feirante",
+    ].map((nome, i) => servico({ nome, slug: `s${i}`, descricao_curta: null, categoria: null }));
+
+  it("com poucos serviços, não mostra a busca", async () => {
+    servicosMock.mockResolvedValue([servico()]);
+    renderPage();
+    await screen.findByText("Certidão de IPTU");
+    expect(screen.queryByRole("searchbox", { name: /Procurar serviço/i })).toBeNull();
+  });
+
+  it("procura pelo nome sem ligar para acento e limpa", async () => {
+    servicosMock.mockResolvedValue(varios());
+    renderPage();
+    const busca = await screen.findByRole("searchbox", { name: /Procurar serviço/i });
+    fireEvent.change(busca, { target: { value: "iluminacao" } });
+    expect(screen.getByText("Iluminação pública")).toBeInTheDocument();
+    expect(screen.queryByText("Certidão de IPTU")).toBeNull();
+
+    fireEvent.change(busca, { target: { value: "xyz" } });
+    expect(screen.getByText(/Nenhum serviço com “xyz”/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Limpar a busca/i }));
+    expect(screen.getByText("Certidão de IPTU")).toBeInTheDocument();
   });
 });
