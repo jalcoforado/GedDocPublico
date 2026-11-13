@@ -3,25 +3,18 @@
 import { Carregando } from "@/components/ui/carregando";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Blocks, Type } from "lucide-react";
 import { useState } from "react";
 
-import { PreVisualizacaoDocumento } from "@/components/PreVisualizacaoDocumento";
-import { MontadorTemplate } from "@/components/protocolo/MontadorTemplate";
+import { EditorDeModelo, type ModoEdicao } from "@/components/protocolo/EditorDeModelo";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { useToast } from "@/components/ui/toast";
 import { api, protocoloApi, type TemplateDocumento } from "@/lib/api";
 import { blocosParaHtml, htmlParaBlocos, type Bloco } from "@/lib/template-blocos";
-import { cn } from "@/lib/utils";
-
-/** Montar com blocos (SI-31) ou editar o HTML corrido no editor de texto. */
-type ModoEdicao = "blocos" | "livre";
 
 async function enviarImagem(file: File): Promise<string> {
   const { url } = await api.editorImagens.upload(file);
@@ -330,74 +323,18 @@ export default function TemplatesDocumentoPage() {
             />
           </div>
 
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-end justify-between gap-2">
-              <div>
-                <Label>Conteúdo do modelo</Label>
-                <p className="text-xs text-muted-foreground">
-                  {modo === "blocos"
-                    ? "Monte o documento com blocos; ao lado, como ele sai no PDF."
-                    : "Texto corrido. Voltar para blocos junta o que não for bloco num bloco de Texto."}
-                </p>
-              </div>
-              <div
-                role="group"
-                aria-label="Modo de edição do modelo"
-                className="inline-flex rounded-md border border-border bg-surface-1 p-0.5"
-              >
-                {(
-                  [
-                    ["blocos", "Montar com blocos", Blocks],
-                    ["livre", "Editor livre", Type],
-                  ] as const
-                ).map(([valor, nome, Icone]) => (
-                  <button
-                    key={valor}
-                    type="button"
-                    aria-pressed={modo === valor}
-                    onClick={() => trocarModo(valor)}
-                    className={cn(
-                      "inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium transition-colors duration-fast",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                      modo === valor
-                        ? "bg-card text-foreground shadow-sm"
-                        : "text-foreground-muted hover:text-foreground",
-                    )}
-                  >
-                    <Icone className="h-3.5 w-3.5" aria-hidden="true" />
-                    {nome}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {modo === "blocos" ? (
-              <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
-                <MontadorTemplate
-                  blocos={blocos}
-                  onChange={mudarBlocos}
-                  campos={placeholdersQ.data ?? []}
-                  onUploadImage={enviarImagem}
-                />
-                <div className="xl:sticky xl:top-0 xl:self-start">
-                  <PreVisualizacaoDocumento
-                    titulo=""
-                    corpoHtml={form.corpo_html}
-                    modelo
-                    className="h-[40rem]"
-                  />
-                </div>
-              </div>
-            ) : (
-              <RichTextEditor
-                value={form.corpo_html}
-                onChange={(html) => setForm({ ...form, corpo_html: html })}
-                minHeight={280}
-                ariaLabel="Conteúdo do template"
-                campos={placeholdersQ.data ?? []}
-                onUploadImage={enviarImagem}
-              />
-            )}
+          <div className="space-y-1.5">
+            <Label>Conteúdo do modelo</Label>
+            <EditorDeModelo
+              modo={modo}
+              onTrocarModo={trocarModo}
+              blocos={blocos}
+              onBlocos={mudarBlocos}
+              corpoHtml={form.corpo_html}
+              onCorpoHtml={(html) => setForm({ ...form, corpo_html: html })}
+              campos={placeholdersQ.data ?? []}
+              onUploadImage={enviarImagem}
+            />
           </div>
 
           <label className="flex items-center gap-2 text-sm">

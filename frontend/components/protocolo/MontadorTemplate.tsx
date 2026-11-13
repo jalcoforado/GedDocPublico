@@ -63,7 +63,7 @@ export interface CampoDisponivel {
 /**
  * Montador de template por blocos (SI-31, primeira versão).
  *
- * - Paleta à esquerda: arrastar um bloco para a folha o põe onde for solto;
+ * - Paleta numa faixa acima da folha: arrastar um bloco para a folha o põe onde for solto;
  *   clicar põe no fim.
  * - Na folha, cada bloco se arrasta pela alça (⋮⋮) para mudar de lugar.
  *   A alça é o único ponto de arrasto — o resto do bloco tem campos de
@@ -151,56 +151,54 @@ export function MontadorTemplate({
   }
 
   return (
-    <div className="grid gap-4 md:grid-cols-[12.5rem_minmax(0,1fr)]">
+    <div className="space-y-2">
       <p aria-live="polite" className="sr-only">
         {aviso}
       </p>
 
-      {/* ── Paleta ── */}
-      <aside aria-labelledby="paleta-blocos-titulo" className="space-y-2">
-        <div>
-          <h3 id="paleta-blocos-titulo" className="text-sm font-semibold text-foreground">
-            Blocos
-          </h3>
-          <p className="text-xs text-foreground-muted">Arraste para a folha, ou clique para pôr no fim.</p>
-        </div>
-        <ul className="grid grid-cols-2 gap-1.5 md:grid-cols-1">
-          {CATALOGO_BLOCOS.map((info) => {
-            const Icone = ICONE[info.tipo];
-            return (
-              <li key={info.tipo}>
-                <button
-                  type="button"
-                  draggable
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData(DT_NOVO, info.tipo);
-                    e.dataTransfer.effectAllowed = "copy";
-                  }}
-                  onDragEnd={fimDoArrasto}
-                  onClick={() => inserir(info.tipo)}
-                  aria-label={`Adicionar bloco ${info.rotulo}`}
-                  title={info.descricao}
-                  className={cn(
-                    "group flex w-full cursor-grab items-start gap-2.5 rounded-md border border-border bg-card px-2.5 py-2 text-left",
-                    "transition-colors duration-fast hover:border-brand/50 hover:bg-surface-2 active:cursor-grabbing",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  )}
-                >
-                  <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
-                    <Icone className="h-4 w-4" aria-hidden="true" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium text-foreground">{info.rotulo}</span>
-                    <span className="hidden text-xs leading-snug text-foreground-muted md:block">
-                      {info.descricao}
-                    </span>
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      </aside>
+      {/* ── Paleta ──
+          Uma faixa de fichas acima da folha, não uma coluna ao lado: a coluna
+          comia ~13rem que fazem falta quando a prévia está aberta. Fica presa
+          no topo ao rolar — o bloco está sempre à mão para arrastar. A
+          descrição de cada bloco vai no `title`. */}
+      <div
+        role="group"
+        aria-labelledby="paleta-blocos-titulo"
+        className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-surface-1 px-2 py-1.5 shadow-sm"
+      >
+        <span id="paleta-blocos-titulo" className="mr-1 text-xs font-semibold text-foreground">
+          Blocos
+          <span className="ml-1 hidden font-normal text-foreground-muted sm:inline">
+            · arraste para a folha ou clique
+          </span>
+        </span>
+        {CATALOGO_BLOCOS.map((info) => {
+          const Icone = ICONE[info.tipo];
+          return (
+            <button
+              key={info.tipo}
+              type="button"
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData(DT_NOVO, info.tipo);
+                e.dataTransfer.effectAllowed = "copy";
+              }}
+              onDragEnd={fimDoArrasto}
+              onClick={() => inserir(info.tipo)}
+              aria-label={`Adicionar bloco ${info.rotulo}`}
+              title={info.descricao}
+              className={cn(
+                "inline-flex cursor-grab items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground",
+                "transition-colors duration-fast hover:border-brand/50 hover:bg-surface-2 active:cursor-grabbing",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              )}
+            >
+              <Icone className="h-3.5 w-3.5 text-brand" aria-hidden="true" />
+              {info.rotulo}
+            </button>
+          );
+        })}
+      </div>
 
       {/* ── Folha ── */}
       <div
@@ -229,14 +227,14 @@ export function MontadorTemplate({
           fimDoArrasto();
         }}
         className={cn(
-          "min-h-[18rem] rounded-lg border bg-surface-1 p-3 transition-colors duration-fast",
+          "min-h-[14rem] rounded-lg border bg-surface-1 p-3 transition-colors duration-fast",
           alvo !== null ? "border-brand/60" : "border-border",
         )}
       >
         {blocos.length === 0 ? (
           <div
             className={cn(
-              "flex h-full min-h-[16rem] flex-col items-center justify-center gap-3 rounded-md border-2 border-dashed px-6 text-center",
+              "flex h-full min-h-[12rem] flex-col items-center justify-center gap-3 rounded-md border-2 border-dashed px-6 text-center",
               alvo !== null ? "border-brand bg-brand/5" : "border-border",
             )}
           >
