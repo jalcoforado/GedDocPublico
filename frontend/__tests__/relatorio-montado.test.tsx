@@ -195,4 +195,39 @@ describe("montar relatório", () => {
     expect(screen.getByRole("button", { name: "Gerar relatório" })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Salvar relatório/ })).toBeDisabled();
   });
+
+  it("arrastar e soltar muda a ordem das colunas", async () => {
+    await abrir();
+    const lista = screen.getByRole("list", { name: "Colunas escolhidas" });
+    const itens = () => within(lista).getAllByRole("listitem");
+    const dt = { effectAllowed: "", dropEffect: "", setData: vi.fn(), getData: vi.fn() };
+    // "Onde está" (último) solto sobre "Situação" (segundo): vai para antes dele
+    fireEvent.dragStart(itens()[4], { dataTransfer: dt });
+    fireEvent.dragOver(itens()[1], { dataTransfer: dt });
+    fireEvent.drop(itens()[1], { dataTransfer: dt });
+    expect(itens().map((li) => li.textContent)).toEqual(["Aberto em", "Onde está", "Situação", "Assunto", "Unidade dona"]);
+    // "Aberto em" (primeiro) solto sobre "Assunto": arrastando para baixo, cai depois dele
+    fireEvent.dragStart(itens()[0], { dataTransfer: dt });
+    fireEvent.dragOver(itens()[3], { dataTransfer: dt });
+    fireEvent.drop(itens()[3], { dataTransfer: dt });
+    expect(itens().map((li) => li.textContent)).toEqual(["Onde está", "Situação", "Assunto", "Aberto em", "Unidade dona"]);
+    // e é essa ordem que vai para o relatório
+    fireEvent.click(screen.getByRole("button", { name: "Gerar relatório" }));
+    expect(definicaoDe(nav.replace.mock.calls.at(-1)![0] as string).colunas).toEqual([
+      "local_atual", "situacao", "assunto", "aberto_em", "unidade_dona",
+    ]);
+  });
+
+  it("pelo teclado, a alça move com as setas e anuncia a posição", async () => {
+    await abrir();
+    const lista = screen.getByRole("list", { name: "Colunas escolhidas" });
+    fireEvent.keyDown(within(lista).getByRole("button", { name: /Mover Assunto/ }), { key: "ArrowUp" });
+    expect(within(lista).getAllByRole("listitem").map((li) => li.textContent)).toEqual(
+      ["Aberto em", "Assunto", "Situação", "Unidade dona", "Onde está"],
+    );
+    expect(screen.getByText("Assunto: posição 2 de 5")).toBeInTheDocument();
+    // no topo, seta para cima não faz nada
+    fireEvent.keyDown(within(lista).getByRole("button", { name: /Mover Aberto em/ }), { key: "ArrowUp" });
+    expect(within(lista).getAllByRole("listitem")[0]).toHaveTextContent("Aberto em");
+  });
 });

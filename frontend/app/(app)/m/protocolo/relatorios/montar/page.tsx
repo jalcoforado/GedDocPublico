@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Download, FileText, Lock, Pencil, Save, Trash2, X } from "lucide-react";
+import { Download, FileText, GripVertical, Lock, Pencil, Save, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -502,11 +502,21 @@ function SecaoColunas({ d, onChange, catalogo }: Edita & { catalogo: CatalogoMon
   function alternar(c: ColunaMontado, marcar: boolean) {
     onChange({ ...d, colunas: marcar ? [...escolhidas, c] : escolhidas.filter((x) => x !== c) });
   }
-  function mover(i: number, delta: number) {
-    const novo = [...escolhidas];
-    const [c] = novo.splice(i, 1);
-    novo.splice(i + delta, 0, c);
+  // Ordem por arrastar e soltar (HTML nativo, como no organograma). Pelo
+  // teclado, a alça move com as setas ↑ e ↓ — e anuncia a posição nova.
+  const [arrastando, setArrastando] = useState<ColunaMontado | null>(null);
+  const [sobre, setSobre] = useState<number | null>(null);
+  const [aviso, setAviso] = useState("");
+  const rotulo = (c: ColunaMontado) => info.get(c)?.rotulo ?? c;
+
+  /** Põe `c` na posição `destino`. Arrastando para baixo, cai DEPOIS do item
+   * em que soltou; para cima, ANTES — o que a pessoa vê na tela. */
+  function moverPara(c: ColunaMontado, destino: number) {
+    const novo = escolhidas.filter((x) => x !== c);
+    const pos = Math.max(0, Math.min(destino, novo.length));
+    novo.splice(pos, 0, c);
     onChange({ ...d, colunas: novo });
+    return pos;
   }
 
   return (
@@ -533,22 +543,65 @@ function SecaoColunas({ d, onChange, catalogo }: Edita & { catalogo: CatalogoMon
         <div className="space-y-4">
           <div>
             <p className="text-sm font-semibold text-foreground">Na ordem do relatório</p>
-            <p className="text-xs text-foreground-muted">O número do processo vem sempre primeiro.</p>
+            <p className="text-xs text-foreground-muted">
+              Arraste para mudar a ordem. O número do processo vem sempre primeiro.
+            </p>
             <ol className="mt-2 space-y-1" aria-label="Colunas escolhidas">
               {escolhidas.map((c, i) => (
-                <li key={c} className="flex items-center justify-between gap-2 rounded-md border border-border py-0.5 pl-2 pr-1 text-sm">
-                  <span>{info.get(c)?.rotulo ?? c}</span>
-                  <span className="flex gap-0.5">
-                    <Button type="button" size="icon" variant="ghost" className="h-7 w-7" aria-label={`Subir ${info.get(c)?.rotulo}`}
-                      disabled={i === 0} onClick={() => mover(i, -1)}><ArrowUp className="h-4 w-4" /></Button>
-                    <Button type="button" size="icon" variant="ghost" className="h-7 w-7" aria-label={`Descer ${info.get(c)?.rotulo}`}
-                      disabled={i === escolhidas.length - 1} onClick={() => mover(i, 1)}><ArrowDown className="h-4 w-4" /></Button>
-                    <Button type="button" size="icon" variant="ghost" className="h-7 w-7" aria-label={`Tirar ${info.get(c)?.rotulo}`}
-                      onClick={() => alternar(c, false)}><X className="h-4 w-4" /></Button>
-                  </span>
+                <li
+                  key={c}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.effectAllowed = "move";
+                    e.dataTransfer.setData("text/plain", c);
+                    setArrastando(c);
+                  }}
+                  onDragEnd={() => { setArrastando(null); setSobre(null); }}
+                  onDragOver={(e) => {
+                    if (!arrastando) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    if (sobre !== i) setSobre(i);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (arrastando && arrastando !== c) moverPara(arrastando, i);
+                    setArrastando(null);
+                    setSobre(null);
+                  }}
+                  className={
+                    "flex cursor-grab items-center gap-1 rounded-md border py-0.5 pl-0.5 pr-1 text-sm transition-colors active:cursor-grabbing " +
+                    (arrastando === c
+                      ? "border-dashed border-border opacity-50"
+                      : sobre === i && arrastando
+                        ? "border-primary bg-primary/5"
+                        : "border-border bg-card")
+                  }
+                >
+                  <button
+                    type="button"
+                    id={`alca-${c}`}
+                    aria-label={`Mover ${rotulo(c)}, posição ${i + 1} de ${escolhidas.length}. Use as setas para cima e para baixo.`}
+                    className="inline-flex h-7 w-6 shrink-0 cursor-grab items-center justify-center rounded text-foreground-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onKeyDown={(e) => {
+                      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+                      e.preventDefault();
+                      const destino = i + (e.key === "ArrowUp" ? -1 : 1);
+                      if (destino < 0 || destino >= escolhidas.length) return;
+                      const pos = moverPara(c, destino);
+                      setAviso(`${rotulo(c)}: posição ${pos + 1} de ${escolhidas.length}`);
+                      requestAnimationFrame(() => document.getElementById(`alca-${c}`)?.focus());
+                    }}
+                  >
+                    <GripVertical className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                  <span className="flex-1 select-none">{rotulo(c)}</span>
+                  <Button type="button" size="icon" variant="ghost" className="h-7 w-7" aria-label={`Tirar ${rotulo(c)}`}
+                    onClick={() => alternar(c, false)}><X className="h-4 w-4" /></Button>
                 </li>
               ))}
             </ol>
+            <p aria-live="polite" className="sr-only">{aviso}</p>
           </div>
           <div>
             <Label htmlFor="mon-ordem">Ordenar por</Label>
