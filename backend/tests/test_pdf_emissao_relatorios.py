@@ -36,16 +36,25 @@ def _texto(pdf: bytes) -> str:
 def _respostas():
     processos = RelatorioResposta(
         filtros_aplicados=RelatorioFiltro(),
+        descricao_filtros=[],
         nome_unidade=None,
-        totais=RelatorioTotais(total=0, ativos=0, inativos=0, sigilosos=0, externos=0),
+        totais=RelatorioTotais(
+            total=0, em_andamento=0, em_transito=0, arquivados=0, sigilosos=0, externos=0
+        ),
         por_tipo_processo=[],
         por_unidade_proprietaria=[],
+        por_local_atual=[],
+        por_assunto=[],
+        por_servico=[],
         processos=[],
     )
     tramitacao = RelatorioTramitacaoResposta(
         filtros_aplicados=RelatorioFiltro(),
+        descricao_filtros=[],
         nome_unidade=None,
         qtd_processos=0,
+        qtd_listados=0,
+        cortado=False,
         qtd_processos_com_atraso=0,
         minutos_medio_por_processo=0.0,
         por_unidade=[],
@@ -53,6 +62,7 @@ def _respostas():
     )
     assinaturas = RelatorioAssinaturasResposta.model_construct(
         filtros_aplicados=AssinaturasFiltro(),
+        descricao_filtros=[],
         totais=AssinaturasTotais.model_construct(
             total=0, pendentes=0, concluidas=0, canceladas=0, minutos_medio_conclusao=None
         ),

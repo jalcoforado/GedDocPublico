@@ -130,18 +130,48 @@ def test_niveis_permitidos_e_obrigatorio(fn):
 
 
 def test_toda_rota_de_relatorio_resolve_o_sigilo():
-    """Cada rota de `/relatorios` usa a mesma dependência da listagem."""
-    from app.routers.processos import acesso_niveis_dep
-    from app.routers.relatorios import router
+    """Toda rota de `/relatorios` que devolve dado de processo decide o sigilo
+    de quem consulta (`niveis_acesso_usuario`, o mesmo recorte da listagem),
+    direto ou por um dos ajudantes do router. Rota nova tem de entrar numa das
+    duas listas, senão este teste quebra.
 
-    def deps(dependant):
-        for d in dependant.dependencies:
-            yield d.call
-            yield from deps(d)
+    Desde o SI-34 as rotas chamam `niveis_acesso_usuario` no corpo (antes era a
+    dependência `acesso_niveis_dep`); a garantia é a mesma.
+    """
+    import inspect
 
-    rotas = [r for r in router.routes if getattr(r, "dependant", None)]
-    assert len(rotas) == 9
-    sem_sigilo = [r.path for r in rotas if acesso_niveis_dep not in set(deps(r.dependant))]
+    from app.routers import relatorios as mod
+
+    # Não devolvem processo: opções do filtro, catálogo de colunas e as
+    # definições salvas (só a definição; os dados rodam com o sigilo de quem abre).
+    SEM_DADO_DE_PROCESSO = {
+        "servicos_do_filtro",
+        "montado_catalogo",
+        "salvos_listar",
+        "salvos_criar",
+        "salvos_obter",
+        "salvos_atualizar",
+        "salvos_excluir",
+    }
+    AJUDANTES = ("_gerencial", "_tramitacao", "_montado")
+    for nome in AJUDANTES:
+        assert "niveis_acesso_usuario" in inspect.getsource(getattr(mod, nome)), nome
+
+    def resolve_sigilo(fn) -> bool:
+        src = inspect.getsource(fn)
+        return "niveis_acesso_usuario" in src or any(
+            f"await {h}(" in src for h in AJUDANTES
+        )
+
+    rotas = [r for r in mod.router.routes if getattr(r, "endpoint", None)]
+    assert len(rotas) >= 9
+    nomes = {r.endpoint.__name__ for r in rotas}
+    assert SEM_DADO_DE_PROCESSO <= nomes, "lista desatualizada: " + str(SEM_DADO_DE_PROCESSO - nomes)
+    sem_sigilo = [
+        r.path
+        for r in rotas
+        if r.endpoint.__name__ not in SEM_DADO_DE_PROCESSO and not resolve_sigilo(r.endpoint)
+    ]
     assert sem_sigilo == []
 
 
