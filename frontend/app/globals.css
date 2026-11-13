@@ -455,10 +455,14 @@
   /* === Entrada da tela ===
      As seções sobem e aparecem uma depois da outra (40ms de intervalo, até a
      sexta), em vez de a tela inteira surgir de uma vez. Só opacidade e
-     transform, que o compositor anima; quem pediu menos movimento não vê. */
+     transform, que o compositor anima; quem pediu menos movimento não vê.
+     `backwards`, não `both`: com `both` a seção ficava presa no último quadro
+     (transform: none) e, para o navegador, continuava "transformada" — vira o
+     bloco de contenção de todo `position: fixed` dentro dela, e o fundo
+     escuro de um diálogo aberto ali cobria só a seção, não a tela. */
   @media (prefers-reduced-motion: no-preference) {
     .pagina > :is(.space-y-3, .space-y-4, .space-y-5, .space-y-6) > * {
-      animation: secao-entra 420ms var(--ease-out-expo) both;
+      animation: secao-entra 420ms var(--ease-out-expo) backwards;
     }
     .pagina > :is(.space-y-3, .space-y-4, .space-y-5, .space-y-6) > :nth-child(2) { animation-delay: 40ms; }
     .pagina > :is(.space-y-3, .space-y-4, .space-y-5, .space-y-6) > :nth-child(3) { animation-delay: 80ms; }
