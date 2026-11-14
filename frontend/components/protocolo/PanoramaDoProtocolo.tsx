@@ -106,7 +106,9 @@ export function PanoramaDoProtocolo({
 
   return (
     <section aria-labelledby="panorama-protocolo-titulo" className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      {/* Filtros SEMPRE na linha de baixo do título (2026-11-14): ao lado, o
+          texto muda de tamanho com a escolha e empurrava os botões de lugar. */}
+      <div className="space-y-3">
         <div>
           <h2 id="panorama-protocolo-titulo" className="font-display text-base font-semibold text-foreground">
             Panorama do protocolo
