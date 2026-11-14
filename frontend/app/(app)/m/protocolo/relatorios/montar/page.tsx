@@ -6,14 +6,13 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
-import { useOpcoesDoRecorte } from "@/components/relatorios/opcoesDoRecorte";
+import { CamposDoRecorte } from "@/components/relatorios/CamposDoRecorte";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Carregando } from "@/components/ui/carregando";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Combobox } from "@/components/ui/combobox";
 import { useConfirm, usePrompt } from "@/components/ui/confirm";
 import { Input } from "@/components/ui/input";
 import { KpiCard } from "@/components/ui/kpi-card";
@@ -32,7 +31,6 @@ import {
   type ColunaMontado,
   type DefinicaoMontado,
   type FiltrosMontado,
-  type ModoUnidadeRelatorio,
   type OrdemMontado,
   type PeriodoMontado,
   type ResultadoMontado,
@@ -43,12 +41,12 @@ import {
 } from "@/lib/api";
 import {
   ROTA_RELATORIOS,
-  ROTULO_MODO_UNIDADE,
   ROTULO_PRAZO,
   ROTULO_SITUACAO,
   ROTULO_TIPO_PERIODO,
   definicaoDaUrl,
   definicaoInicial,
+  type FiltroDaUrl,
   fmtValorMontado,
   urlDoMontador,
 } from "@/lib/relatorios";
@@ -282,10 +280,10 @@ export default function MontarRelatorioPage() {
         className="space-y-4"
         onSubmit={(e) => { e.preventDefault(); if (!problema) aplicar(rascunho); }}
       >
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <SecaoRecorte d={rascunho} onChange={setRascunho} />
-          <SecaoFiltros d={rascunho} onChange={setRascunho} />
-        </div>
+        {/* Recorte em largura inteira: os campos são os mesmos da barra das
+            listas (`CamposDoRecorte`) e têm a mesma grade de quatro colunas. */}
+        <SecaoRecorte d={rascunho} onChange={setRascunho} />
+        <SecaoFiltros d={rascunho} onChange={setRascunho} />
         {catalogoQ.data ? (
           <SecaoColunas d={rascunho} onChange={setRascunho} catalogo={catalogoQ.data} />
         ) : (
@@ -322,93 +320,81 @@ type Edita = { d: DefinicaoMontado; onChange: (d: DefinicaoMontado) => void };
 function SecaoRecorte({ d, onChange }: Edita) {
   const f = d.filtros ?? {};
   const p = d.periodo ?? { tipo: "sem" };
-  const op = useOpcoesDoRecorte(f.id_tipo_processo);
   const setF = (patch: Partial<FiltrosMontado>) => onChange({ ...d, filtros: { ...f, ...patch } });
   const setP = (patch: Partial<PeriodoMontado>) => onChange({ ...d, periodo: { ...p, ...patch } });
-  const num = (v: number | string | null) => (typeof v === "number" ? v : null);
+  // Os mesmos campos, rótulos e ordem da barra de filtros das listas
+  // (`CamposDoRecorte`); só o período é diferente, porque aqui pode ser
+  // relativo. Null (do salvo) e undefined (da barra) querem dizer o mesmo.
+  const valor: FiltroDaUrl = {
+    id_unidade: f.id_unidade ?? undefined,
+    modo_unidade: f.modo_unidade,
+    id_tipo_processo: f.id_tipo_processo ?? undefined,
+    id_assunto: f.id_assunto ?? undefined,
+    id_servico: f.id_servico ?? undefined,
+  };
 
   return (
     <Card>
       <CardHeader><CardTitle>Período e recorte</CardTitle></CardHeader>
-      <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        <div>
-          <Label htmlFor="mon-periodo">Período</Label>
-          <Select id="mon-periodo" value={p.tipo}
-            onChange={(e) => onChange({ ...d, periodo: { tipo: e.target.value as TipoPeriodoMontado, dias: 30 } })}>
-            {(Object.keys(ROTULO_TIPO_PERIODO) as TipoPeriodoMontado[]).map((t) => (
-              <option key={t} value={t}>{ROTULO_TIPO_PERIODO[t]}</option>
-            ))}
-          </Select>
-          <p className="mt-1 text-xs text-foreground-muted">
-            {p.tipo === "fixo" || p.tipo === "sem"
-              ? "O mesmo período toda vez que abrir."
-              : "Relativo: recalculado no dia em que o relatório abre."}
-          </p>
-        </div>
-        <div>
-          <Label htmlFor="mon-data-base">Contar pela data de</Label>
-          <Select id="mon-data-base" value={f.data_base ?? "abertura"}
-            onChange={(e) => setF({ data_base: e.target.value as "abertura" | "arquivamento" })}>
-            <option value="abertura">abertura</option>
-            <option value="arquivamento">arquivamento</option>
-          </Select>
-        </div>
-        {p.tipo === "fixo" && (
-          <>
-            <div>
-              <Label htmlFor="mon-desde">De</Label>
-              <Input id="mon-desde" type="date" value={p.desde ?? ""} onChange={(e) => setP({ desde: e.target.value || null })} />
-            </div>
-            <div>
-              <Label htmlFor="mon-ate">Até</Label>
-              <Input id="mon-ate" type="date" value={p.ate ?? ""} onChange={(e) => setP({ ate: e.target.value || null })} />
-            </div>
-          </>
-        )}
-        {p.tipo === "ultimos_dias" && (
-          <div>
-            <Label htmlFor="mon-dias">Quantos dias</Label>
-            <Input id="mon-dias" type="number" min={1} max={3650} inputMode="numeric" value={p.dias ?? ""}
-              onChange={(e) => setP({ dias: e.target.value ? Number(e.target.value) : null })} />
-          </div>
-        )}
-        <div className="md:col-span-2">
-          <Label htmlFor="mon-unidade">Unidade</Label>
-          <Combobox id="mon-unidade" options={op.unidades} value={f.id_unidade ?? null}
-            onChange={(v) => setF({ id_unidade: num(v) })} placeholder="Todas as unidades"
-            searchPlaceholder="Nome ou sigla da unidade…" loading={op.carregando.unidades} />
-        </div>
-        {f.id_unidade ? (
-          <div className="md:col-span-2">
-            <Label htmlFor="mon-modo">Contar processos da unidade que é</Label>
-            <Select id="mon-modo" value={f.modo_unidade ?? "envolvida"}
-              onChange={(e) => setF({ modo_unidade: e.target.value as ModoUnidadeRelatorio })}>
-              {(Object.keys(ROTULO_MODO_UNIDADE) as ModoUnidadeRelatorio[]).map((m) => (
-                <option key={m} value={m}>{ROTULO_MODO_UNIDADE[m]}</option>
-              ))}
-            </Select>
-          </div>
-        ) : null}
-        <div>
-          <Label htmlFor="mon-tipo">Tipo de processo</Label>
-          <Combobox id="mon-tipo" options={op.tipos} value={f.id_tipo_processo ?? null}
-            onChange={(v) => {
-              const id = num(v) ?? undefined;
-              setF({ id_tipo_processo: id ?? null, id_assunto: op.assuntoCombina(f.id_assunto, id) ? f.id_assunto : null });
-            }}
-            placeholder="Todos" loading={op.carregando.tipos} />
-        </div>
-        <div>
-          <Label htmlFor="mon-assunto">Assunto</Label>
-          <Combobox id="mon-assunto" options={op.assuntos} value={f.id_assunto ?? null}
-            onChange={(v) => setF({ id_assunto: num(v) })} placeholder="Todos" loading={op.carregando.assuntos} />
-        </div>
-        <div className="md:col-span-2">
-          <Label htmlFor="mon-servico">Serviço</Label>
-          <Combobox id="mon-servico" options={op.servicos} value={f.id_servico ?? null}
-            onChange={(v) => setF({ id_servico: num(v) })} placeholder="Todos"
-            searchPlaceholder="Nome do serviço…" loading={op.carregando.servicos} />
-        </div>
+      <CardContent>
+        <CamposDoRecorte
+          prefixo="mon"
+          valor={valor}
+          onChange={(v) =>
+            setF({
+              id_unidade: v.id_unidade ?? null,
+              modo_unidade: v.modo_unidade,
+              id_tipo_processo: v.id_tipo_processo ?? null,
+              id_assunto: v.id_assunto ?? null,
+              id_servico: v.id_servico ?? null,
+            })
+          }
+          periodo={
+            <>
+              <div>
+                <Label htmlFor="mon-periodo">Período</Label>
+                <Select id="mon-periodo" value={p.tipo}
+                  onChange={(e) => onChange({ ...d, periodo: { tipo: e.target.value as TipoPeriodoMontado, dias: 30 } })}>
+                  {(Object.keys(ROTULO_TIPO_PERIODO) as TipoPeriodoMontado[]).map((t) => (
+                    <option key={t} value={t}>{ROTULO_TIPO_PERIODO[t]}</option>
+                  ))}
+                </Select>
+                <p className="mt-1 text-xs text-foreground-muted">
+                  {p.tipo === "fixo" || p.tipo === "sem"
+                    ? "O mesmo período toda vez que abrir."
+                    : "Relativo: recalculado no dia em que o relatório abre."}
+                </p>
+              </div>
+              <div>
+                <Label htmlFor="mon-data-base">Contar pela data de</Label>
+                <Select id="mon-data-base" value={f.data_base ?? "abertura"}
+                  onChange={(e) => setF({ data_base: e.target.value as "abertura" | "arquivamento" })}>
+                  <option value="abertura">abertura</option>
+                  <option value="arquivamento">arquivamento</option>
+                </Select>
+              </div>
+              {p.tipo === "fixo" && (
+                <>
+                  <div>
+                    <Label htmlFor="mon-desde">De</Label>
+                    <Input id="mon-desde" type="date" value={p.desde ?? ""} onChange={(e) => setP({ desde: e.target.value || null })} />
+                  </div>
+                  <div>
+                    <Label htmlFor="mon-ate">Até</Label>
+                    <Input id="mon-ate" type="date" value={p.ate ?? ""} onChange={(e) => setP({ ate: e.target.value || null })} />
+                  </div>
+                </>
+              )}
+              {p.tipo === "ultimos_dias" && (
+                <div>
+                  <Label htmlFor="mon-dias">Quantos dias</Label>
+                  <Input id="mon-dias" type="number" min={1} max={3650} inputMode="numeric" value={p.dias ?? ""}
+                    onChange={(e) => setP({ dias: e.target.value ? Number(e.target.value) : null })} />
+                </div>
+              )}
+            </>
+          }
+        />
       </CardContent>
     </Card>
   );
@@ -420,7 +406,7 @@ function SecaoFiltros({ d, onChange }: Edita) {
   return (
     <Card>
       <CardHeader><CardTitle>Filtros</CardTitle></CardHeader>
-      <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-2">
+      <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         <div>
           <Label htmlFor="mon-situacao">Situação hoje</Label>
           <Select id="mon-situacao" value={f.situacao ?? ""}
@@ -475,7 +461,7 @@ function SecaoFiltros({ d, onChange }: Edita) {
             placeholder="Qualquer"
             onChange={(e) => setF({ parado_ha_dias: e.target.value ? Number(e.target.value) : null })} />
         </div>
-        <fieldset className="space-y-2 md:col-span-2">
+        <fieldset className="space-y-2 md:col-span-2 xl:col-span-4">
           <legend className="text-sm font-medium text-foreground">Só processos</legend>
           {([
             ["complementacao_aberta", "com complementação aguardando o cidadão"],

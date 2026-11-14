@@ -12,6 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/ui/toast";
 import type { LotacaoOut, PainelUnidade } from "@/lib/api";
 
+import { respostaGerencial } from "./apoio/respostaGerencial";
+
 /** `perms` aceita "processo" (ler) e "processo:inserir" (abrir). */
 const estado: { perms: string[]; lotacoes: LotacaoOut[]; unidadeContexto: number | null } = {
   perms: [],
@@ -41,6 +43,8 @@ const notifMock = vi.fn(() => Promise.resolve({ items: [], nao_lidas: 4 }));
 /** "Parados há mais tempo": a caixa Análise, cinco primeiros. */
 let parados: { items: unknown[]; total: number } = { items: [], total: 0 };
 const listMock = vi.fn((_f: unknown) => Promise.resolve(parados));
+/** O Panorama (segundo andar, 2026-11-14) lê o gerencial dos relatórios. */
+const gerencialMock = vi.fn((_f: unknown) => Promise.resolve(respostaGerencial()));
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -54,6 +58,7 @@ vi.mock("@/lib/api", async () => {
         painel: () => painelMock(),
         list: (f: unknown) => listMock(f),
       },
+      relatorios: { ...actual.api.relatorios, gerencial: (f: unknown) => gerencialMock(f) },
     },
     notificacoesApi: { ...actual.notificacoesApi, listarMinhas: () => notifMock() },
   };

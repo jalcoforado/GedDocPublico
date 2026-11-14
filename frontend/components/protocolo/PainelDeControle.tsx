@@ -25,6 +25,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog } from "@/components/ui/dialog";
+import { PanoramaDoProtocolo } from "@/components/protocolo/PanoramaDoProtocolo";
 import { ParadosHaMaisTempo } from "@/components/protocolo/ParadosHaMaisTempo";
 import { KpiCard } from "@/components/ui/kpi-card";
 import { PageHeader } from "@/components/ui/page-header";
@@ -46,6 +47,10 @@ import { cn } from "@/lib/utils";
  * sistema de processos. A `/home` deixou de redirecionar para cá em
  * 2026-11-05: virou o Início que atravessa os módulos, e um dos cartões dela
  * resume este painel.
+ *
+ * Desde 2026-11-14 tem um segundo andar, o Panorama do protocolo
+ * (`PanoramaDoProtocolo`): o período, com os números que até então moravam
+ * na tela de Relatórios — que virou um índice de relatórios.
  *
  * Os números vêm de `GET /processos/painel`, no mesmo recorte das caixas de
  * trabalho (unidade ATIVA, sigilo de quem consulta): o quadro diz 12 e a
@@ -251,7 +256,8 @@ export function PainelDeControle() {
   // ela que o `GET /processos/painel` conta. Vem do mesmo hook do cabeçalho
   // (`UnidadeAtiva`), para o nome daqui e o de lá não divergirem; trocar de
   // setor invalida as queries, e nome e números mudam juntos.
-  const nomeUnidade = useLotacaoAtiva().ativa?.nome;
+  const lotacao = useLotacaoAtiva().ativa;
+  const nomeUnidade = lotacao?.nome;
 
   const painelQ = useQuery({
     queryKey: ["protocolo-painel"],
@@ -408,6 +414,11 @@ export function PainelDeControle() {
       {operaProcessos && painel && !unidadeVazia && (
         <ParadosHaMaisTempo intervalo={INTERVALO_ATUALIZACAO} />
       )}
+
+      {/* Segundo andar (2026-11-14): o período, no visual do Panorama do
+          Início, com os números da tela de Relatórios do SI-34. O andar de
+          cima é "a minha unidade, agora"; este diz o seu próprio recorte. */}
+      {operaProcessos && <PanoramaDoProtocolo idUnidade={lotacao?.id ?? null} nomeUnidade={nomeUnidade} />}
 
       {configurando && (
         <ConfigurarQuadros

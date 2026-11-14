@@ -1,7 +1,7 @@
 # Relatórios do Protocolo
 
 > **Status:** vivo · **Autoridade sobre:** o que cada número de `/m/protocolo/relatorios` mede, quem vê, e as limitações conhecidas.
-> **Última verificação:** 2026-11-12 (SI-35).
+> **Última verificação:** 2026-11-14 (Panorama no Painel; Relatórios como índice).
 > Índice: [docs/INDEX.md](INDEX.md) · precedência: código > `CLAUDE.md` > este doc.
 
 Fonte de verdade executável: `backend/app/services/relatorios_comum.py` (as
@@ -16,15 +16,31 @@ código vence e este arquivo deve ser corrigido.
 
 | Tela | Pergunta | Onde |
 |---|---|---|
-| Painel de controle | O que a minha unidade tem para fazer **agora**? | `/m/protocolo/painel` |
-| Dashboard executivo | Qual o **panorama**, em gráficos? | `/dashboard` — **fora do menu** (ver Limitações) |
-| **Relatórios** | O que aconteceu **no período**, com a lista que prova cada número? | `/m/protocolo/relatorios` |
+| Painel de controle, andar de cima | O que a minha unidade tem para fazer **agora**? | `/m/protocolo/painel` |
+| Painel de controle, **Panorama do protocolo** | Como o protocolo andou **no período** (7/30/90 dias), na minha unidade ou em todas? | `/m/protocolo/painel`, abaixo dos quadros |
+| **Relatórios** | Qual relatório responde à minha pergunta, e a lista que prova cada número | `/m/protocolo/relatorios` (índice) e as listas |
+| Dashboard executivo | (legado) panorama em gráficos | `/dashboard` — **fora do menu** (ver Limitações) |
 
-## A página de relatórios
+Desde 2026-11-14 (decisão do time): os números do período saíram da página de
+Relatórios e foram para o **Painel de controle**, como segundo andar
+(`components/protocolo/PanoramaDoProtocolo.tsx`), no visual do Panorama do
+Início: cartões, gráficos com a pergunta no título e cada bloco levando ao
+relatório que prova o número. Os filtros do Panorama são simples: período por
+botões e **minha unidade (padrão, a regra de negócio de hoje) ou todas**. Os
+filtros finos (tipo, assunto, serviço) ficam nos Relatórios. Sem comparação
+com o período anterior. O Panorama lê `GET /relatorios/gerencial.json`, o
+mesmo endpoint da antiga página — **não** o dashboard executivo.
 
-Uma página, um filtro no topo (período, unidade, tipo, assunto, serviço), um
-gráfico de tendência e as seções abaixo. O filtro é o **recorte comum**: vale
-igual na página, nas quatro listas, nos CSVs e nos PDFs.
+A página de **Relatórios virou um índice**: os quatro relatórios padrão
+(Processos, Tramitação, Documentação, Assinaturas), cada um com a pergunta que
+responde e quem o usa (a lista do SI-33), mais "Meus relatórios" e o montador
+(SI-35). Ela não consulta número nenhum. As listas continuam como eram.
+
+## Os números do período (Panorama) e as listas
+
+Um filtro, o **recorte comum** (período, unidade, tipo, assunto, serviço), vale
+igual no Panorama, nas quatro listas, no montador, nos CSVs e nos PDFs — os
+campos são um componente só (`CamposDoRecorte`).
 **Cada seção conta pela sua própria data** e diz qual é:
 
 | Seção | Conta | Pela data de |
@@ -47,15 +63,16 @@ A comparação com o período anterior e os "principais assuntos" saíram da
 página em 2026-11-11, para deixá-la mais limpa. Os assuntos
 viraram o quadro **"Agrupar por"** da lista de processos.
 
-As seções ficam em **quatro grupos, um por tela de destino**, com **um botão de
-lista por grupo**:
+No Panorama, cada bloco leva à sua lista com o recorte que produziu o número:
 
-| Grupo | Subgrupos | Botão leva a |
-|---|---|---|
-| Processos | Entrada e saída no tempo, Entrada, Andamento, Saída, Prazos | lista de processos |
-| Tramitação | Gargalos por unidade | tramitação, pela data de chegada |
-| Documentação | Documentos exigidos, Complementação | lista de documentação |
-| Assinaturas | Pedidos no período | assinaturas, pela data do pedido |
+| Bloco do Panorama | Leva a |
+|---|---|
+| Cartões Abertos, Arquivados, Em andamento, Parados, Prazo vencido | lista de processos, na visão do cartão |
+| Entrada e saída no tempo; Por onde entram | lista de processos |
+| Os prazos estão sendo cumpridos? (cada fatia) | lista de processos, na visão da fatia |
+| Onde os processos demoram? | tramitação, pela data de chegada |
+| Os documentos estão em dia? (cada fatia) | lista de documentação, na visão da fatia |
+| Assinaturas pendentes; Como andam as assinaturas? | assinaturas, pela data do pedido |
 
 Na lista de processos, o seletor **"Mostrar"** escolhe o recorte de cada número
 do grupo (abertos, arquivados, em andamento, em trânsito, parados, no prazo, com
@@ -64,8 +81,8 @@ produziu o número: o backend garante que o número é o total dessa lista, e o
 frontend garante que cada opção pede esses mesmos parâmetros
 (`VISOES_PROCESSOS` em `frontend/lib/relatorios.ts`). Nas opções "de hoje" o
 período não entra na consulta, mas fica na URL e volta a valer ao trocar de
-opção. **CSV e PDF de lista ficam nas listas**; a página de relatórios sai
-inteira em PDF.
+opção. **CSV e PDF de lista ficam nas listas**; o Panorama sai inteiro em PDF
+("PDF do panorama", o antigo "PDF desta página").
 
 Cada lista tem, além do recorte comum, **os filtros do que ela mostra**:
 

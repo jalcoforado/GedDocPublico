@@ -30,6 +30,8 @@ vi.mock("@/lib/api", () => ({
     admin: { me: () => Promise.resolve({ is_platform_admin: false }) },
     modulos: () => Promise.resolve({ itens: [{ slug: "protocolo", nome: "Protocolo", icone: "FileText", ordem: 1 }] }),
     branding: () => Promise.resolve(null),
+    // O Panorama do painel (2026-11-14) lê o gerencial; aqui só não pode quebrar.
+    relatorios: { gerencial: () => Promise.reject(new Error("sem dados no teste")) },
     processos: {
       caixas: () => Promise.resolve({
         entrada: 0, saida: 0, analise: 12, externos: 0, aguardando_assinatura: 0,
@@ -40,6 +42,7 @@ vi.mock("@/lib/api", () => ({
   notificacoesApi: {
     listarMinhas: () => Promise.resolve({ nao_lidas: 0, itens: [] }),
   },
+  gerencialPdfUrl: () => "/api/v2/relatorios/gerencial.pdf",
 }));
 
 import AppLayout from "@/app/(app)/layout";
