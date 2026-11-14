@@ -207,6 +207,20 @@ describe("F3 — o nginx precisa conhecer as rotas", () => {
       ).toBe(true);
     },
   );
+
+  // Menu por área (2026-11-14): `/cadastros` nasceu em `app/(app)/` e
+  // funcionava no Next, mas dava 502 pelo nginx — fora da regex, a rota cai
+  // no fallback PHP (que não existe mais). Toda tela transversal tem de
+  // estar na regex; `m` tem teste próprio acima.
+  it.each(Array.from(TRANSVERSAIS).filter((d) => d !== "m"))(
+    "a tela transversal `/%s` está na regex do nginx",
+    (token) => {
+      expect(
+        tokens.has(token),
+        `sem o token \`${token}\` em nginx/default.conf, /${token} cai no fallback legado e dá 502 pelo :8090, mesmo funcionando no Next`,
+      ).toBe(true);
+    },
+  );
 });
 
 /**
