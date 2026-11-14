@@ -31,6 +31,22 @@ filtros finos (tipo, assunto, serviço) ficam nos Relatórios. Sem comparação
 com o período anterior. O Panorama lê `GET /relatorios/gerencial.json`, o
 mesmo endpoint da antiga página — **não** o dashboard executivo.
 
+O andar de cima também virou dash (mesmo dia): as tabelas saíram.
+"Controle de prazos" é o quadro **"O prazo do envio está sendo cumprido?"**
+(o prazo da caixa: o do encaminhamento vigente, ou o do serviço quando o envio
+não fixou um — o que pinta a linha na caixa); "Aguardando retorno" e
+"Assinaturas" viraram detalhe dos quadros Enviados e Para assinar; e a lista
+"Parados há mais tempo" virou o quadro **"O que está parado há mais tempo?"**,
+que conta os parados há 15+ dias **onde estão agora** na unidade e leva à visão
+Parados do relatório de Processos — que, nessa visão, ordena do mais parado
+para o menos e mostra "parado há N dias".
+
+**Dois prazos, dois nomes, de propósito:** "prazo do envio" (no andar de cima,
+o compromisso de quem está com o processo) e "prazo do serviço" (no Panorama e
+nos Relatórios, a promessa ao cidadão). Por isso o "vencidos" de um pode não
+ser o do outro. Também há dois "parados": o do andar de cima conta onde o
+processo está agora; o do Panorama, dona ou onde está. Cada bloco diz o seu.
+
 A página de **Relatórios virou um índice**: os quatro relatórios padrão
 (Processos, Tramitação, Documentação, Assinaturas), cada um com a pergunta que
 responde e quem o usa (a lista do SI-33), mais "Meus relatórios" e o montador
