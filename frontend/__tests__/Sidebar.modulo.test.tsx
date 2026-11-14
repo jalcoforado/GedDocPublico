@@ -96,27 +96,27 @@ describe("menu único", () => {
     expect(screen.queryByRole("link", { name: "Conciliação" })).toBeNull();
   });
 
-  it("cadastros e etapas ficam fora da barra; a tela-índice do módulo entra no lugar", async () => {
+  it("cadastros e etapas ficam fora da barra; uma tela-índice de TODOS os módulos entra no lugar", async () => {
     renderSidebar({ modulo: "frota", open: true, onClose: () => {} });
     await screen.findByRole("link", { name: "Caixas de trabalho" });
-    for (const fora of ["Manifestantes", "Assuntos", "CCD (Classificação)", "Aguardando gestor", "Fornecedores", "Motoristas", "Empresas"]) {
+    for (const fora of ["Manifestantes", "Assuntos", "CCD (Classificação)", "Aguardando gestor", "Fornecedores", "Motoristas", "Empresas", "Dashboard", "Indicadores", "Cadastros e controle"]) {
       expect(screen.queryByRole("link", { name: fora }), fora).toBeNull();
     }
-    expect(screen.getByRole("link", { name: "Cadastros e configuração" })).toHaveAttribute("href", "/m/protocolo/cadastros");
-    expect(screen.getByRole("link", { name: "Cadastros e controle" })).toHaveAttribute("href", "/m/pagamentos/cadastros");
+    // Menu por área (2026-11-14): um índice só, em vez de um por módulo.
+    const cadastros = screen.getAllByRole("link", { name: "Cadastros e configuração" });
+    expect(cadastros.map((a) => a.getAttribute("href"))).toEqual(["/cadastros"]);
   });
 
-  it("seções na ordem do catálogo, Administração por último e fechada", async () => {
+  it("seções por ÁREA (não por módulo), Administração por último e fechada", async () => {
     renderSidebar({ modulo: "frota", open: true, onClose: () => {} });
     await screen.findByRole("link", { name: "Caixas de trabalho" });
     const botoes = screen
       .getAllByRole("button")
-      .filter((b) => b.hasAttribute("aria-expanded") && /^(Protocolo|Pagamentos|Frota|Transporte Regulado|Administração)$/.test(b.textContent?.trim() ?? ""));
+      .filter((b) => b.hasAttribute("aria-expanded") && /^(Atendimento|Financeiro|Mobilidade|Protocolo|Pagamentos|Frota|Transporte Regulado|Administração)$/.test(b.textContent?.trim() ?? ""));
     expect(botoes.map((b) => b.textContent?.trim())).toEqual([
-      "Protocolo",
-      "Pagamentos",
-      "Frota",
-      "Transporte Regulado",
+      "Atendimento",
+      "Financeiro",
+      "Mobilidade",
       "Administração",
     ]);
     const adm = botoes[botoes.length - 1];

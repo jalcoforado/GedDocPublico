@@ -31,6 +31,9 @@ const TODOS = Object.values(MENUS).flatMap((m) => hrefs(m.grupos.flatMap((g) => 
  */
 const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> = {
   "/home": {},
+  // Menu por área (2026-11-14): índice de cadastros de todos os módulos. Sem
+  // perm própria — cada cartão dela é podado pela permissão da tela.
+  "/cadastros": {},
   "/m/protocolo/painel": { perm: "processo" },
   // "Caixas de trabalho": UM item. As caixas são abas da tela, não itens do
   // menu (`components/protocolo/AbasCaixas.tsx`).

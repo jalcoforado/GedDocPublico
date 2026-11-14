@@ -138,10 +138,18 @@ describe("menu do protocolo — telas, não filtros", () => {
 });
 
 describe("irmãos aninhados — vence o mais específico", () => {
-  it("em /m/pagamentos/dashboard, só 'Dashboard' (não 'Visão geral')", async () => {
+  it("em /m/pagamentos/conciliacao, só 'Conciliação' (não 'Visão geral')", async () => {
+    onde.pathname = "/m/pagamentos/conciliacao";
+    renderSidebar({ modulo: "pagamentos", open: true, onClose: () => {} });
+    await waitFor(() => expect(atuais()).toEqual(["Conciliação"]));
+  });
+
+  it("em Indicadores (o antigo Dashboard, aba da Visão geral), a atual é 'Visão geral'", async () => {
+    // Menu por área (2026-11-14): Indicadores saiu da barra e virou aba da
+    // Visão geral — quem acende é a tela que contém a aba.
     onde.pathname = "/m/pagamentos/dashboard";
     renderSidebar({ modulo: "pagamentos", open: true, onClose: () => {} });
-    await waitFor(() => expect(atuais()).toEqual(["Dashboard"]));
+    await waitFor(() => expect(atuais()).toEqual(["Visão geral"]));
   });
 
   it("numa etapa (aba) de Solicitações, a atual na barra é 'Solicitações'", async () => {

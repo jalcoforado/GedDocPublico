@@ -38,7 +38,9 @@ const DIR_M = join(DIR_APP, "m");
  * nenhum. Acrescentar nome aqui é decisão de arquitetura — se a tela é de um
  * módulo, o lugar dela é `m/<slug>/`.
  */
-const TRANSVERSAIS = new Set(["home", "dashboard", "perfil", "para-assinar", "minuta-error", "m"]);
+// `cadastros` (menu por área, 2026-11-14): junta os cadastros e a configuração
+// de TODOS os módulos numa tela, por área — agrega através dos módulos.
+const TRANSVERSAIS = new Set(["home", "dashboard", "perfil", "para-assinar", "minuta-error", "cadastros", "m"]);
 
 function subdiretorios(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true })

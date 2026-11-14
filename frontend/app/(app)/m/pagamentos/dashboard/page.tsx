@@ -35,6 +35,7 @@ import { KpiCard } from "@/components/ui/kpi-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { api, type ComposicaoItem } from "@/lib/api";
+import { NavVisaoFinanceiro } from "@/components/pagamentos/NavVisaoFinanceiro";
 import { PAGAMENTO_ROTULO, TRAMITACAO_ROTULO } from "@/components/pagamentos/situacoes";
 import { EIXO, GRAFICO } from "@/lib/chart-theme";
 import { cn } from "@/lib/utils";
@@ -258,7 +259,7 @@ export default function PagamentosDashboardPage() {
     <div className="space-y-6">
       <PageHeader
         icon={BarChart3}
-        title="Dashboard financeiro"
+        title="Indicadores financeiros"
         description="Visão consolidada de caixa, despesas e alertas do módulo de pagamentos."
         actions={
           <Select
@@ -275,6 +276,7 @@ export default function PagamentosDashboardPage() {
           </Select>
         }
       />
+      <NavVisaoFinanceiro />
 
       {/* Linha 1 — KPIs */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
