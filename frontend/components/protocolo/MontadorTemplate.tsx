@@ -164,7 +164,7 @@ export function MontadorTemplate({
       <div
         role="group"
         aria-labelledby="paleta-blocos-titulo"
-        className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-surface-1 px-2 py-1.5 shadow-sm"
+        className="sticky top-0 z-sticky flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-surface-1 px-2 py-1.5 shadow-sm"
       >
         <span id="paleta-blocos-titulo" className="mr-1 text-xs font-semibold text-foreground">
           Blocos
