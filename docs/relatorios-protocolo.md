@@ -31,21 +31,21 @@ filtros finos (tipo, assunto, serviço) ficam nos Relatórios. Sem comparação
 com o período anterior. O Panorama lê `GET /relatorios/gerencial.json`, o
 mesmo endpoint da antiga página — **não** o dashboard executivo.
 
-O andar de cima também virou dash (mesmo dia): as tabelas saíram.
-"Controle de prazos" é o quadro **"O prazo do envio está sendo cumprido?"**
-(o prazo da caixa: o do encaminhamento vigente, ou o do serviço quando o envio
-não fixou um — o que pinta a linha na caixa); "Aguardando retorno" e
-"Assinaturas" viraram detalhe dos quadros Enviados e Para assinar; e a lista
-"Parados há mais tempo" virou o quadro **"O que está parado há mais tempo?"**,
-que conta os parados há 15+ dias **onde estão agora** na unidade e leva à visão
-Parados do relatório de Processos — que, nessa visão, ordena do mais parado
-para o menos e mostra "parado há N dias".
+As tabelas e a lista do Painel saíram (mesmo dia): "Aguardando retorno" e
+"Assinaturas" viraram detalhe dos quadros Enviados e Para assinar; "Parados há
+mais tempo" é o cartão de Parados do Panorama, que leva à visão Parados do
+relatório de Processos — que, nessa visão, ordena do mais parado para o menos
+e mostra "parado há N dias".
 
-**Dois prazos, dois nomes, de propósito:** "prazo do envio" (no andar de cima,
-o compromisso de quem está com o processo) e "prazo do serviço" (no Panorama e
-nos Relatórios, a promessa ao cidadão). Por isso o "vencidos" de um pode não
-ser o do outro. Também há dois "parados": o do andar de cima conta onde o
-processo está agora; o do Panorama, dona ou onde está. Cada bloco diz o seu.
+**Dois prazos no quadro "Os prazos estão sendo cumpridos?", o do serviço como
+principal** (decisão de 2026-11-14). O **prazo do serviço** (a promessa ao
+cidadão; o mesmo dos Relatórios) é a barra principal. O **prazo do envio** (o
+da caixa: o do encaminhamento vigente, ou o do serviço quando o envio não fixou
+um — o que pinta a linha na caixa) vem embaixo, menor, só em "Minha unidade",
+porque é da mesa da unidade ativa, agora. Por isso os dois "vencidos" podem
+diferir. Por que o do serviço é o principal: vale igual para todos (o do envio
+depende de alguém preencher), fecha a conta com a lista do relatório, e mede o
+que o cidadão sente.
 
 A página de **Relatórios virou um índice**: os quatro relatórios padrão
 (Processos, Tramitação, Documentação, Assinaturas), cada um com a pergunta que

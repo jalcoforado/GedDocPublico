@@ -7,7 +7,8 @@ import { useState } from "react";
 
 import { BarraSegmentada, CartaoTendencia, ListaDeBarras, QuadroGrafico, SeletorPeriodo } from "@/components/home/graficos";
 import { GraficoEntradaSaida } from "@/components/relatorios/GraficoEntradaSaida";
-import { api, gerencialPdfUrl, type GerencialResposta } from "@/lib/api";
+import { api, gerencialPdfUrl, type GerencialResposta, type PainelUnidade } from "@/lib/api";
+import { hrefDaCaixa } from "@/lib/caixas-processos";
 import {
   ROTA_LISTA_ASSINATURAS,
   ROTA_LISTA_DOCUMENTACAO,
@@ -71,7 +72,18 @@ export function periodoDosUltimos(dias: number, hoje = new Date()): { desde: str
 
 type Escopo = "minha" | "todas";
 
-export function PanoramaDoProtocolo({ idUnidade, nomeUnidade }: { idUnidade: number | null; nomeUnidade?: string | null }) {
+export function PanoramaDoProtocolo({
+  idUnidade,
+  nomeUnidade,
+  prazoDoEnvio,
+}: {
+  idUnidade: number | null;
+  nomeUnidade?: string | null;
+  /** Prazos da caixa Análise da unidade ativa (`GET /processos/painel`):
+   * o "prazo do envio", complemento do prazo do serviço. Só existe para a
+   * unidade ativa — em "Todas" o quadro diz isso. */
+  prazoDoEnvio?: PainelUnidade["prazos"];
+}) {
   const [periodo, setPeriodo] = useState(30);
   const [escopo, setEscopo] = useState<Escopo>(idUnidade ? "minha" : "todas");
   const minha = escopo === "minha" && !!idUnidade;
@@ -185,7 +197,7 @@ export function PanoramaDoProtocolo({ idUnidade, nomeUnidade }: { idUnidade: num
 
         <QuadroGrafico
           pergunta="Os prazos estão sendo cumpridos?"
-          resposta="Prazo do serviço prometido ao cidadão: abertura + N dias. “Vencendo”: faltam 20% do prazo ou menos."
+          resposta="Pelo prazo do serviço, a promessa ao cidadão: abertura + N dias. “Vencendo”: faltam 20% do prazo ou menos."
           acao={{ href: visao("vencidos"), label: "Ver vencidos" }}
         >
           {q.isLoading ? (
@@ -213,6 +225,7 @@ export function PanoramaDoProtocolo({ idUnidade, nomeUnidade }: { idUnidade: num
                 vazio="Nenhum arquivado com prazo de serviço no período."
                 nota={`${g.prazos.concluidos_sem_prazo} arquivado(s) sem prazo de serviço.`}
               />
+              <PrazoDoEnvio prazos={minha ? prazoDoEnvio : undefined} />
             </div>
           ) : null}
         </QuadroGrafico>
@@ -310,6 +323,51 @@ export function PanoramaDoProtocolo({ idUnidade, nomeUnidade }: { idUnidade: num
         </ul>
       )}
     </section>
+  );
+}
+
+/**
+ * O prazo do envio, como complemento do prazo do serviço (decisão de
+ * 2026-11-14: os dois no Panorama, o do serviço como principal). É o prazo da
+ * caixa Análise — o do encaminhamento vigente, ou o do serviço quando o envio
+ * não fixou um —, o que pinta a linha na caixa. Vale para a mesa da unidade
+ * ativa, agora: não segue o período nem existe para "Todas".
+ */
+function PrazoDoEnvio({ prazos }: { prazos?: PainelUnidade["prazos"] }) {
+  const analise = hrefDaCaixa("analise");
+  return (
+    <div className="space-y-1.5 border-t border-border pt-3" data-testid="prazo-do-envio">
+      <p className="text-xs font-medium uppercase tracking-wide text-foreground-subtle">
+        Prazo do envio · na mesa da unidade, agora
+      </p>
+      {!prazos ? (
+        <p className="text-xs text-foreground-muted">
+          É o prazo que quem encaminhou deu à unidade; aparece em “Minha unidade”.
+        </p>
+      ) : (
+        <>
+          <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+            {(
+              [
+                ["Vencido", prazos.vencidos, "text-danger-soft-foreground"],
+                ["Vencendo", prazos.vencendo, "text-warning-soft-foreground"],
+                ["No prazo", prazos.no_prazo, "text-foreground"],
+              ] as const
+            ).map(([rotulo, n, cor]) => (
+              <li key={rotulo}>
+                <Link href={analise} className="inline-flex items-baseline gap-1 rounded hover:underline">
+                  <span className="text-foreground-muted">{rotulo}</span>
+                  <span className={cn("font-semibold tabular-nums", n > 0 && cor)}>{n}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-foreground-muted">
+            O do encaminhamento, ou o do serviço quando o envio não fixou um. Sem prazo: {prazos.sem_prazo}.
+          </p>
+        </>
+      )}
+    </div>
   );
 }
 

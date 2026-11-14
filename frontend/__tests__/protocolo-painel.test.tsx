@@ -40,9 +40,6 @@ vi.mock("@/lib/auth", () => ({
 let painel: PainelUnidade;
 const painelMock = vi.fn(() => Promise.resolve(painel));
 const notifMock = vi.fn(() => Promise.resolve({ items: [], nao_lidas: 4 }));
-/** Quadro "parados" (2026-11-14): o total da visão Parados do relatório. */
-let totalParados = 7;
-const processosRelMock = vi.fn((_f: unknown) => Promise.resolve({ totais: { total: totalParados } }));
 /** O Panorama (segundo andar, 2026-11-14) lê o gerencial dos relatórios. */
 const gerencialMock = vi.fn((_f: unknown) => Promise.resolve(respostaGerencial()));
 
@@ -60,7 +57,6 @@ vi.mock("@/lib/api", async () => {
       relatorios: {
         ...actual.api.relatorios,
         gerencial: (f: unknown) => gerencialMock(f),
-        processos: (f: unknown) => processosRelMock(f),
       },
     },
     notificacoesApi: { ...actual.notificacoesApi, listarMinhas: () => notifMock() },
@@ -110,8 +106,6 @@ beforeEach(() => {
   painel = painelBase();
   painelMock.mockClear();
   notifMock.mockClear();
-  totalParados = 7;
-  processosRelMock.mockClear();
   window.localStorage.clear();
 });
 afterEach(() => {
@@ -165,18 +159,23 @@ describe("painel de controle", () => {
     expect(quadro("Recusados").innerHTML).not.toContain("border-l-danger");
   });
 
-  it("o prazo do envio é um quadro do dash, com o nome do prazo, e leva à caixa Análise", async () => {
+  it("o prazo do envio é complemento do prazo do serviço, dentro do Panorama, e leva à caixa Análise", async () => {
+    estado.lotacoes = [{ id: 3, nome: "Secretaria de Administração", principal: true }];
     await abrir();
-    const prazos = within(await screen.findByRole("region", { name: "O prazo do envio está sendo cumprido?" }));
-    for (const [rotulo, n] of [["Prazo vencido", "2"], ["Vencendo", "3"], ["No prazo", "5"]]) {
-      const link = prazos.getByText(rotulo).closest("a") as HTMLAnchorElement;
+    const bloco = within(await screen.findByTestId("prazo-do-envio"));
+    // dentro do quadro de prazos do Panorama, depois do prazo do serviço
+    expect(screen.getByTestId("prazo-do-envio").closest("section")).toHaveAccessibleName("Os prazos estão sendo cumpridos?");
+    for (const [rotulo, n] of [["Vencido", "2"], ["Vencendo", "3"], ["No prazo", "5"]]) {
+      const link = bloco.getByText(rotulo).closest("a") as HTMLAnchorElement;
       expect(link).toHaveAttribute("href", "/m/protocolo/processos?caixa=analise&ativos=0");
       expect(link).toHaveTextContent(n);
     }
-    expect(prazos.getByText("Sem prazo definido: 2.")).toBeInTheDocument();
-    // as antigas tabelas não existem mais
+    expect(bloco.getByText(/Sem prazo: 2./)).toBeInTheDocument();
+    // as antigas tabelas e os quadros do meio não existem mais
     expect(screen.queryByRole("region", { name: "Controle de prazos" })).toBeNull();
     expect(screen.queryByRole("region", { name: "Aguardando retorno de outras unidades" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "O prazo do envio está sendo cumprido?" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "O que está parado há mais tempo?" })).toBeNull();
   });
 
   it("retorno e assinaturas viraram detalhe dos quadros Enviados e Para assinar", async () => {
@@ -197,20 +196,12 @@ describe("painel de controle", () => {
     expect(caixaDo("Para assinar")).not.toHaveTextContent("enviado(s) por você");
   });
 
-  it("sem nenhum prazo na unidade, diz isso em vez de três zeros", async () => {
-    painel = { ...painelBase(), prazos: { vencidos: 0, vencendo: 0, no_prazo: 0, sem_prazo: 12 } };
-    await abrir();
-    const prazos = within(await screen.findByRole("region", { name: "O prazo do envio está sendo cumprido?" }));
-    expect(prazos.getByText("Nenhum processo com prazo na unidade.")).toBeInTheDocument();
-    expect(prazos.queryByText("Vencendo")).toBeNull();
-  });
-
   it("quem não opera processos vê só as notificações, e o painel não é pedido", async () => {
     estado.perms = [];
     await abrir();
     await waitFor(() => expect(valorDo("Notificações")).toBe("4"));
     expect(screen.queryByText("Na unidade")).toBeNull();
-    expect(screen.queryByRole("region", { name: "Controle de prazos" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Os prazos estão sendo cumpridos?" })).toBeNull();
     expect(painelMock).not.toHaveBeenCalled();
   });
 
@@ -463,7 +454,7 @@ describe("painel de controle — mais perto do SEI", () => {
       },
     };
     await abrir();
-    await screen.findByRole("region", { name: "O prazo do envio está sendo cumprido?" });
+    await screen.findByRole("region", { name: "Os prazos estão sendo cumpridos?" });
     expect(screen.queryByRole("region", { name: "Primeiros passos" })).toBeNull();
   });
 
@@ -508,38 +499,5 @@ describe("painel de controle — mais perto do SEI", () => {
   it("sem o nome da unidade, mantém o texto genérico", async () => {
     await abrir();
     expect(await screen.findByText(/os números são da sua unidade/)).toBeInTheDocument();
-  });
-});
-
-describe("parados: quadro do dash que leva ao relatório (2026-11-14)", () => {
-  const quadroParados = () => screen.getByRole("region", { name: "O que está parado há mais tempo?" });
-
-  it("conta os parados onde estão agora na unidade ATIVA, e leva à visão Parados do relatório", async () => {
-    estado.lotacoes = [{ id: 3, nome: "Secretaria de Administração", principal: true }];
-    await abrir();
-    await waitFor(() => expect(within(quadroParados()).getByTestId("parados-total")).toHaveTextContent("7"));
-    expect(processosRelMock).toHaveBeenCalledWith({
-      id_unidade: 3, modo_unidade: "atual", parado_ha_dias: 15, max_rows: 1,
-    });
-    const ver = within(quadroParados()).getByRole("link", { name: /Ver no relatório/ });
-    const [rota, qs] = ver.getAttribute("href")!.split("?");
-    expect(rota).toBe("/m/protocolo/relatorios/processos");
-    expect(Object.fromEntries(new URLSearchParams(qs))).toEqual({
-      id_unidade: "3", modo_unidade: "atual", parado_ha_dias: "15", dias_parado: "15",
-    });
-    expect(quadroParados()).toHaveTextContent("que estão agora na unidade Secretaria de Administração");
-  });
-
-  it("a antiga lista nome a nome saiu do painel", async () => {
-    await abrir();
-    await screen.findByRole("region", { name: "O que está parado há mais tempo?" });
-    expect(screen.queryByRole("region", { name: "Parados há mais tempo na unidade" })).toBeNull();
-  });
-
-  it("unidade sem processo nenhum não mostra o quadro (o primeiro uso já fala)", async () => {
-    painel.caixas = { ...painel.caixas, analise: 0, entrada: 0, saida: 0, externos: 0, arquivados: 0, recusados: 0 };
-    await abrir();
-    await screen.findByText(/Ainda não há nenhum processo/);
-    expect(screen.queryByRole("region", { name: "O que está parado há mais tempo?" })).toBeNull();
   });
 });

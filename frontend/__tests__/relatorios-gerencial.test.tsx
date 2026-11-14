@@ -67,10 +67,16 @@ function cliente() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
 
+const PRAZO_DO_ENVIO = { vencidos: 11, vencendo: 0, no_prazo: 3, sem_prazo: 3 };
+
 async function abrirPanorama(idUnidade: number | null = 3) {
   render(
     <QueryClientProvider client={cliente()}>
-      <PanoramaDoProtocolo idUnidade={idUnidade} nomeUnidade={idUnidade ? "Secretaria de Obras" : null} />
+      <PanoramaDoProtocolo
+        idUnidade={idUnidade}
+        nomeUnidade={idUnidade ? "Secretaria de Obras" : null}
+        prazoDoEnvio={idUnidade ? PRAZO_DO_ENVIO : undefined}
+      />
     </QueryClientProvider>,
   );
   await screen.findByRole("region", { name: "Quantos processos entram e quantos saem?" });
@@ -197,6 +203,25 @@ describe("Panorama do protocolo — o segundo andar do Painel de controle", () =
     const processos = ver("Quantos processos entram e quantos saem?", /Ver lista de processos/);
     expect(processos.rota).toBe("/m/protocolo/relatorios/processos");
     expect(processos.params).toEqual(RECORTE_MINHA);
+  });
+
+  it("dois prazos, o do serviço como principal: o do envio é complemento, só na minha unidade", async () => {
+    await abrirPanorama();
+    const prazos = quadro("Os prazos estão sendo cumpridos?");
+    expect(prazos).toHaveTextContent(/Pelo prazo do serviço/);
+    const envio = within(within(prazos).getByTestId("prazo-do-envio"));
+    expect(envio.getByText(/Prazo do envio · na mesa da unidade, agora/)).toBeInTheDocument();
+    expect(envio.getByText("Vencido").closest("a")).toHaveTextContent("11");
+    expect(envio.getByText("Vencido").closest("a")).toHaveAttribute("href", "/m/protocolo/processos?caixa=analise&ativos=0");
+    // o do serviço vem antes (é o principal)
+    const textos = prazos.textContent ?? "";
+    expect(textos.indexOf("Em aberto hoje")).toBeLessThan(textos.indexOf("Prazo do envio"));
+
+    fireEvent.click(screen.getByRole("radio", { name: "Todas" }));
+    await screen.findByText(/em todas as unidades/);
+    expect(within(quadro("Os prazos estão sendo cumpridos?")).getByTestId("prazo-do-envio")).toHaveTextContent(
+      "aparece em “Minha unidade”",
+    );
   });
 
   it("sem comparação com o período anterior (decisão de 2026-11-14) e com tabela do gráfico para leitor de tela", async () => {

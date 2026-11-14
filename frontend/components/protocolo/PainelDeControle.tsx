@@ -25,15 +25,13 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog } from "@/components/ui/dialog";
-import { BarraSegmentada, QuadroGrafico } from "@/components/home/graficos";
-import { DIAS_PARADO_PANORAMA, PanoramaDoProtocolo } from "@/components/protocolo/PanoramaDoProtocolo";
+import { PanoramaDoProtocolo } from "@/components/protocolo/PanoramaDoProtocolo";
 import { KpiCard } from "@/components/ui/kpi-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { api, notificacoesApi, type PainelUnidade } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { ROTA_PROCESSOS, hrefDaCaixa } from "@/lib/caixas-processos";
 import { useLotacaoAtiva } from "@/lib/lotacao-ativa";
-import { ROTA_LISTA_PROCESSOS, comVisao, filtroParaUrl } from "@/lib/relatorios";
 import { cn } from "@/lib/utils";
 
 /**
@@ -421,20 +419,14 @@ export function PainelDeControle() {
 
       {operaProcessos && unidadeVazia && <PrimeiroUso podeAbrir={can("processo", "inserir")} />}
 
-      {/* O que eram tabelas e a lista "parados há mais tempo" virou dash
-          (2026-11-14): o prazo do envio é um quadro; os parados, um quadro
-          que leva ao relatório de Processos, onde a lista mora. */}
-      {operaProcessos && painel && (
-        <div className="grid gap-5 lg:grid-cols-2">
-          <PrazoDoEnvio painel={painel} />
-          {!unidadeVazia && <ParadosNaUnidade idUnidade={lotacao?.id ?? null} nomeUnidade={nomeUnidade} />}
-        </div>
-      )}
+      {/* As tabelas e a lista "parados há mais tempo" saíram (2026-11-14): o
+          prazo do envio virou complemento do prazo do serviço no Panorama, e
+          os parados são o cartão do Panorama, que leva ao relatório. */}
 
       {/* Segundo andar (2026-11-14): o período, no visual do Panorama do
           Início, com os números da tela de Relatórios do SI-34. O andar de
           cima é "a minha unidade, agora"; este diz o seu próprio recorte. */}
-      {operaProcessos && <PanoramaDoProtocolo idUnidade={lotacao?.id ?? null} nomeUnidade={nomeUnidade} />}
+      {operaProcessos && <PanoramaDoProtocolo idUnidade={lotacao?.id ?? null} nomeUnidade={nomeUnidade} prazoDoEnvio={painel?.prazos} />}
 
       {configurando && (
         <ConfigurarQuadros
@@ -662,75 +654,5 @@ function ConfigurarQuadros({
         {anuncio}
       </p>
     </Dialog>
-  );
-}
-
-/** O prazo da caixa Análise — "prazo do envio": o compromisso de quem está
- * com o processo agora (o prazo do encaminhamento; sem ele, o do serviço).
- * É o que pinta a linha na caixa. O Panorama, abaixo, mostra o "prazo do
- * serviço", a promessa ao cidadão: dois prazos legítimos, cada um com o seu
- * nome (decisão de 2026-11-14). */
-function PrazoDoEnvio({ painel }: { painel: PainelUnidade }) {
-  const { prazos } = painel;
-  const analise = hrefDaCaixa("analise");
-  const comPrazo = prazos.vencidos + prazos.vencendo + prazos.no_prazo;
-  return (
-    <QuadroGrafico
-      pergunta="O prazo do envio está sendo cumprido?"
-      resposta="Processos na mesa da unidade, pelo prazo de quem está com eles: o do envio, ou o do serviço quando o envio não fixou um."
-      acao={{ href: analise, label: "Ver a caixa Análise" }}
-    >
-      {comPrazo === 0 ? (
-        <p className="py-3 text-sm text-foreground-muted">Nenhum processo com prazo na unidade.</p>
-      ) : (
-        <BarraSegmentada
-          unidade={["processo", "processos"]}
-          segmentos={[
-            { rotulo: "Prazo vencido", valor: prazos.vencidos, cor: "hsl(var(--danger))", href: analise },
-            { rotulo: "Vencendo", valor: prazos.vencendo, cor: "hsl(var(--warning))", href: analise },
-            { rotulo: "No prazo", valor: prazos.no_prazo, cor: "hsl(var(--success))", href: analise },
-          ]}
-        />
-      )}
-      <p className="mt-2 text-xs text-foreground-muted">
-        Sem prazo definido: {prazos.sem_prazo}.
-      </p>
-    </QuadroGrafico>
-  );
-}
-
-/** Quantos estão parados na unidade (onde estão agora), e o caminho para a
- * lista: a visão Parados do relatório de Processos, do mais esquecido para o
- * menos — o que a antiga lista "parados há mais tempo" respondia. */
-function ParadosNaUnidade({ idUnidade, nomeUnidade }: { idUnidade: number | null; nomeUnidade?: string | null }) {
-  const recorte = idUnidade ? { id_unidade: idUnidade, modo_unidade: "atual" as const } : {};
-  const q = useQuery({
-    queryKey: ["processos", "painel-parados-relatorio", idUnidade],
-    queryFn: () =>
-      api.relatorios.processos({ ...recorte, parado_ha_dias: DIAS_PARADO_PANORAMA, max_rows: 1 }),
-    staleTime: 60_000,
-    refetchInterval: INTERVALO_ATUALIZACAO,
-  });
-  const href = `${ROTA_LISTA_PROCESSOS}${filtroParaUrl(comVisao({ ...recorte, dias_parado: DIAS_PARADO_PANORAMA }, "parados"))}`;
-  const total = q.data?.totais.total;
-  return (
-    <QuadroGrafico
-      pergunta="O que está parado há mais tempo?"
-      resposta={`Processos ${nomeUnidade ? `que estão agora na unidade ${nomeUnidade}` : "da prefeitura"} sem nenhuma movimentação há ${DIAS_PARADO_PANORAMA} dias ou mais. A lista, do mais parado para o menos, fica no relatório de Processos.`}
-      acao={{ href, label: "Ver no relatório" }}
-    >
-      {q.isError ? (
-        <p className="py-3 text-sm text-danger-soft-foreground">Não foi possível carregar agora.</p>
-      ) : (
-        <Link href={href} className="group inline-flex items-baseline gap-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-          <span className="font-display text-3xl font-semibold tabular-nums text-foreground" data-testid="parados-total">
-            {q.isLoading ? "…" : total}
-          </span>
-          <span className="text-sm text-foreground-muted group-hover:text-foreground">
-            {total === 1 ? "processo parado" : "processos parados"} há {DIAS_PARADO_PANORAMA}+ dias
-          </span>
-        </Link>
-      )}
-    </QuadroGrafico>
   );
 }
