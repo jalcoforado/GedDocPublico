@@ -1,6 +1,6 @@
 {
   "_comentario": "Ratchet do design:check. Números só podem CAIR. Regrave com `npm run design:check -- --update` ao queimar débito — nunca para acomodar código novo.",
-  "total": 119,
+  "total": 115,
   "arquivos": {
     "app/(app)/dashboard/page.tsx": 9,
     "app/(app)/m/administracao/organograma/page.tsx": 3,
@@ -16,7 +16,6 @@
     "components/CrudPage.tsx": 1,
     "components/MinutasProcesso.tsx": 8,
     "components/ProcessoWorkflowPanel.tsx": 4,
-    "components/RedigirDocumentoDialog.tsx": 2,
     "components/UnidadePicker.tsx": 5,
     "components/admin/TenantEditForm.tsx": 1,
     "components/organograma/OrganogramaDiagramView.tsx": 1,
