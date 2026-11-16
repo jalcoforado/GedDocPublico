@@ -34,6 +34,7 @@ import {
   consultaDaLista,
   filtroDaUrl,
   filtroParaUrl,
+  diasDesde,
   fmtData,
   fmtDataHora,
   recorteComum,
@@ -71,6 +72,9 @@ export default function RelatorioProcessosPage() {
   const visao = visaoDe(filtro);
   const consulta = consultaDaLista(filtro);
   const dataBase = consulta.data_base;
+  // Parados (2026-11-14): vem do mais esquecido para o menos, e a coluna de
+  // data diz há quanto tempo — o que a lista do Painel respondia.
+  const parados = visao.id === "parados";
   const grupos = [...new Set(VISOES_PROCESSOS.map((v) => v.grupo))];
   const [dimensao, setDimensao] = useState<Dimensao>("assunto");
 
@@ -237,7 +241,7 @@ export default function RelatorioProcessosPage() {
                     <TH>Número</TH>
                     <TH>Aberto em</TH>
                     <TH>Situação</TH>
-                    <TH>{dataBase === "arquivamento" ? "Arquivado em" : "Última movimentação"}</TH>
+                    <TH>{parados ? "Parado há" : dataBase === "arquivamento" ? "Arquivado em" : "Última movimentação"}</TH>
                     <TH>Manifestante</TH>
                     <TH>Tipo</TH>
                     <TH>Unidade dona</TH>
@@ -277,9 +281,16 @@ export default function RelatorioProcessosPage() {
                         </div>
                       </TD>
                       <TD className="text-xs tabular-nums">
-                        {dataBase === "arquivamento"
-                          ? fmtDataHora(p.data_hora_arquivamento)
-                          : fmtData(p.ultima_movimentacao)}
+                        {parados ? (
+                          <>
+                            <span className="font-medium">{diasDesde(p.ultima_movimentacao)} dias</span>
+                            <span className="block text-foreground-muted">desde {fmtData(p.ultima_movimentacao)}</span>
+                          </>
+                        ) : dataBase === "arquivamento" ? (
+                          fmtDataHora(p.data_hora_arquivamento)
+                        ) : (
+                          fmtData(p.ultima_movimentacao)
+                        )}
                       </TD>
                       <TD className="text-sm">{p.manifestante ?? "—"}</TD>
                       <TD className="text-sm">{p.tipo_processo ?? "—"}</TD>

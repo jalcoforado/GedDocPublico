@@ -357,3 +357,19 @@ async def test_as_contas_da_pagina_fecham(cen, admin_engine, periodo):
         # "Pela data de conclusão" só conta o que tem conclusão
         concl = (await _get("assinaturas.json", data_base="conclusao")).json()["totais"]
         assert concl["pendentes"] == 0
+
+
+@pytest.mark.asyncio
+async def test_parados_vem_do_mais_esquecido_para_o_menos(cen):
+    """A lista do Painel "parados há mais tempo" virou a visão Parados do
+    relatório de Processos (2026-11-14): tem de vir na mesma ordem — a última
+    movimentação mais antiga primeiro —, e não pela abertura."""
+    r = await _get("processos.json", parado_ha_dias=1)
+    assert r.status_code == 200, r.text
+    ultimas = [p["ultima_movimentacao"] for p in r.json()["processos"]]
+    assert len(ultimas) >= 3
+    assert ultimas == sorted(ultimas)
+    # e a ordem não é a da abertura (o cenário tem processo aberto antes e
+    # movimentado depois de outro)
+    aberturas = [p["data_hora_abertura"] for p in r.json()["processos"]]
+    assert aberturas != sorted(aberturas, reverse=True)

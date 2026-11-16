@@ -25,10 +25,9 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog } from "@/components/ui/dialog";
-import { ParadosHaMaisTempo } from "@/components/protocolo/ParadosHaMaisTempo";
+import { PanoramaDoProtocolo } from "@/components/protocolo/PanoramaDoProtocolo";
 import { KpiCard } from "@/components/ui/kpi-card";
 import { PageHeader } from "@/components/ui/page-header";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { api, notificacoesApi, type PainelUnidade } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { ROTA_PROCESSOS, hrefDaCaixa } from "@/lib/caixas-processos";
@@ -46,6 +45,10 @@ import { cn } from "@/lib/utils";
  * sistema de processos. A `/home` deixou de redirecionar para cá em
  * 2026-11-05: virou o Início que atravessa os módulos, e um dos cartões dela
  * resume este painel.
+ *
+ * Desde 2026-11-14 tem um segundo andar, o Panorama do protocolo
+ * (`PanoramaDoProtocolo`): o período, com os números que até então moravam
+ * na tela de Relatórios — que virou um índice de relatórios.
  *
  * Os números vêm de `GET /processos/painel`, no mesmo recorte das caixas de
  * trabalho (unidade ATIVA, sigilo de quem consulta): o quadro diz 12 e a
@@ -80,8 +83,10 @@ interface DefQuadro {
   /** Para onde o quadro leva. Sem `href` o quadro é só número: melhor não
    * ser link do que ser link para uma tela que não mostra o que ele conta. */
   href?: string;
-  /** Dica curta, visível sob o número. */
-  dica: string;
+  /** Dica curta, visível sob o número. Pode depender dos dados: o que era
+   * tabela à parte (enviados com prazo vencido, assinaturas que você pediu)
+   * virou detalhe do quadro (2026-11-14). */
+  dica: string | ((d: Dados) => string);
   /** O que o número conta, por extenso: no `title` (mouse) e no
    * `aria-describedby` (leitor de tela). Escrito a partir do que
    * `painel_unidade`/`_predicado_caixa` contam no backend — uma explicação
@@ -126,7 +131,12 @@ const QUADROS: DefQuadro[] = [
     id: "saida",
     rotulo: "Enviados",
     href: hrefDaCaixa("saida"),
-    dica: "aguardando o destino receber",
+    dica: (d) => {
+      const n = d.painel?.aguardando_retorno.atrasados ?? 0;
+      return n > 0
+        ? `aguardando o destino receber · ${n} com prazo do envio vencido`
+        : "aguardando o destino receber";
+    },
     explicacao:
       "Processos que a sua unidade enviou e que a unidade de destino ainda não recebeu.",
     icon: ArrowUpFromLine,
@@ -168,7 +178,12 @@ const QUADROS: DefQuadro[] = [
     id: "assinar",
     rotulo: "Para assinar",
     href: "/para-assinar",
-    dica: "documentos aguardando sua assinatura",
+    dica: (d) => {
+      const n = d.painel?.caixas.enviado_para_assinatura ?? 0;
+      return n > 0
+        ? `documentos aguardando sua assinatura · mais ${n} enviado(s) por você, ainda não assinado(s)`
+        : "documentos aguardando sua assinatura";
+    },
     explicacao:
       "Processos com pelo menos um documento que você precisa assinar, numa solicitação de assinatura que não foi cancelada.",
     icon: PenLine,
@@ -251,7 +266,8 @@ export function PainelDeControle() {
   // ela que o `GET /processos/painel` conta. Vem do mesmo hook do cabeçalho
   // (`UnidadeAtiva`), para o nome daqui e o de lá não divergirem; trocar de
   // setor invalida as queries, e nome e números mudam juntos.
-  const nomeUnidade = useLotacaoAtiva().ativa?.nome;
+  const lotacao = useLotacaoAtiva().ativa;
+  const nomeUnidade = lotacao?.nome;
 
   const painelQ = useQuery({
     queryKey: ["protocolo-painel"],
@@ -403,11 +419,14 @@ export function PainelDeControle() {
 
       {operaProcessos && unidadeVazia && <PrimeiroUso podeAbrir={can("processo", "inserir")} />}
 
-      {operaProcessos && painel && <Tabelas painel={painel} />}
+      {/* As tabelas e a lista "parados há mais tempo" saíram (2026-11-14): o
+          prazo do envio virou complemento do prazo do serviço no Panorama, e
+          os parados são o cartão do Panorama, que leva ao relatório. */}
 
-      {operaProcessos && painel && !unidadeVazia && (
-        <ParadosHaMaisTempo intervalo={INTERVALO_ATUALIZACAO} />
-      )}
+      {/* Segundo andar (2026-11-14): o período, no visual do Panorama do
+          Início, com os números da tela de Relatórios do SI-34. O andar de
+          cima é "a minha unidade, agora"; este diz o seu próprio recorte. */}
+      {operaProcessos && <PanoramaDoProtocolo idUnidade={lotacao?.id ?? null} nomeUnidade={nomeUnidade} prazoDoEnvio={painel?.prazos} />}
 
       {configurando && (
         <ConfigurarQuadros
@@ -436,7 +455,7 @@ function Quadro({ def, dados }: { def: DefQuadro; dados: Dados }) {
       value={valor ?? "—"}
       hint={
         <>
-          {def.dica}
+          {typeof def.dica === "function" ? def.dica(dados) : def.dica}
           {valor != null && base != null && base > 0 && (
             <Proporcao parte={valor} total={base} />
           )}
@@ -635,132 +654,5 @@ function ConfigurarQuadros({
         {anuncio}
       </p>
     </Dialog>
-  );
-}
-
-function Tabela({
-  titulo,
-  colunas,
-  children,
-}: {
-  titulo: string;
-  colunas: [string, string];
-  children: React.ReactNode;
-}) {
-  return (
-    <section aria-label={titulo} className="space-y-2">
-      <h2 className="font-display text-base font-semibold text-foreground">{titulo}</h2>
-      <div className="overflow-x-auto rounded-card border border-border bg-surface-1 shadow-card">
-        <Table>
-          <THead>
-            <TR>
-              <TH>{colunas[0]}</TH>
-              <TH className="w-32 text-right">{colunas[1]}</TH>
-            </TR>
-          </THead>
-          <TBody>{children}</TBody>
-        </Table>
-      </div>
-    </section>
-  );
-}
-
-function Linha({
-  rotulo,
-  valor,
-  href,
-  tom,
-}: {
-  rotulo: string;
-  valor: number;
-  href: string;
-  tom?: "danger" | "warning";
-}) {
-  return (
-    <TR>
-      <TD>
-        <span
-          className={cn(
-            valor > 0 && tom === "danger" && "font-medium text-danger-soft-foreground",
-            valor > 0 && tom === "warning" && "font-medium text-warning-soft-foreground",
-          )}
-        >
-          {rotulo}
-        </span>
-      </TD>
-      <TD className="text-right tabular-nums">
-        {valor > 0 ? (
-          // Cor neutra, sublinhada: a cor de link do tema (laranja em
-          // Itaitinga) fazia "No prazo: 3" parecer alarme. Vermelho e amarelo
-          // ficam só para vencido e vencendo.
-          <Link
-            href={href}
-            className={cn(
-              "font-medium underline underline-offset-2 hover:no-underline",
-              tom === "danger" && "text-danger-soft-foreground",
-              tom === "warning" && "text-warning-soft-foreground",
-              !tom && "text-foreground",
-            )}
-          >
-            {valor}
-          </Link>
-        ) : (
-          <span className="text-foreground-muted">0</span>
-        )}
-      </TD>
-    </TR>
-  );
-}
-
-function Tabelas({ painel }: { painel: PainelUnidade }) {
-  const { prazos, aguardando_retorno: retorno, caixas } = painel;
-  const comPrazo = prazos.vencidos + prazos.vencendo + prazos.no_prazo;
-  // A caixa Análise abre pelo que espera há mais tempo, e o destaque de cada
-  // linha é o prazo: é lá que vencidos e vencendo aparecem marcados.
-  const analise = hrefDaCaixa("analise");
-
-  return (
-    <div className="grid gap-5 lg:grid-cols-3">
-      <Tabela titulo="Controle de prazos" colunas={["Situação", "Processos"]}>
-        {comPrazo === 0 ? (
-          <TR>
-            <TD colSpan={2} className="text-sm text-foreground-muted">
-              Nenhum processo com prazo na unidade.
-            </TD>
-          </TR>
-        ) : (
-          <>
-            <Linha rotulo="Prazo vencido" valor={prazos.vencidos} href={analise} tom="danger" />
-            <Linha rotulo="Vencendo" valor={prazos.vencendo} href={analise} tom="warning" />
-            <Linha rotulo="No prazo" valor={prazos.no_prazo} href={analise} />
-          </>
-        )}
-        <Linha rotulo="Sem prazo definido" valor={prazos.sem_prazo} href={analise} />
-      </Tabela>
-
-      <Tabela titulo="Aguardando retorno de outras unidades" colunas={["Situação", "Processos"]}>
-        <Linha
-          rotulo="Prazo vencido"
-          valor={retorno.atrasados}
-          href={hrefDaCaixa("saida")}
-          tom="danger"
-        />
-        <Linha rotulo="Total enviado" valor={retorno.total} href={hrefDaCaixa("saida")} />
-      </Tabela>
-
-      <Tabela titulo="Assinaturas" colunas={["Situação", "Processos"]}>
-        <Linha
-          rotulo="Aguardando a sua assinatura"
-          valor={caixas.aguardando_assinatura}
-          href="/para-assinar"
-          tom="warning"
-        />
-        <Linha
-          rotulo="Enviados por você, ainda não assinados"
-          valor={caixas.enviado_para_assinatura}
-          href={hrefDaCaixa("enviado_para_assinatura")}
-        />
-      </Tabela>
-    </div>
   );
 }

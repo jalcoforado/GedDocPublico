@@ -1,16 +1,19 @@
 /**
- * Página gerencial de relatórios (SI-34). Uma tela, filtro no topo, quatro
- * grupos; cada número leva à lista que o produziu, com o MESMO recorte. O
- * backend garante que o número da seção é o total dessa lista
- * (`tests/test_relatorios_protocolo_medidas.py`); aqui se garante que o link
- * da seção carrega o recorte certo — sem isso a lista abriria com outro
- * filtro e o número não bateria, com os dois lados "certos".
+ * Relatórios do protocolo: o Panorama do Painel de controle e o índice de
+ * relatórios (decisão de 2026-11-14), mais o apoio das listas (SI-34/35).
+ *
+ * O Panorama é a antiga página gerencial no visual do Início: cada bloco
+ * leva à lista que produziu o número, com o MESMO recorte. O backend garante
+ * que o número é o total dessa lista (`tests/test_relatorios_protocolo_medidas.py`);
+ * aqui se garante que o link carrega o recorte certo — sem isso a lista
+ * abriria com outro filtro e o número não bateria, com os dois lados "certos".
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { GerencialResposta, RelatorioFiltroInput } from "@/lib/api";
+import { DIAS_PARADO_PANORAMA, PanoramaDoProtocolo, periodoDosUltimos } from "@/components/protocolo/PanoramaDoProtocolo";
+import type { RelatorioFiltroInput } from "@/lib/api";
 import {
   VISOES_DOCUMENTACAO,
   VISOES_PROCESSOS,
@@ -26,6 +29,8 @@ import {
   type VisaoProcessos,
 } from "@/lib/relatorios";
 
+import { respostaGerencial } from "./apoio/respostaGerencial";
+
 const nav = { busca: "", replace: vi.fn() };
 
 vi.mock("next/navigation", () => ({
@@ -34,7 +39,7 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(nav.busca),
 }));
 
-const gerencialMock = vi.fn((_f: unknown) => Promise.resolve(resposta()));
+const gerencialMock = vi.fn((_f: unknown) => Promise.resolve(respostaGerencial()));
 const salvosMock = vi.fn(() =>
   Promise.resolve([{ id: 7, nome: "Alvarás parados", criado_em: "2026-11-12T10:00:00", atualizado_em: "2026-11-12T10:30:00" }]),
 );
@@ -58,117 +63,196 @@ vi.mock("@/lib/api", async () => {
   };
 });
 
-function resposta(): GerencialResposta {
-  return {
-    descricao_filtros: ["Período: 01/10/2026 a 31/10/2026 — cada seção diz por qual data conta"],
-    entrada: {
-      abertos: 142,
-      por_canal: [
-        { canal: "balcao", rotulo: "Balcão", count: 100 },
-        { canal: null, rotulo: "Não informado", count: 42 },
-      ],
-    },
-    andamento: { em_andamento: 88, em_transito: 9, parados: 12, dias_parado: 15 },
-    saida: { arquivados: 41, dias_medio_ate_arquivar: 18.25 },
-    prazos: {
-      concluidos_no_prazo: 32, concluidos_atrasados: 9, concluidos_sem_prazo: 0,
-      dentro_do_prazo: 51, vencendo: 8, atrasados: 6, em_aberto_sem_prazo: 23,
-    },
-    tendencia: {
-      granularidade: "semana", desde: "2026-10-01", ate: "2026-10-31",
-      pontos: [
-        { inicio: "2026-09-28", abertos: 30, arquivados: 10 },
-        { inicio: "2026-10-05", abertos: 40, arquivados: 12 },
-      ],
-    },
-    gargalos: {
-      unidades: [
-        { id_unidade: 3, unidade: "Secretaria de Obras", chegadas: 20, com_prazo: 10, atrasos: 7, dias_medio: 4.5 },
-      ],
-      cortado: false,
-    },
-    assinaturas: { total: 30, pendentes: 6, concluidas: 22, canceladas: 2, minutos_medio_conclusao: 2880 },
-    documentacao: {
-      pendentes: 5, parciais: 3, completos: 12, sem_documentos_exigidos: 122,
-      complementacao_pedida: 7, aguardando_cidadao: 4, complementacao_respondida: 2, dias_medio_resposta: 3.5,
-    },
-  };
+function cliente() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
 
-async function abrir(busca = "") {
-  nav.busca = busca;
-  const { default: Pagina } = await import("@/app/(app)/m/protocolo/relatorios/page");
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+const PRAZO_DO_ENVIO = { vencidos: 11, vencendo: 0, no_prazo: 3, sem_prazo: 3 };
+
+async function abrirPanorama(idUnidade: number | null = 3) {
   render(
-    <QueryClientProvider client={client}>
+    <QueryClientProvider client={cliente()}>
+      <PanoramaDoProtocolo
+        idUnidade={idUnidade}
+        nomeUnidade={idUnidade ? "Secretaria de Obras" : null}
+        prazoDoEnvio={idUnidade ? PRAZO_DO_ENVIO : undefined}
+      />
+    </QueryClientProvider>,
+  );
+  await screen.findByRole("region", { name: "Quantos processos entram e quantos saem?" });
+  await within(cartao("Abertos")).findByText("142");
+}
+
+async function abrirIndice() {
+  const { default: Pagina } = await import("@/app/(app)/m/protocolo/relatorios/page");
+  render(
+    <QueryClientProvider client={cliente()}>
       <Pagina />
     </QueryClientProvider>,
   );
-  await screen.findByRole("heading", { name: "Entrada" });
+  await screen.findByRole("heading", { name: "Relatórios padrão" });
 }
 
-/** Os links da página (todos os "Ver …"), por grupo. */
-function linksDoGrupo(grupo: string): { rota: string; params: URLSearchParams }[] {
-  const regiao = screen.getByRole("region", { name: grupo });
-  return within(regiao)
-    .queryAllByRole("link")
-    .map((a) => {
-      const [rota, qs = ""] = a.getAttribute("href")!.split("?");
-      return { rota, params: new URLSearchParams(qs) };
-    });
-}
+/** O cartão de tendência (é um link) com aquele rótulo. */
+const cartao = (rotulo: string) =>
+  within(screen.getByLabelText("Números do período")).getByText(rotulo, { exact: true }).closest("a") as HTMLAnchorElement;
+const destino = (a: Element | null) => {
+  const [rota, qs = ""] = (a?.getAttribute("href") ?? "").split("?");
+  return { rota, params: Object.fromEntries(new URLSearchParams(qs)) };
+};
+const quadro = (pergunta: string) => screen.getByRole("region", { name: pergunta });
 
-// A página traz a biblioteca de gráficos: o primeiro import é lento (7s numa
-// máquina ocupada) e estourava o limite de 5s do primeiro teste. Carrega uma
-// vez aqui, com folga, e os testes medem a página, não o import.
+// Os gráficos são pesados no primeiro import; carrega uma vez, com folga.
 beforeAll(async () => {
-  await import("@/app/(app)/m/protocolo/relatorios/page");
+  await import("@/components/protocolo/PanoramaDoProtocolo");
 }, 60_000);
 
 beforeEach(() => {
   gerencialMock.mockClear();
+  salvosMock.mockClear();
   nav.replace.mockClear();
 });
 afterEach(() => cleanup());
 
+// Recorte usado pelos testes de apoio das listas, mais abaixo.
 const RECORTE = "desde=2026-10-01&ate=2026-10-31&id_unidade=3&modo_unidade=dona&id_assunto=9";
-const RECORTE_PARAMS = {
-  desde: "2026-10-01", ate: "2026-10-31", id_unidade: "3", modo_unidade: "dona", id_assunto: "9",
-};
+const ULTIMOS_30 = periodoDosUltimos(30);
+const RECORTE_MINHA = { ...ULTIMOS_30, id_unidade: "3", modo_unidade: "envolvida" };
 
-describe("página gerencial — grupos por tela de destino, um botão por grupo", () => {
-  it("consulta com o recorte da URL e mostra os números", async () => {
-    await abrir(RECORTE);
+describe("Panorama do protocolo — o segundo andar do Painel de controle", () => {
+  it("abre nos últimos 30 dias da unidade ativa (regra de hoje) e mostra os números do gerencial", async () => {
+    await abrirPanorama();
     expect(gerencialMock).toHaveBeenCalledWith({
-      id_unidade: 3, modo_unidade: "dona", id_assunto: 9, id_tipo_processo: undefined,
-      desde: "2026-10-01", ate: "2026-10-31", dias_parado: 15,
+      ...ULTIMOS_30, id_unidade: 3, modo_unidade: "envolvida", dias_parado: DIAS_PARADO_PANORAMA,
     });
-    expect(within(screen.getByRole("region", { name: "Entrada" })).getByText("142")).toBeTruthy();
-    expect(within(screen.getByRole("region", { name: "Saída" })).getByText("18,3 dias")).toBeTruthy();
-    expect(
-      within(screen.getByRole("region", { name: "Gargalos por unidade" })).getByText("Secretaria de Obras"),
-    ).toBeTruthy();
+    expect(within(cartao("Arquivados")).getByText("41")).toBeInTheDocument();
+    expect(within(cartao("Arquivados")).getByText(/18,3 dias/)).toBeInTheDocument();
+    expect(within(cartao("Em andamento")).getByText("88")).toBeInTheDocument();
+    expect(within(cartao(`Parados há ${DIAS_PARADO_PANORAMA}+ dias`)).getByText("12")).toBeInTheDocument();
+    expect(within(cartao("Prazo vencido")).getByText("6")).toBeInTheDocument();
+    expect(within(cartao("Assinaturas pendentes")).getByText("16")).toBeInTheDocument();
+    expect(screen.getByText(/na unidade Secretaria de Obras/)).toBeInTheDocument();
   });
 
-  it("quatro grupos, um link cada, cada um para uma tela diferente", async () => {
-    await abrir(RECORTE);
-    const grupos = ["Processos", "Tramitação", "Documentação", "Assinaturas"];
-    expect(grupos.map((g) => linksDoGrupo(g).length)).toEqual([1, 1, 1, 1]);
-    // nenhum outro link na área dos números (o PDF da página fica no cabeçalho)
-    const main = document.body;
-    const todos = within(main).getAllByRole("link").map((a) => a.getAttribute("href") ?? "");
-    // "Meus relatórios" (SI-35) leva ao montador; os quatro grupos de números, cada um à sua lista.
-    const telas = todos
-      .filter((h) => h.startsWith("/m/protocolo/relatorios/") && !h.startsWith("/m/protocolo/relatorios/montar"))
-      .map((h) => h.split("?")[0]);
-    expect(new Set(telas).size).toBe(4);
-    expect(telas).toHaveLength(4);
-    // e nenhum CSV solto na página: exportar é na lista
+  it("“Todas” tira a unidade da consulta; o período muda com os botões", async () => {
+    await abrirPanorama();
+    fireEvent.click(screen.getByRole("radio", { name: "Todas" }));
+    await screen.findByText(/em todas as unidades/);
+    expect(gerencialMock).toHaveBeenLastCalledWith({ ...ULTIMOS_30, dias_parado: DIAS_PARADO_PANORAMA });
+    fireEvent.click(screen.getByRole("radio", { name: "7 dias" }));
+    await screen.findByText(/últimos 7 dias/);
+    expect(gerencialMock).toHaveBeenLastCalledWith({ ...periodoDosUltimos(7), dias_parado: DIAS_PARADO_PANORAMA });
+  });
+
+  it("sem unidade ativa, abre em todas e “Minha unidade” fica desabilitado", async () => {
+    await abrirPanorama(null);
+    expect(screen.getByRole("radio", { name: "Minha unidade" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "Todas" })).toHaveAttribute("aria-checked", "true");
+    expect(gerencialMock).toHaveBeenCalledWith({ ...ULTIMOS_30, dias_parado: DIAS_PARADO_PANORAMA });
+  });
+
+  it("cada cartão leva à lista de processos na visão que produziu o número, com o recorte", async () => {
+    await abrirPanorama();
+    const abertos = destino(cartao("Abertos"));
+    expect(abertos.rota).toBe("/m/protocolo/relatorios/processos");
+    expect(abertos.params).toEqual(expect.objectContaining(RECORTE_MINHA));
+    expect(visaoDe(filtroDaUrl(new URLSearchParams(cartao("Abertos").getAttribute("href")!.split("?")[1]))).id).toBe("abertos");
+    const porCartao: [string, VisaoProcessos][] = [
+      ["Arquivados", "arquivados"],
+      ["Em andamento", "em_andamento"],
+      [`Parados há ${DIAS_PARADO_PANORAMA}+ dias`, "parados"],
+      ["Prazo vencido", "vencidos"],
+    ];
+    for (const [rotulo, visao] of porCartao) {
+      const qs = cartao(rotulo).getAttribute("href")!.split("?")[1];
+      expect(visaoDe(filtroDaUrl(new URLSearchParams(qs))).id, rotulo).toBe(visao);
+      expect(destino(cartao(rotulo)).params).toEqual(expect.objectContaining(RECORTE_MINHA));
+    }
+    const assinaturas = destino(cartao("Assinaturas pendentes"));
+    expect(assinaturas.rota).toBe("/m/protocolo/relatorios/assinaturas");
+    expect(assinaturas.params).toEqual({ ...RECORTE_MINHA, data_base: "pedido" });
+  });
+
+  it("cada quadro leva à sua tela com o recorte; as fatias levam ao seu “Mostrar”", async () => {
+    await abrirPanorama();
+    const ver = (pergunta: string, nome: RegExp) => destino(within(quadro(pergunta)).getByRole("link", { name: nome }));
+
+    const tram = ver("Onde os processos demoram?", /Ver tramitação/);
+    expect(tram.rota).toBe("/m/protocolo/relatorios/tramitacao");
+    expect(tram.params).toEqual({ ...RECORTE_MINHA, data_base: "chegada" });
+    // só quem atrasou entra no ranking
+    expect(within(quadro("Onde os processos demoram?")).getByText("Secretaria de Obras")).toBeInTheDocument();
+    expect(within(quadro("Onde os processos demoram?")).queryByText("Protocolo Geral")).toBeNull();
+
+    const doc = ver("Os documentos estão em dia?", /Ver documentação/);
+    expect(doc.rota).toBe("/m/protocolo/relatorios/documentacao");
+    expect(doc.params).toEqual(RECORTE_MINHA);
+    const pendentes = destino(within(quadro("Os documentos estão em dia?")).getByRole("link", { name: /Pendentes/ }));
+    expect(pendentes.params).toEqual({ ...RECORTE_MINHA, visao: "doc_pendente" });
+    const aguardando = destino(within(quadro("Os documentos estão em dia?")).getByRole("link", { name: /4 aguardando/ }));
+    expect(aguardando.params.visao).toBe("compl_aberta");
+
+    const ass = ver("Como andam as assinaturas?", /Ver assinaturas/);
+    expect(ass.params).toEqual({ ...RECORTE_MINHA, data_base: "pedido" });
+    expect(within(quadro("Como andam as assinaturas?")).getByText(/Tempo médio até concluir/)).toBeInTheDocument();
+
+    const vencidos = destino(within(quadro("Os prazos estão sendo cumpridos?")).getByRole("link", { name: /Vencidos/ }));
+    expect(visaoDe(filtroDaUrl(new URLSearchParams(vencidos.params))).id).toBe("vencidos");
+    expect(within(quadro("Os prazos estão sendo cumpridos?")).getByText(/23 em aberto sem prazo/)).toBeInTheDocument();
+
+    const processos = ver("Quantos processos entram e quantos saem?", /Ver lista de processos/);
+    expect(processos.rota).toBe("/m/protocolo/relatorios/processos");
+    expect(processos.params).toEqual(RECORTE_MINHA);
+  });
+
+  it("dois prazos, o do serviço como principal: o do envio é complemento, só na minha unidade", async () => {
+    await abrirPanorama();
+    const prazos = quadro("Os prazos estão sendo cumpridos?");
+    expect(prazos).toHaveTextContent(/Pelo prazo do serviço/);
+    const envio = within(within(prazos).getByTestId("prazo-do-envio"));
+    expect(envio.getByText(/Prazo do envio · na mesa da unidade, agora/)).toBeInTheDocument();
+    expect(envio.getByText("Vencido").closest("a")).toHaveTextContent("11");
+    expect(envio.getByText("Vencido").closest("a")).toHaveAttribute("href", "/m/protocolo/processos?caixa=analise&ativos=0");
+    // o do serviço vem antes (é o principal)
+    const textos = prazos.textContent ?? "";
+    expect(textos.indexOf("Em aberto hoje")).toBeLessThan(textos.indexOf("Prazo do envio"));
+
+    fireEvent.click(screen.getByRole("radio", { name: "Todas" }));
+    await screen.findByText(/em todas as unidades/);
+    expect(within(quadro("Os prazos estão sendo cumpridos?")).getByTestId("prazo-do-envio")).toHaveTextContent(
+      "aparece em “Minha unidade”",
+    );
+  });
+
+  it("sem comparação com o período anterior (decisão de 2026-11-14) e com tabela do gráfico para leitor de tela", async () => {
+    await abrirPanorama();
+    expect(screen.queryByText(/período anterior/)).toBeNull();
+    expect(screen.queryByText(/ vs\. /)).toBeNull();
+    const tabela = within(quadro("Quantos processos entram e quantos saem?")).getByRole("table");
+    expect(within(tabela).getAllByRole("row")).toHaveLength(3);
+    // o PDF é do recorte que está na tela
+    const pdf = screen.getByRole("link", { name: /PDF do panorama/ }).getAttribute("href")!;
+    expect(pdf).toContain("/relatorios/gerencial.pdf?");
+    expect(pdf).toContain("id_unidade=3");
+  });
+});
+
+describe("Relatórios — o índice", () => {
+  it("lista os relatórios padrão com pergunta e quem usa, cada um abrindo a sua lista; sem números", async () => {
+    await abrirIndice();
+    expect(gerencialMock).not.toHaveBeenCalled();
+    const abrir = (titulo: string) => destino(screen.getByRole("link", { name: `Abrir relatório ${titulo}` }));
+    expect(abrir("Processos")).toEqual({ rota: "/m/protocolo/relatorios/processos", params: {} });
+    expect(abrir("Tramitação")).toEqual({ rota: "/m/protocolo/relatorios/tramitacao", params: { data_base: "chegada" } });
+    expect(abrir("Documentação")).toEqual({ rota: "/m/protocolo/relatorios/documentacao", params: {} });
+    expect(abrir("Assinaturas")).toEqual({ rota: "/m/protocolo/relatorios/assinaturas", params: { data_base: "pedido" } });
+    expect(screen.getAllByText(/Quem usa:/)).toHaveLength(4);
+    expect(screen.getByRole("link", { name: /Painel de controle/ })).toHaveAttribute("href", "/m/protocolo/painel");
     expect(screen.queryByRole("link", { name: /CSV/ })).toBeNull();
   });
 
   it("Meus relatórios lista os salvos da pessoa e leva ao montador", async () => {
-    await abrir(RECORTE);
+    await abrirIndice();
     const grupo = screen.getByRole("region", { name: "Meus relatórios" });
     expect(within(grupo).getByRole("link", { name: /Montar relatório/ })).toHaveAttribute(
       "href",
@@ -178,74 +262,6 @@ describe("página gerencial — grupos por tela de destino, um botão por grupo"
     // abre pelo id: a definição vem do servidor, que só devolve o que é da pessoa
     expect(salvo).toHaveAttribute("href", "/m/protocolo/relatorios/montar?salvo=7");
     expect(salvo).toHaveTextContent("alterado em 12/11/2026 10:30");
-  });
-
-  it("cada botão leva o recorte do filtro à sua tela", async () => {
-    await abrir(RECORTE);
-    const [processos] = linksDoGrupo("Processos");
-    expect(processos.rota).toBe("/m/protocolo/relatorios/processos");
-    // só o recorte: a lista abre em "abertos no período" e o Mostrar troca
-    expect(Object.fromEntries(processos.params)).toEqual(RECORTE_PARAMS);
-    const [tramitacao] = linksDoGrupo("Tramitação");
-    expect(tramitacao.rota).toBe("/m/protocolo/relatorios/tramitacao");
-    expect(Object.fromEntries(tramitacao.params)).toEqual({ ...RECORTE_PARAMS, data_base: "chegada" });
-    const [assinaturas] = linksDoGrupo("Assinaturas");
-    expect(assinaturas.rota).toBe("/m/protocolo/relatorios/assinaturas");
-    expect(Object.fromEntries(assinaturas.params)).toEqual({ ...RECORTE_PARAMS, data_base: "pedido" });
-    const [documentacao] = linksDoGrupo("Documentação");
-    expect(documentacao.rota).toBe("/m/protocolo/relatorios/documentacao");
-    expect(Object.fromEntries(documentacao.params)).toEqual(RECORTE_PARAMS);
-  });
-
-  it("o serviço é filtro do recorte comum e vai para todas as telas", async () => {
-    await abrir(`${RECORTE}&id_servico=5`);
-    expect(gerencialMock).toHaveBeenCalledWith(expect.objectContaining({ id_servico: 5 }));
-    for (const g of ["Processos", "Tramitação", "Documentação", "Assinaturas"]) {
-      expect(linksDoGrupo(g)[0].params.get("id_servico")).toBe("5");
-    }
-  });
-
-  it("Documentação: documentos exigidos e complementação, cada número dizendo sua data", async () => {
-    await abrir(RECORTE);
-    const docs = screen.getByRole("region", { name: "Documentos exigidos" });
-    for (const [rotulo, n] of [["Pendentes", "5"], ["Parciais", "3"], ["Completos", "12"]]) {
-      const card = within(docs).getByText(rotulo).closest(".rounded-card");
-      expect(card?.querySelector("[data-testid=kpi-valor]")?.textContent).toBe(n);
-    }
-    expect(within(docs).getByText(/122 aberto\(s\) no período/)).toBeTruthy();
-    const compl = screen.getByRole("region", { name: "Complementação" });
-    expect(within(compl).getByText("pela data do pedido")).toBeTruthy();
-    expect(within(compl).getByText("situação de hoje")).toBeTruthy();
-    expect(within(compl).getByText("3,5 dias")).toBeTruthy();
-  });
-
-  it("Prazos: cinco cartões numa grade só; os sem prazo são ditos", async () => {
-    await abrir(RECORTE);
-    const regiao = screen.getByRole("region", { name: "Prazos" });
-    for (const rotulo of ["No prazo", "Com atraso", "Dentro do prazo", "Vencendo", "Vencidos"]) {
-      expect(within(regiao).getByText(rotulo)).toBeTruthy();
-    }
-    // 32 de 41 com prazo
-    expect(within(regiao).getByText("78% dos arquivados com prazo")).toBeTruthy();
-    expect(within(regiao).getByText(/0 arquivado\(s\) e 23 em aberto/)).toBeTruthy();
-    // todos os cartões na MESMA grade — é o que iguala a altura
-    const grades = new Set(
-      ["No prazo", "Vencidos"].map((r) => within(regiao).getByText(r).closest(".grid")),
-    );
-    expect(grades.size).toBe(1);
-  });
-
-  it("sem comparação com o período anterior nem principais assuntos (decisão de 2026-11-11)", async () => {
-    await abrir(RECORTE);
-    expect(screen.queryByText(/ vs\. /)).toBeNull();
-    // os assuntos viraram o "Agrupar por" da lista de processos
-    expect(screen.queryByText("Principais assuntos")).toBeNull();
-  });
-
-  it("gráfico com tabela para leitor de tela", async () => {
-    await abrir(RECORTE);
-    const tabela = within(screen.getByRole("region", { name: "Entrada e saída no tempo" })).getByRole("table");
-    expect(within(tabela).getAllByRole("row")).toHaveLength(3);
   });
 });
 

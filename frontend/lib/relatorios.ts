@@ -164,6 +164,16 @@ export function fmtDataHora(s: string | null | undefined): string {
   return `${dia}/${m}/${a}${h ? ` ${h.slice(0, 5)}` : ""}`;
 }
 
+/** Dias inteiros desde `s` (hora de Brasília, sem fuso) até `hoje`, ou null.
+ * Conta pelo DIA do calendário, como "parado há 3 dias" é lido. */
+export function diasDesde(s: string | null | undefined, hoje: Date = new Date()): number | null {
+  if (!s) return null;
+  const [a, m, d] = s.slice(0, 10).split("-").map(Number);
+  const inicio = Date.UTC(a, m - 1, d);
+  const fim = Date.UTC(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+  return Math.max(0, Math.round((fim - inicio) / 86_400_000));
+}
+
 /** `2026-10-10…` → `10/10/2026`. */
 export function fmtData(s: string | null | undefined): string {
   if (!s) return "—";

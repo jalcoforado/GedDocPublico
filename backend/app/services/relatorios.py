@@ -154,12 +154,16 @@ async def gerar_relatorio(
     )
 
     # Lista (com teto), mais recente primeiro pela data que define o período.
+    # Parados (2026-11-14): o mais esquecido primeiro, pela última
+    # movimentação — a pergunta "o que está parado há mais tempo?", que saiu
+    # da lista do Painel de controle e veio para cá.
     LocalAtual = aliased(UnidadeTrabalho, name="la")
-    ordem = (
-        rec.c.arquivado_em.desc().nulls_last()
-        if f.data_base == "arquivamento"
-        else Processo.data_hora_abertura.desc()
-    )
+    if f.parado_ha_dias:
+        ordem = rec.c.ultima_mov.asc()
+    elif f.data_base == "arquivamento":
+        ordem = rec.c.arquivado_em.desc().nulls_last()
+    else:
+        ordem = Processo.data_hora_abertura.desc()
     list_stmt = (
         select(
             Processo,
