@@ -87,9 +87,9 @@ export function calcularProximoPasso(
     return {
       intent: "warning",
       icon: MessageCircle,
-      title: "Responda à solicitação de complementação documental.",
+      title: "A prefeitura pediu mais documentos para continuar.",
       description:
-        "O servidor pediu documentos adicionais para continuar a análise. Envie o que estiver pendente e confirme o envio.",
+        "Veja logo abaixo, no quadro “Complementação documental”, o que foi pedido. Toque em “Anexar” em cada documento e, quando terminar, em “Responder complementação”.",
     };
   }
 
@@ -143,13 +143,13 @@ export function ProximosPassosCard({
           <Icon className={cn("h-5 w-5", tint.iconColor)} />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-medium uppercase tracking-wider text-foreground-muted">
+          <p className="text-xs font-medium uppercase tracking-wide text-foreground-muted">
             Próximos passos
           </p>
-          <p className="mt-0.5 text-sm font-semibold text-foreground">
+          <p className="mt-0.5 text-base font-semibold text-foreground">
             {msg.title}
           </p>
-          <p className="mt-1 text-xs text-foreground-muted">{msg.description}</p>
+          <p className="mt-1 text-sm text-foreground-muted">{msg.description}</p>
         </div>
       </CardContent>
     </Card>

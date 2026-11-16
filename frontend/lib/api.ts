@@ -7,22 +7,37 @@ function baseUrl(): string {
 }
 
 export interface LoginResponse {
-  access_token: string;
+  /** Vazios quando `requer_2fa`: ainda não há sessão, só o desafio. */
+  access_token: string | null;
   token_type: string;
-  expires_in: number;
-  usuario_id: number;
-  usuario_email: string;
-  nome: string;
+  expires_in: number | null;
+  usuario_id: number | null;
+  usuario_email: string | null;
+  nome: string | null;
   /** SEC-1 Commit 4 — true quando o usuário acabou de receber senha temporária
    * (provisionamento, reset administrativo, POST /usuarios). O frontend
    * deve redirecionar para /alterar-senha-obrigatoria. */
   must_change_password: boolean;
+  /** 2FA por e-mail (0136): senha certa, falta o código de 6 dígitos. */
+  requer_2fa?: boolean;
+  /** Apresentado com o código em `/auth/login/2fa`. Vale 10 minutos. */
+  desafio?: string | null;
+  /** Para onde o código foi, mascarado (`ad•••@prefeitura.gov.br`). */
+  email_mascarado?: string | null;
+}
+
+/** Resposta das rotas de link por e-mail: para qual login mandar a pessoa. */
+export interface ContaConfirmada {
+  tipo: "servidor" | "cidadao";
 }
 
 // Fase 15 — branding/white-label do tenant atual (resolvido pelo Host header).
 export interface BrandingResponse {
   slug: string;
   nome: string;
+  /** Conta por e-mail ligada (convite, confirmação, "Não lembro a senha",
+   * 2FA)? Desligada por padrão desde 2026-11-09: a tela esconde essas partes. */
+  conta_por_email?: boolean;
   cor_primaria: string | null;
   /** Tema do município: com `cor_primaria`, `lib/tema-cores.ts` deriva a paleta. */
   cor_destaque: string | null;
@@ -103,6 +118,8 @@ export interface Usuario {
   ativo: boolean;
   /** Sigilo gradual — credencial de acesso (só super-usuário altera) */
   nivel_acesso_sigilo: NivelSigilo;
+  /** `null` = convite enviado e ainda não aceito (0136). */
+  email_verificado_em?: string | null;
 }
 export interface UsuarioDetail extends Usuario {
   grupos: number[];
@@ -199,6 +216,8 @@ export interface TipoManifestante {
   id: number;
   tipo_manifestante: string;
   id_categoria: number;
+  /** "F" pessoa física (CPF), "J" pessoa jurídica (CNPJ) — migration 0136. */
+  natureza: "F" | "J";
   ativo: boolean;
 }
 export interface Manifestante {
@@ -453,6 +472,12 @@ export interface ProcessoDetail extends ProcessoListItem {
    *  restringe e o servidor decide. */
   pode_receber_encaminhamento?: boolean | null;
   pode_cancelar_encaminhamento?: boolean | null;
+  /** SI-16 — os ids do que o formulário de abertura escolhe, para a edição
+   *  do rascunho se pré-preencher. Os nomes vêm de `ProcessoListItem`. */
+  id_assunto?: number | null;
+  id_tipo_processo?: number | null;
+  id_manifestante?: number | null;
+  id_unidade_proprietaria?: number | null;
   observacao: string | null;
   corpo: string | null;
   virtual: boolean;
@@ -584,7 +609,21 @@ export interface ProcessoListFilters {
   /** "recentes" (abertura, do mais novo — padrão) | "parados" (há mais tempo
    * sem movimentação primeiro). */
   ordem?: "recentes" | "parados";
+  /** SI-19 — coluna clicada na tabela. Com ela, `ordem` é ignorada. */
+  ordenar?: ColunaProcesso;
+  direcao?: DirecaoOrdenacao;
 }
+
+/** SI-19 — colunas pelas quais o servidor ordena (`OrdenarProcesso`). */
+export type ColunaProcesso =
+  | "numero"
+  | "abertura"
+  | "manifestante"
+  | "assunto"
+  | "local_atual"
+  | "responsavel"
+  | "parado";
+export type DirecaoOrdenacao = "asc" | "desc";
 
 export interface ProcessoCreateInput {
   id_assunto: number;
@@ -600,9 +639,14 @@ export interface ProcessoCreateInput {
   virtual?: boolean;
   /** "balcao"/"portal" vêm dos fluxos dedicados; aqui só interno|email */
   canal_entrada?: "interno" | "email";
-  /** E3 — nasce sem número (situacao='rascunho'); emitido no 1º encaminhamento */
+  /** E3 — nasce sem número (situacao='rascunho'). Ganha número em "Abrir
+   *  processo" (SI-16) ou no 1º encaminhamento. */
   rascunho?: boolean;
 }
+
+/** SI-16 — edição do rascunho: o formulário de abertura inteiro, sem
+ *  `rascunho`/`virtual` (o rascunho continua rascunho até ser aberto). */
+export type RascunhoUpdateInput = Omit<ProcessoCreateInput, "rascunho" | "virtual">;
 
 export interface EncaminharInput {
   id_unidade_destino: number;
@@ -630,21 +674,45 @@ export interface Prioridade {
   cor: string;
 }
 
-// Fase 6 — Relatórios
+// Fase 6 — Relatórios (refeitos no SI-34: `backend/app/services/relatorios_comum.py`)
+/** Unidade em três sentidos: dona ou onde está (padrão), só a dona (a
+ * proprietária) ou só onde está agora. "Por onde passou" saiu em 2026-11-12;
+ * na tramitação pela data de entrada, a unidade é onde o processo deu entrada. */
+export type ModoUnidadeRelatorio = "envolvida" | "dona" | "atual";
+/** Situação real, pelas mesmas condições das caixas de trabalho. */
+export type SituacaoRelatorio = "em_andamento" | "em_transito" | "arquivado";
+
 export interface RelatorioFiltroInput {
   id_unidade?: number;
+  modo_unidade?: ModoUnidadeRelatorio;
   id_assunto?: number;
   id_tipo_processo?: number;
+  id_servico?: number;
+  /** Dia LOCAL (Brasília), `AAAA-MM-DD`, inclusive. */
   desde?: string;
   ate?: string;
-  apenas_ativos?: boolean;
+  /** Por qual data o período conta. Processos: abertura | arquivamento;
+   * tramitação: abertura | chegada. */
+  data_base?: "abertura" | "arquivamento" | "chegada";
+  situacao?: SituacaoRelatorio;
+  parado_ha_dias?: number;
+  prazo?: StatusPrazoRelatorio;
+  /** Lista de processos: o critério dos cartões Sigilosos e Externos. */
+  sigilo?: FiltroSigiloRelatorio;
+  origem?: FiltroOrigemRelatorio;
+  /** Tramitação: só processos com alguma etapa atrasada. */
+  com_atraso?: boolean;
   max_rows?: number;
 }
 
+export type FiltroSigiloRelatorio = "ostensivo" | "sigiloso";
+export type FiltroOrigemRelatorio = "interna" | "externa";
+
 export interface RelatorioTotais {
   total: number;
-  ativos: number;
-  inativos: number;
+  em_andamento: number;
+  em_transito: number;
+  arquivados: number;
   sigilosos: number;
   externos: number;
 }
@@ -655,16 +723,20 @@ export interface RelatorioBreakdownItem {
   pct: number;
 }
 
+/** Datas dos relatórios chegam em hora de Brasília, SEM fuso
+ * (`2026-10-10T23:30:00`): formatar o texto, não converter. */
 export interface RelatorioProcessoRow {
   id: number;
   numero_processo: string;
   data_hora_abertura: string;
+  data_hora_arquivamento: string | null;
+  ultima_movimentacao: string | null;
+  situacao: SituacaoRelatorio;
   manifestante: string | null;
   tipo_processo: string | null;
   assunto: string | null;
   unidade_proprietaria: string | null;
   local_atual: string | null;
-  ativo: boolean;
   publico: boolean;
   nivel_sigilo: NivelSigilo;
   externo: boolean;
@@ -672,11 +744,19 @@ export interface RelatorioProcessoRow {
 
 export interface RelatorioResposta {
   filtros_aplicados: RelatorioFiltroInput;
+  /** O recorte em frases — igual na tela, no CSV e no PDF. */
+  descricao_filtros: string[];
   nome_unidade: string | null;
   totais: RelatorioTotais;
   por_tipo_processo: RelatorioBreakdownItem[];
   por_unidade_proprietaria: RelatorioBreakdownItem[];
+  /** Onde o processo está agora (arquivado: onde foi arquivado). */
+  por_local_atual: RelatorioBreakdownItem[];
+  por_assunto: RelatorioBreakdownItem[];
+  por_servico: RelatorioBreakdownItem[];
   processos: RelatorioProcessoRow[];
+  /** A lista tem teto; os totais, não. */
+  cortado: boolean;
 }
 
 // Fase 6.2 — Relatório de tramitação
@@ -694,7 +774,7 @@ export interface TramitacaoProcesso {
   id: number;
   numero_processo: string;
   data_hora_abertura: string;
-  ativo: boolean;
+  situacao: SituacaoRelatorio;
   manifestante: string | null;
   assunto: string | null;
   qtd_encaminhamentos: number;
@@ -718,8 +798,12 @@ export interface TramitacaoPorUnidade {
 
 export interface RelatorioTramitacaoResposta {
   filtros_aplicados: RelatorioFiltroInput;
+  descricao_filtros: string[];
   nome_unidade: string | null;
+  /** Total do recorte; a lista, os atrasos e as médias são dos `qtd_listados`. */
   qtd_processos: number;
+  qtd_listados: number;
+  cortado: boolean;
   qtd_processos_com_atraso: number;
   minutos_medio_por_processo: number;
   por_unidade: TramitacaoPorUnidade[];
@@ -730,8 +814,16 @@ export interface RelatorioTramitacaoResposta {
 export type StatusSolicitacaoAssin = "pendente" | "concluida" | "cancelada";
 
 export interface AssinaturasFiltroInput {
+  /** Recorte comum, sobre o PROCESSO da solicitação. */
+  id_unidade?: number;
+  modo_unidade?: ModoUnidadeRelatorio;
+  id_assunto?: number;
+  id_tipo_processo?: number;
+  id_servico?: number;
+  /** Dia LOCAL, `AAAA-MM-DD`, pela data do pedido ou da conclusão. */
   desde?: string;
   ate?: string;
+  data_base?: "pedido" | "conclusao";
   id_solicitante?: number;
   id_assinante?: number;
   status?: StatusSolicitacaoAssin;
@@ -782,10 +874,230 @@ export interface SolicitacaoRow {
 
 export interface RelatorioAssinaturasResposta {
   filtros_aplicados: AssinaturasFiltroInput;
+  descricao_filtros: string[];
+  /** Totais e agregados contam o recorte inteiro; só a lista tem teto. */
   totais: AssinaturasTotais;
   por_assinante: AssinanteAgregado[];
   por_solicitante: SolicitanteAgregado[];
   solicitacoes: SolicitacaoRow[];
+  cortado: boolean;
+}
+
+// SI-34 — página gerencial: uma tela, cinco seções, cada uma pela SUA data.
+export interface GerencialFiltroInput {
+  id_unidade?: number;
+  modo_unidade?: ModoUnidadeRelatorio;
+  id_assunto?: number;
+  id_tipo_processo?: number;
+  id_servico?: number;
+  desde?: string;
+  ate?: string;
+  dias_parado?: number;
+}
+
+/** Status do prazo do SERVIÇO (`prazos.calcular_prazo`). */
+export type StatusPrazoRelatorio =
+  | "sem_prazo"
+  | "dentro_do_prazo"
+  | "vencendo"
+  | "atrasado"
+  | "concluido_no_prazo"
+  | "concluido_atrasado";
+
+export interface GerencialResposta {
+  descricao_filtros: string[];
+  entrada: {
+    abertos: number;
+    por_canal: { canal: string | null; rotulo: string; count: number }[];
+  };
+  andamento: { em_andamento: number; em_transito: number; parados: number; dias_parado: number };
+  saida: { arquivados: number; dias_medio_ate_arquivar: number | null };
+  /** Prazo do serviço; os `*_sem_prazo` dizem quantos ficaram fora da conta. */
+  prazos: {
+    concluidos_no_prazo: number;
+    concluidos_atrasados: number;
+    concluidos_sem_prazo: number;
+    dentro_do_prazo: number;
+    vencendo: number;
+    atrasados: number;
+    em_aberto_sem_prazo: number;
+  };
+  tendencia: {
+    granularidade: "semana" | "mes";
+    desde: string;
+    ate: string;
+    pontos: { inicio: string; abertos: number; arquivados: number }[];
+  };
+  gargalos: {
+    unidades: {
+      id_unidade: number | null;
+      unidade: string | null;
+      /** Entradas na unidade: abertura (na dona) ou recebimento. */
+      chegadas: number;
+      com_prazo: number;
+      atrasos: number;
+      dias_medio: number | null;
+    }[];
+    cortado: boolean;
+  };
+  assinaturas: AssinaturasTotais;
+  /** Cada número é o total de uma visão de `/relatorios/documentacao`. */
+  documentacao: {
+    /** Abertos no período cujo serviço exige documentos; situação de hoje. */
+    pendentes: number;
+    parciais: number;
+    completos: number;
+    sem_documentos_exigidos: number;
+    /** Processos: pedido no período / aguardando hoje / respondido no período. */
+    complementacao_pedida: number;
+    aguardando_cidadao: number;
+    complementacao_respondida: number;
+    dias_medio_resposta: number | null;
+  };
+}
+
+/** Uma visão = a lista de um número do grupo Documentação. */
+export type VisaoDocumentacao =
+  | "documentos"
+  | "doc_pendente"
+  | "doc_parcial"
+  | "doc_completo"
+  | "compl_pedida"
+  | "compl_aberta"
+  | "compl_respondida";
+
+export interface DocumentacaoFiltroInput extends RelatorioFiltroInput {
+  visao?: VisaoDocumentacao;
+}
+
+export interface DocumentacaoProcessoRow {
+  id: number;
+  numero_processo: string;
+  /** Hora de Brasília, sem fuso. */
+  data_hora_abertura: string;
+  servico: string | null;
+  status_documental: StatusDocumental;
+  obrigatorios_total: number;
+  obrigatorios_enviados: number;
+  /** O pedido de complementação mais recente do processo. */
+  complementacao_status: "aberta" | "respondida" | "cancelada" | null;
+  complementacao_pedida_em: string | null;
+  complementacao_respondida_em: string | null;
+  local_atual: string | null;
+  nivel_sigilo: NivelSigilo;
+}
+
+export interface RelatorioDocumentacaoResposta {
+  visao: VisaoDocumentacao;
+  descricao_filtros: string[];
+  totais: {
+    total: number;
+    pendentes: number;
+    parciais: number;
+    completos: number;
+    aguardando_cidadao: number;
+  };
+  processos: DocumentacaoProcessoRow[];
+  cortado: boolean;
+}
+
+// SI-35 — relatório montado pela própria pessoa. Espelha
+// `backend/app/schemas/relatorio_montado.py`: catálogo FECHADO, o backend
+// recusa (422) coluna ou chave fora dele. Sem CPF, telefone e e-mail.
+export type ColunaMontado =
+  | "nup" | "aberto_em" | "arquivado_em" | "situacao" | "tipo" | "assunto" | "servico"
+  | "unidade_dona" | "local_atual" | "responsavel" | "manifestante" | "sigilo" | "origem" | "canal"
+  | "ultima_movimentacao" | "dias_parado" | "prazo_situacao" | "prazo_previsto"
+  | "doc_situacao" | "doc_obrigatorios" | "complementacao"
+  | "tram_envios" | "tram_unidades" | "tram_atrasos" | "tram_ultimo_envio" | "tram_unidade_mais_tempo"
+  | "ass_pedidas" | "ass_concluidas" | "ass_pendentes" | "ass_ultima_conclusao";
+export type OrdemMontado =
+  | "numero" | "aberto_em" | "arquivado_em" | "ultima_movimentacao"
+  | "assunto" | "servico" | "unidade_dona" | "local_atual";
+export type AgruparPorMontado = "situacao" | "tipo" | "unidade_dona" | "local_atual" | "assunto" | "servico";
+export type TipoPeriodoMontado = "sem" | "fixo" | "ultimos_dias" | "mes_atual" | "mes_anterior" | "ano_atual";
+export type StatusDocFiltroMontado = "sem_documentos_exigidos" | "pendente" | "parcial" | "completo";
+
+export interface PeriodoMontado {
+  tipo: TipoPeriodoMontado;
+  desde?: string | null;
+  ate?: string | null;
+  dias?: number | null;
+}
+
+export interface FiltrosMontado {
+  id_unidade?: number | null;
+  modo_unidade?: ModoUnidadeRelatorio;
+  id_assunto?: number | null;
+  id_tipo_processo?: number | null;
+  id_servico?: number | null;
+  data_base?: "abertura" | "arquivamento";
+  situacao?: SituacaoRelatorio | null;
+  parado_ha_dias?: number | null;
+  prazo?: StatusPrazoRelatorio | null;
+  sigilo?: FiltroSigiloRelatorio | null;
+  origem?: FiltroOrigemRelatorio | null;
+  documentacao?: StatusDocFiltroMontado | null;
+  complementacao_aberta?: boolean;
+  com_atraso?: boolean;
+  assinatura_pendente?: boolean;
+}
+
+export interface DefinicaoMontado {
+  versao?: 1;
+  colunas: ColunaMontado[];
+  filtros?: FiltrosMontado;
+  periodo?: PeriodoMontado;
+  agrupar_por?: AgruparPorMontado | null;
+  ordem?: OrdemMontado | null;
+  ordem_desc?: boolean;
+}
+
+export interface ColunaMontadoInfo {
+  chave: ColunaMontado;
+  rotulo: string;
+  grupo: string;
+  tipo: "texto" | "numero" | "data" | "data_hora";
+}
+
+export interface CatalogoMontado {
+  colunas: ColunaMontadoInfo[];
+  colunas_padrao: ColunaMontado[];
+  ordens: Record<OrdemMontado, string>;
+  agrupamentos: Record<AgruparPorMontado, string>;
+  max_colunas: number;
+}
+
+export interface ResultadoMontado {
+  definicao: DefinicaoMontado;
+  colunas: ColunaMontadoInfo[];
+  descricao_filtros: string[];
+  desde: string | null;
+  ate: string | null;
+  totais: { total: number; em_andamento: number; em_transito: number; arquivados: number };
+  rotulo_agrupamento: string | null;
+  agrupamento: RelatorioBreakdownItem[] | null;
+  linhas: {
+    id: number;
+    numero_processo: string;
+    nivel_sigilo: NivelSigilo;
+    /** Data e hora em ISO, hora de Brasília, sem fuso. */
+    valores: Partial<Record<ColunaMontado, string | number | null>>;
+  }[];
+  cortado: boolean;
+  avisos: string[];
+}
+
+export interface RelatorioSalvoResumo {
+  id: number;
+  nome: string;
+  criado_em: string;
+  atualizado_em: string;
+}
+
+export interface RelatorioSalvoOut extends RelatorioSalvoResumo {
+  definicao: DefinicaoMontado;
+  avisos: string[];
 }
 
 // Fase 7 — Jobs assíncronos
@@ -823,6 +1135,8 @@ export interface CidadaoMe {
   telefone: string | null;
   telefone_whatsapp: boolean;
   ativo: boolean;
+  /** `null` = cadastro esperando a confirmação por e-mail. */
+  email_verificado_em?: string | null;
 }
 
 export interface CidadaoLoginResponse {
@@ -969,10 +1283,11 @@ function _suprimeRedirectSessaoExpirada(pathname: string, path: string): boolean
   // A própria requisição de login: 401 aqui é credencial errada, não sessão
   // expirada. Precisa aparecer na tela (mensagem "e-mail ou senha inválidos"),
   // não virar redirect — senão a tela de login vira um loop.
-  if (path === "/auth/login") return true;
-  // Já na tela de login: redirecionar de /login pra /login é ruído e pode
-  // laçar com o middleware.
-  if (pathname === "/login") return true;
+  if (path === "/auth/login" || path.startsWith("/auth/login/")) return true;
+  // Já na tela de login (ou numa das telas de conta sob ela — código de 2FA,
+  // redefinir senha, convite): redirecionar para /login é ruído e pode laçar
+  // com o middleware.
+  if (pathname === "/login" || pathname.startsWith("/login/")) return true;
   // Portal do cidadão: cookie e login próprios (aprimora_cidadao_token,
   // /cidadao/login). Defensivo — `request()` não é usada pelo cidadão hoje,
   // mas um 401 vindo de uma página `/cidadao/*` não pode mandar pro login
@@ -1120,13 +1435,74 @@ export function comprovanteUrl(
 function relatorioQs(f: RelatorioFiltroInput): string {
   return qs({
     id_unidade: f.id_unidade,
+    // O modo só faz sentido com uma unidade escolhida.
+    modo_unidade: f.id_unidade ? f.modo_unidade : undefined,
     id_assunto: f.id_assunto,
     id_tipo_processo: f.id_tipo_processo,
+    id_servico: f.id_servico,
     desde: f.desde,
     ate: f.ate,
-    apenas_ativos: f.apenas_ativos ? "true" : undefined,
+    data_base: f.data_base,
+    situacao: f.situacao,
+    parado_ha_dias: f.parado_ha_dias,
+    prazo: f.prazo,
+    sigilo: f.sigilo,
+    origem: f.origem,
+    com_atraso: f.com_atraso || undefined,
     max_rows: f.max_rows,
   });
+}
+
+function documentacaoQs(f: DocumentacaoFiltroInput): string {
+  return qs({
+    id_unidade: f.id_unidade,
+    modo_unidade: f.id_unidade ? f.modo_unidade : undefined,
+    id_assunto: f.id_assunto,
+    id_tipo_processo: f.id_tipo_processo,
+    id_servico: f.id_servico,
+    desde: f.desde,
+    ate: f.ate,
+    visao: f.visao,
+    max_rows: f.max_rows,
+  });
+}
+
+export function documentacaoCsvUrl(f: DocumentacaoFiltroInput): string {
+  return `${BROWSER_API_URL}/relatorios/documentacao.csv${documentacaoQs(f)}`;
+}
+
+export function documentacaoPdfUrl(f: DocumentacaoFiltroInput): string {
+  return `${BROWSER_API_URL}/relatorios/documentacao.pdf${documentacaoQs(f)}`;
+}
+
+/** SI-35 — a definição vai em JSON no `d`: o CSV e o PDF são links comuns. */
+function montadoQs(d: DefinicaoMontado, extra: Record<string, string | undefined> = {}): string {
+  return qs({ d: JSON.stringify(d), ...extra });
+}
+
+export function montadoCsvUrl(d: DefinicaoMontado): string {
+  return `${BROWSER_API_URL}/relatorios/montado.csv${montadoQs(d)}`;
+}
+
+export function montadoPdfUrl(d: DefinicaoMontado, nome?: string): string {
+  return `${BROWSER_API_URL}/relatorios/montado.pdf${montadoQs(d, { nome: nome || undefined })}`;
+}
+
+function gerencialQs(f: GerencialFiltroInput): string {
+  return qs({
+    id_unidade: f.id_unidade,
+    modo_unidade: f.id_unidade ? f.modo_unidade : undefined,
+    id_assunto: f.id_assunto,
+    id_tipo_processo: f.id_tipo_processo,
+    id_servico: f.id_servico,
+    desde: f.desde,
+    ate: f.ate,
+    dias_parado: f.dias_parado,
+  });
+}
+
+export function gerencialPdfUrl(f: GerencialFiltroInput): string {
+  return `${BROWSER_API_URL}/relatorios/gerencial.pdf${gerencialQs(f)}`;
 }
 
 export function relatorioCsvUrl(f: RelatorioFiltroInput): string {
@@ -1153,8 +1529,14 @@ export function tramitacaoPdfUrl(f: RelatorioFiltroInput, inline = true): string
 
 function assinaturasQs(f: AssinaturasFiltroInput): string {
   return qs({
+    id_unidade: f.id_unidade,
+    modo_unidade: f.id_unidade ? f.modo_unidade : undefined,
+    id_assunto: f.id_assunto,
+    id_tipo_processo: f.id_tipo_processo,
+    id_servico: f.id_servico,
     desde: f.desde,
     ate: f.ate,
+    data_base: f.data_base,
     id_solicitante: f.id_solicitante,
     id_assinante: f.id_assinante,
     status: f.status,
@@ -3233,6 +3615,44 @@ export const api = {
       body: JSON.stringify({ email, senha }),
     }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
+  // Conta por e-mail (0136): 2FA, "não lembro a senha", convite, confirmação.
+  conta: {
+    login2fa: (desafio: string, codigo: string, lembrar: boolean) =>
+      request<LoginResponse>("/auth/login/2fa", {
+        method: "POST",
+        body: JSON.stringify({ desafio, codigo, lembrar }),
+      }),
+    reenviarCodigo: (desafio: string) =>
+      request<LoginResponse>("/auth/login/2fa/reenviar", {
+        method: "POST",
+        body: JSON.stringify({ desafio }),
+      }),
+    esqueciSenha: (email: string) =>
+      request<{ detail: string }>("/auth/esqueci-senha", {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      }),
+    redefinirSenha: (token: string, nova_senha: string) =>
+      request<ContaConfirmada>("/auth/redefinir-senha", {
+        method: "POST",
+        body: JSON.stringify({ token, nova_senha }),
+      }),
+    conviteInfo: (token: string) =>
+      request<{ nome: string; email: string }>("/auth/convite/info", {
+        method: "POST",
+        body: JSON.stringify({ token }),
+      }),
+    aceitarConvite: (token: string, nova_senha: string) =>
+      request<ContaConfirmada>("/auth/convite/aceitar", {
+        method: "POST",
+        body: JSON.stringify({ token, nova_senha }),
+      }),
+    verificarEmail: (token: string) =>
+      request<ContaConfirmada>("/auth/verificar-email", {
+        method: "POST",
+        body: JSON.stringify({ token }),
+      }),
+  },
   me: (token?: string) => request<MeResponse>("/auth/me", {}, token),
   // E1 (benchmark SUiTE) — "alterar setor": troca a lotação ativa da sessão.
   // O backend já devolve o MeResponse recalculado; não precisa de uma
@@ -3298,17 +3718,23 @@ export const api = {
 
   // User-specific endpoints (current logged-in user)
   users: {
-    getGoogleCredential: async () => {
+    /**
+     * SI-32 — integração com o Google: `configurado` (o servidor tem client
+     * ID/secret) e `connected` (este usuário autorizou). Sem `configurado`, a
+     * tela explica em vez de oferecer um "Conectar" que levaria a um erro.
+     * Falha de rede = não conectado, mas configurado (não esconde a opção à toa).
+     */
+    getGoogleCredential: async (): Promise<{ connected: boolean; configurado: boolean }> => {
       try {
-        const res = await fetch(`${baseUrl()}/auth/users/me/google-credential`, {
+        const res = await fetch(`${baseUrl()}/auth/google/status`, {
           cache: "no-store",
           credentials: "include",
         });
-        if (res.status === 404) return { connected: false };
         if (!res.ok) throw new Error("Failed to fetch credential status");
-        return res.json();
-      } catch (err) {
-        return { connected: false };
+        const s = (await res.json()) as { configurado: boolean; conectado: boolean };
+        return { connected: s.conectado, configurado: s.configurado };
+      } catch {
+        return { connected: false, configurado: true };
       }
     },
   },
@@ -3374,6 +3800,9 @@ export const api = {
       request<ResetSenhaResponse>(`/usuarios/${id}/resetar-senha`, {
         method: "POST",
       }),
+    /** Convite pendente: manda o link de novo (o anterior deixa de valer). */
+    reenviarConvite: (id: number) =>
+      request<void>(`/usuarios/${id}/reenviar-convite`, { method: "POST" }),
   },
 
   unidades: {
@@ -4312,6 +4741,9 @@ export const api = {
       }),
     placeholders: () =>
       request<PlaceholderInfo[]>("/templates-documento/placeholders-disponiveis"),
+    /** SI-30 — CSS com que o PDF final é impresso; a pré-visualização usa o mesmo. */
+    estiloImpressao: () =>
+      request<{ css: string; css_tela: string }>("/templates-documento/estilo-impressao"),
   },
 
   // Imagens embutidas no editor rico (Novo Processo, Templates, Minutas)
@@ -4835,6 +5267,18 @@ export const api = {
         method: "POST",
         body: JSON.stringify(data),
       }),
+    /** SI-16 — rascunho é do autor: para os outros, estes três dão 404. */
+    editarRascunho: (id: number, data: RascunhoUpdateInput) =>
+      request<ProcessoDetail>(`/processos/${id}/rascunho`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    /** Dá o número sem tramitar; o processo fica na unidade de quem abriu. */
+    abrirRascunho: (id: number) =>
+      request<ProcessoDetail>(`/processos/${id}/abrir`, { method: "POST" }),
+    /** Exclusão lógica. Só rascunho; processo aberto dá 409. */
+    excluirRascunho: (id: number) =>
+      request<void>(`/processos/${id}/rascunho`, { method: "DELETE" }),
     encaminhar: (id: number, data: EncaminharInput) =>
       request<ProcessoDetail>(`/processos/${id}/encaminhamentos`, {
         method: "POST",
@@ -4930,6 +5374,8 @@ export const api = {
 
   // Fase 6 — Relatórios
   relatorios: {
+    gerencial: (f: GerencialFiltroInput) =>
+      request<GerencialResposta>(`/relatorios/gerencial.json${gerencialQs(f)}`),
     processos: (f: RelatorioFiltroInput) =>
       request<RelatorioResposta>(`/relatorios/processos.json${relatorioQs(f)}`),
     tramitacao: (f: RelatorioFiltroInput) =>
@@ -4940,6 +5386,26 @@ export const api = {
       request<RelatorioAssinaturasResposta>(
         `/relatorios/assinaturas.json${assinaturasQs(f)}`,
       ),
+    documentacao: (f: DocumentacaoFiltroInput) =>
+      request<RelatorioDocumentacaoResposta>(
+        `/relatorios/documentacao.json${documentacaoQs(f)}`,
+      ),
+    /** Opções do filtro de serviço — basta a transação `processo`. */
+    servicos: () =>
+      request<{ id: number; nome: string; ativo: boolean }[]>("/relatorios/servicos.json"),
+    // SI-35 — relatório montado e os "meus relatórios" (só da pessoa).
+    montadoCatalogo: () => request<CatalogoMontado>("/relatorios/montado/catalogo.json"),
+    montado: (d: DefinicaoMontado) =>
+      request<ResultadoMontado>(`/relatorios/montado.json${montadoQs(d)}`),
+    salvos: {
+      list: () => request<RelatorioSalvoResumo[]>("/relatorios/salvos"),
+      get: (id: number) => request<RelatorioSalvoOut>(`/relatorios/salvos/${id}`),
+      create: (body: { nome: string; definicao: DefinicaoMontado }) =>
+        request<RelatorioSalvoOut>("/relatorios/salvos", { method: "POST", body: JSON.stringify(body) }),
+      update: (id: number, body: { nome?: string; definicao?: DefinicaoMontado }) =>
+        request<RelatorioSalvoOut>(`/relatorios/salvos/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+      remove: (id: number) => request<void>(`/relatorios/salvos/${id}`, { method: "DELETE" }),
+    },
   },
 
   // Fase 7 — Jobs assíncronos
@@ -4962,11 +5428,14 @@ export const api = {
         method: "POST",
         body: JSON.stringify({
           id_unidade: f.id_unidade,
+          modo_unidade: f.id_unidade ? f.modo_unidade : undefined,
           id_assunto: f.id_assunto,
           id_tipo_processo: f.id_tipo_processo,
+          id_servico: f.id_servico,
           desde: f.desde,
           ate: f.ate,
-          apenas_ativos: f.apenas_ativos ?? false,
+          data_base: f.data_base === "chegada" ? "chegada" : "abertura",
+          com_atraso: !!f.com_atraso,
           max_processos: f.max_rows ?? 200,
         }),
       }),
@@ -4991,6 +5460,18 @@ export const api = {
       requestCidadao<CidadaoLoginResponse>("/cidadao/login", {
         method: "POST",
         body: JSON.stringify({ cpf_cnpj, senha }),
+      }),
+    /** Link de nova senha para o e-mail do cadastro (resposta igual sempre). */
+    esqueciSenha: (cpf_cnpj: string) =>
+      requestCidadao<{ detail: string }>("/cidadao/esqueci-senha", {
+        method: "POST",
+        body: JSON.stringify({ cpf_cnpj }),
+      }),
+    /** Login recusado com 403 = e-mail ainda não confirmado: manda o link de novo. */
+    reenviarConfirmacao: (cpf_cnpj: string) =>
+      requestCidadao<{ detail: string }>("/cidadao/reenviar-confirmacao", {
+        method: "POST",
+        body: JSON.stringify({ cpf_cnpj }),
       }),
     logout: () => requestCidadao<void>("/cidadao/logout", { method: "POST" }),
     me: (token?: string) => requestCidadao<CidadaoMe>("/cidadao/me", {}, token),

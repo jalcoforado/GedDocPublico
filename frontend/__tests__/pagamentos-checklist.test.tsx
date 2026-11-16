@@ -8,7 +8,7 @@
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChecklistItemDebito } from "@/lib/api";
 
@@ -115,6 +115,12 @@ beforeEach(() => {
   validarMock.mockClear();
 });
 
+// A primeira importação do detalhe (muitos módulos) passava dos 5 s do
+// teste em máquina carregada; aquecer aqui tira o custo de dentro dos testes.
+beforeAll(async () => {
+  await import("@/components/pagamentos/DetalheDebitoContent");
+}, 60_000);
+
 describe("conferência de documentos no detalhe do débito", () => {
   it("lista os itens e diz quantos obrigatórios faltam", async () => {
     const secao = await abrir();
@@ -142,7 +148,7 @@ describe("conferência de documentos no detalhe do débito", () => {
     const alerta = await screen.findByRole("alert");
     expect(alerta).toHaveTextContent("Nota fiscal atestada");
     expect(alerta).not.toHaveTextContent("Certidão municipal");
-    const confirmar = screen.getByRole("button", { name: "Confirmar" });
+    const confirmar = screen.getByRole("button", { name: "Confirmar validação" });
     expect(confirmar).toBeDisabled();
     fireEvent.click(confirmar);
     expect(validarMock).not.toHaveBeenCalled();
@@ -153,7 +159,7 @@ describe("conferência de documentos no detalhe do débito", () => {
     const secao = await abrir();
     await secao.findByLabelText("Nota fiscal atestada");
     fireEvent.click(await screen.findByRole("button", { name: /validar/i }));
-    const confirmar = await screen.findByRole("button", { name: "Confirmar" });
+    const confirmar = await screen.findByRole("button", { name: "Confirmar validação" });
     expect(screen.queryByRole("alert")).toBeNull();
     fireEvent.click(confirmar);
     await waitFor(() => expect(validarMock).toHaveBeenCalledWith(20, { lock_version: 3 }));

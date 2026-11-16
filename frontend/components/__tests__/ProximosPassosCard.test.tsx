@@ -61,7 +61,9 @@ describe("calcularProximoPasso", () => {
       complementacao("aberta"),
     );
     expect(m.intent).toBe("warning");
-    expect(m.title).toMatch(/complementação documental/i);
+    expect(m.title).toMatch(/pediu mais documentos/i);
+    // O caminho para responder fica na descrição, com os nomes que o quadro usa.
+    expect(m.description).toMatch(/Responder complementação/);
   });
 
   it("checklist pendente sem complementação → 'Envie os documentos pendentes…'", () => {
@@ -170,7 +172,7 @@ describe("ProximosPassosCard (render)", () => {
       />,
     );
     expect(
-      screen.getByText(/Responda à solicitação de complementação documental/i),
+      screen.getByText(/A prefeitura pediu mais documentos/i),
     ).toBeInTheDocument();
   });
 

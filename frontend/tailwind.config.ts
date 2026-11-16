@@ -63,6 +63,9 @@ const config: Config = {
           DEFAULT: "hsl(var(--assinatura) / <alpha-value>)",
           texto: "hsl(var(--assinatura-texto) / <alpha-value>)",
         },
+        "marca-fundo": {
+          DEFAULT: "hsl(var(--marca-fundo) / <alpha-value>)",
+        },
         // Títulos de página — o município pode trocar a cor (`cor_titulos`).
         titulo: {
           DEFAULT: "hsl(var(--titulo) / <alpha-value>)",
@@ -218,6 +221,12 @@ const config: Config = {
           from: { opacity: "0", transform: "translateY(4px)" },
           to: { opacity: "1", transform: "translateY(0)" },
         },
+        // Placeholder de carregamento que só aparece se a espera passar do
+        // atraso da animação: resposta rápida não pisca nada.
+        "aparece-depois": {
+          from: { opacity: "0" },
+          to: { opacity: "1" },
+        },
       },
       animation: {
         "fade-in": "fade-in 180ms var(--ease-out)",
@@ -227,6 +236,7 @@ const config: Config = {
         "pulse-soft": "pulse-soft 2s ease-in-out infinite",
         shimmer: "shimmer 2s linear infinite",
         "page-in": "page-in 220ms var(--ease-out-expo)",
+        "aparece-depois": "aparece-depois 200ms var(--ease-out) 150ms both",
       },
     },
   },

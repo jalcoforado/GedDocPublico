@@ -8,8 +8,8 @@ import { FavoritoStar } from "@/components/FavoritoStar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonRow } from "@/components/ui/skeleton";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
-import type { PrazoCaixaStatus, ProcessoListItem } from "@/lib/api";
+import { Table, TBody, TD, TH, THead, TR, TRLink } from "@/components/ui/table";
+import type { ColunaProcesso, PrazoCaixaStatus, ProcessoListItem } from "@/lib/api";
 import { decorridoDesde } from "@/lib/duracao";
 import { cn } from "@/lib/utils";
 
@@ -82,6 +82,13 @@ interface Props {
     alternar: (id: number) => void;
     alternarPagina: (marcar: boolean) => void;
   };
+  /** SI-19 — com ele, os títulos de coluna ordenam (`<TH sortable>`). Quem
+   *  ordena é o servidor: a lista é paginada. Sem ele, cabeçalho fixo. */
+  colunaOrdenavel?: (campo: ColunaProcesso) => {
+    sortable: boolean;
+    sortState: "asc" | "desc" | null;
+    onSortToggle: () => void;
+  };
 }
 
 /**
@@ -94,7 +101,8 @@ interface Props {
  * à esquerda e o tempo, que é o que se compara entre linhas, à direita com
  * algarismos de largura fixa.
  */
-export function TabelaCaixaProcessos({ itens, carregando, selecao }: Props) {
+export function TabelaCaixaProcessos({ itens, carregando, selecao, colunaOrdenavel }: Props) {
+  const ord = (campo: ColunaProcesso) => colunaOrdenavel?.(campo) ?? {};
   const vazio = !carregando && (itens?.length ?? 0) === 0;
   const colunas = selecao ? 7 : 6;
   const todosMarcados =
@@ -117,11 +125,11 @@ export function TabelaCaixaProcessos({ itens, carregando, selecao }: Props) {
               />
             </TH>
           )}
-          <TH>Nº do processo</TH>
-          <TH>Assunto</TH>
-          <TH className="text-right">Tempo na caixa</TH>
-          <TH>Envolvido</TH>
-          <TH>Responsável</TH>
+          <TH {...ord("numero")}>Nº do processo</TH>
+          <TH {...ord("assunto")}>Assunto</TH>
+          <TH className="text-right" {...ord("parado")}>Tempo na caixa</TH>
+          <TH {...ord("manifestante")}>Envolvido</TH>
+          <TH {...ord("responsavel")}>Responsável</TH>
           <TH className="text-right">Ações</TH>
         </TR>
       </THead>
@@ -144,7 +152,7 @@ export function TabelaCaixaProcessos({ itens, carregando, selecao }: Props) {
           const espera = ESPERA[nivelDeEspera(p.prazo_caixa_status)];
           const prazo = textoDoPrazo(p.prazo_caixa_status, p.prazo_caixa_vence_em);
           return (
-            <TR key={p.id}>
+            <TRLink key={p.id} href={href}>
               {selecao && (
                 <TD className="w-10">
                   <Checkbox
@@ -159,7 +167,7 @@ export function TabelaCaixaProcessos({ itens, carregando, selecao }: Props) {
                   <FavoritoStar processo={p} size="sm" />
                   <Link
                     href={href}
-                    className="rounded text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="rounded text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {p.nup ?? p.numero_processo ?? "Rascunho"}
                   </Link>
@@ -208,7 +216,7 @@ export function TabelaCaixaProcessos({ itens, carregando, selecao }: Props) {
                   Abrir →
                 </Link>
               </TD>
-            </TR>
+            </TRLink>
           );
         })}
       </TBody>

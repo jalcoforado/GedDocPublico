@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
@@ -14,5 +16,5 @@ export default function CidadaoLandingPage() {
     router.replace(cidadao ? "/cidadao/processos" : "/cidadao/login");
   }, [router, cidadao, loading]);
 
-  return <p className="text-sm text-muted-foreground">Carregando...</p>;
+  return <Carregando className="text-sm text-muted-foreground" />;
 }

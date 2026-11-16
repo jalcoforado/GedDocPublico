@@ -5,15 +5,20 @@ import {
   AlertTriangle,
   ChevronsDownUp,
   ChevronsUpDown,
+  Clock,
+  FileText,
   LayoutList,
   Loader2,
   Network,
+  Pencil,
   Plus,
   Search,
+  Users,
   X as XIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { corDoCalor, LEGENDA_DO_CALOR } from "@/components/organograma/cores";
 import { OrganogramaDiagramView } from "@/components/organograma/OrganogramaDiagramView";
 import { OrganogramaListView } from "@/components/organograma/OrganogramaListView";
 import {
@@ -23,7 +28,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
 import { Input } from "@/components/ui/input";
+import { KpiCard } from "@/components/ui/kpi-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { useToast } from "@/components/ui/toast";
 import {
@@ -51,12 +58,6 @@ function metricValue(no: OrganogramaNo, m: HeatmapMetric): number | null {
   if (m === "none") return null;
   if (m === "tempo_medio_dias") return no.tempo_medio_dias;
   return no[m] as number;
-}
-
-function heatColor(normalized: number): string {
-  const n = Math.max(0, Math.min(1, normalized));
-  const hue = (1 - n) * 120;
-  return `hsl(${hue}, 60%, 92%)`;
 }
 
 export default function OrganogramaPage() {
@@ -134,7 +135,7 @@ export default function OrganogramaPage() {
     if (metric === "none" || heatMax <= 0) return m;
     for (const no of nos) {
       const v = metricValue(no, metric);
-      if (v != null && v > 0) m.set(no.id, heatColor(v / heatMax));
+      if (v != null && v > 0) m.set(no.id, corDoCalor(v / heatMax));
     }
     return m;
   }, [nos, metric, heatMax]);
@@ -255,7 +256,7 @@ export default function OrganogramaPage() {
             Excluir <strong>{no.unidade_trabalho}</strong>?
           </p>
           {hasChildren && (
-            <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+            <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-warning-soft-foreground">
               <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
               <span className="text-xs">
                 Esta unidade tem subordinadas — elas ficarão órfãs no
@@ -321,7 +322,7 @@ export default function OrganogramaPage() {
       />
 
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card p-3">
+      <FilterBar ariaLabel="Ferramentas do organograma" className="items-center">
         {/* View toggle */}
         <div className="flex rounded-md border border-border bg-surface-1 p-0.5">
           <button
@@ -421,7 +422,7 @@ export default function OrganogramaPage() {
             </button>
           ))}
         </div>
-      </div>
+      </FilterBar>
 
       {/* Heatmap legend */}
       {metric !== "none" && heatMax > 0 && (
@@ -429,10 +430,7 @@ export default function OrganogramaPage() {
           <span>{HEATMAP_LABELS[metric]}: baixo</span>
           <span
             className="inline-block h-3 w-32 rounded"
-            style={{
-              background:
-                "linear-gradient(to right, hsl(120,60%,92%), hsl(60,60%,92%), hsl(0,60%,92%))",
-            }}
+            style={{ background: LEGENDA_DO_CALOR }}
           />
           <span>alto (máx {heatMax.toFixed(0)})</span>
         </div>
@@ -498,7 +496,7 @@ export default function OrganogramaPage() {
 
       {/* Detalhe da seleção */}
       {selecionada && (
-        <div className="rounded-lg border border-border bg-card p-4">
+        <div className="rounded-card border border-border bg-card p-4">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <h2 className="text-sm font-semibold">
@@ -511,9 +509,10 @@ export default function OrganogramaPage() {
                   ` · subordinada à #${selecionada.id_unidade_pai}`}
               </p>
             </div>
-            <div className="flex gap-1">
+            <div className="flex gap-1.5">
               {canUpdate && (
                 <Button size="sm" variant="secondary" onClick={() => openEdit(selecionada)}>
+                  <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
                   Editar
                 </Button>
               )}
@@ -523,51 +522,30 @@ export default function OrganogramaPage() {
                   variant="secondary"
                   onClick={() => openAddChild(selecionada.id)}
                 >
-                  + Subordinada
+                  <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                  Nova subordinada
                 </Button>
               )}
             </div>
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-            <div className="rounded-md border border-border bg-surface-2/50 p-2">
-              <div className="text-[10px] uppercase tracking-wide text-foreground-subtle">
-                Processos ativos
-              </div>
-              <div className="font-mono text-lg font-bold tabular-nums">
-                {selecionada.processos_ativos}
-              </div>
-            </div>
-            <div className="rounded-md border border-border bg-surface-2/50 p-2">
-              <div className="text-[10px] uppercase tracking-wide text-foreground-subtle">
-                Usuários ativos
-              </div>
-              <div className="font-mono text-lg font-bold tabular-nums">
-                {selecionada.usuarios}
-              </div>
-            </div>
-            <div className="rounded-md border border-border bg-surface-2/50 p-2">
-              <div className="text-[10px] uppercase tracking-wide text-foreground-subtle">
-                SLA pendentes
-              </div>
-              <div
-                className={cn(
-                  "font-mono text-lg font-bold tabular-nums",
-                  selecionada.sla_pendentes > 0 && "text-warning",
-                )}
-              >
-                {selecionada.sla_pendentes}
-              </div>
-            </div>
-            <div className="rounded-md border border-border bg-surface-2/50 p-2">
-              <div className="text-[10px] uppercase tracking-wide text-foreground-subtle">
-                Tempo médio (30d)
-              </div>
-              <div className="font-mono text-lg font-bold tabular-nums">
-                {selecionada.tempo_medio_dias != null
-                  ? `${selecionada.tempo_medio_dias.toFixed(1)}d`
-                  : "—"}
-              </div>
-            </div>
+          <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <KpiCard label="Processos ativos" value={selecionada.processos_ativos} icon={FileText} />
+            <KpiCard label="Usuários ativos" value={selecionada.usuarios} icon={Users} />
+            <KpiCard
+              label="SLA pendentes"
+              value={selecionada.sla_pendentes}
+              icon={AlertTriangle}
+              intent={selecionada.sla_pendentes > 0 ? "warning" : "default"}
+            />
+            <KpiCard
+              label="Tempo médio (30 dias)"
+              value={
+                selecionada.tempo_medio_dias != null
+                  ? `${selecionada.tempo_medio_dias.toFixed(1).replace(".", ",")} dias`
+                  : "—"
+              }
+              icon={Clock}
+            />
           </div>
         </div>
       )}

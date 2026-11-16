@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, CheckCheck } from "lucide-react";
 import Link from "next/link";
@@ -118,9 +120,7 @@ export function NotificacoesBell() {
 
           <div className="max-h-[min(420px,calc(100dvh-8rem))] overflow-y-auto">
             {q.isLoading && (
-              <div className="px-3 py-6 text-center text-sm text-muted-foreground">
-                Carregando…
-              </div>
+              <Carregando className="px-3 py-6 text-center text-sm text-muted-foreground" />
             )}
             {!q.isLoading && (q.data?.items.length ?? 0) === 0 && (
               <div className="px-3 py-6 text-center text-sm text-muted-foreground">

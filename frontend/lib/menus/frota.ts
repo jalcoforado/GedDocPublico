@@ -11,13 +11,14 @@ export const menuFrota: MenuModulo = {
       title: "Frota",
       defaultOpen: false,
       items: [
-        { label: "Frota Pública", href: "/m/frota", icon: Truck, perm: "frota" },
+        // Índice do módulo: os cartões dela levam ao que não está na barra.
+        { label: "Visão geral", href: "/m/frota", icon: Truck, perm: "frota" },
         { label: "Veículos", href: "/m/frota/veiculos", icon: Car, perm: "frota" },
-        { label: "Motoristas", href: "/m/frota/motoristas", icon: IdCard, perm: "frota" },
+        { label: "Motoristas", href: "/m/frota/motoristas", icon: IdCard, perm: "frota", lugar: "hub" },
         { label: "Solicitações", href: "/m/frota/solicitacoes", icon: ClipboardList, perm: "frota" },
         // Mapa do caminho de uma solicitação de veículo, do pedido ao retorno.
-        { label: "Fluxo do processo", href: "/m/frota/fluxo", icon: Workflow, perm: "frota" },
-        { label: "Mapa da frota", href: "/m/frota/mapa", icon: MapPinned, perm: "frota" },
+        { label: "Fluxo do processo", href: "/m/frota/fluxo", icon: Workflow, perm: "frota", lugar: "hub" },
+        { label: "Mapa da frota", href: "/m/frota/mapa", icon: MapPinned, perm: "frota", lugar: "hub" },
       ],
     },
   ],

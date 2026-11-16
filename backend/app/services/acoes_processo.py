@@ -770,6 +770,14 @@ async def arquivar(
     """
     processo = await _get_processo(db, processo_id, tenant_id)
 
+    # SI-16: rascunho não se arquiva — ainda não é processo valendo. O destino
+    # dele é ser aberto ou excluído (`services/rascunho_processo.py`).
+    # Arquivá-lo criava um "concluído" sem número nas métricas do painel.
+    if processo.situacao == "rascunho":
+        raise AcaoError(
+            "Rascunho não pode ser arquivado. Abra o processo ou exclua o rascunho."
+        )
+
     ja_arquivado = (
         await db.execute(
             select(Movimentacao.id).where(

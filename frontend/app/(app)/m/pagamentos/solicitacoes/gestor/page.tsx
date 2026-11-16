@@ -25,8 +25,8 @@ const SECOES: SecaoDaFila[] = [
 export default function GestorPage() {
   return (
     <FilaPorEtapa
-      titulo="Fila do Gestor"
-      descricao="Solicitações aguardando sua decisão"
+      titulo="Fila do gestor"
+      descricao="Solicitações que esperam a sua decisão como gestor da pasta."
       icon={Users}
       secoes={SECOES}
       vazio={{

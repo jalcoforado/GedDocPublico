@@ -1,79 +1,76 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { BarChart3, Download, Inbox, TrendingDown, TrendingUp } from "lucide-react";
+import {
+  AlertTriangle,
+  BarChart3,
+  CheckCircle2,
+  Clock,
+  Download,
+  Inbox,
+  ScrollText,
+  SearchX,
+} from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 
+import { fmtData } from "@/components/pagamentos/format";
+import { rotuloTipoServico, TIPOS_SERVICO } from "@/components/transporte/rotulos";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Carregando } from "@/components/ui/carregando";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { FilterBar } from "@/components/ui/filter-bar";
+import { KpiCard } from "@/components/ui/kpi-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { SkeletonKpi } from "@/components/ui/skeleton";
+import { Table, TBody, TD, TH, THead, TR, TRLink } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import {
   api,
   type AlvaraKPIsResponse,
+  type AlvaraRelatorioItem,
   type AlvaraRelatorioListResponse,
-  type Permissionario,
-  type TipoServico,
 } from "@/lib/api";
 
-const TIPOS: { value: TipoServico; label: string }[] = [
-  { value: "taxi", label: "Táxi" },
-  { value: "mototaxi", label: "Mototáxi" },
-  { value: "transporte_escolar", label: "Transporte escolar" },
-  { value: "motofrete", label: "Motofrete" },
-  { value: "transporte_distrital", label: "Transporte distrital" },
-  { value: "aplicativo", label: "Aplicativo" },
-  { value: "outro", label: "Outro" },
-];
+type StatusAlvara = AlvaraRelatorioItem["status"];
 
-const STATUS_LABELS: Record<string, string> = {
-  ativo: "Ativo",
-  vencido: "Vencido",
-  a_renovar_30d: "A renovar (30d)",
-  indefinido: "Indefinido",
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  ativo: "bg-green-100 text-green-800",
-  vencido: "bg-red-100 text-red-800",
-  a_renovar_30d: "bg-yellow-100 text-yellow-800",
-  indefinido: "bg-gray-100 text-gray-800",
+// Mesma situação, mesma cor da lista de alvarás: vencido é `danger` lá
+// ("Expirado") e aqui.
+const STATUS: Record<
+  StatusAlvara,
+  { label: string; intent: "success" | "danger" | "warning" | "neutral" }
+> = {
+  ativo: { label: "Ativo", intent: "success" },
+  vencido: { label: "Vencido", intent: "danger" },
+  a_renovar_30d: { label: "A renovar (30 dias)", intent: "warning" },
+  indefinido: { label: "Sem validade", intent: "neutral" },
 };
 
 interface Filters {
   tipo_servico?: string;
   id_permissionario?: number;
-  status?: "ativo" | "vencido" | "a_renovar_30d" | "indefinido";
+  status?: StatusAlvara;
   limit: number;
   offset: number;
 }
 
-function KPICard({ label, value, icon: Icon, color }: any) {
-  return (
-    <div className="rounded-lg border bg-white p-6 shadow-sm">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm text-gray-600">{label}</p>
-          <p className="text-3xl font-bold">{value}</p>
-        </div>
-        <Icon className={`h-8 w-8 ${color}`} />
-      </div>
-    </div>
-  );
+const FILTROS_INICIAIS: Filters = { limit: 50, offset: 0 };
+
+/** "em 20 dias", "vence hoje", "venceu há 17 dias" — no lugar do "-17d". */
+function prazo(dias: number | null): string {
+  if (dias === null) return "—";
+  if (dias === 0) return "vence hoje";
+  if (dias < 0) return `venceu há ${-dias} ${dias === -1 ? "dia" : "dias"}`;
+  return `em ${dias} ${dias === 1 ? "dia" : "dias"}`;
 }
 
 export default function RelatorioPage() {
   const { toast } = useToast();
 
-  const [filters, setFilters] = useState<Filters>({
-    limit: 50,
-    offset: 0,
-  });
+  const [filters, setFilters] = useState<Filters>(FILTROS_INICIAIS);
+  const filtrando = Boolean(filters.tipo_servico || filters.status || filters.id_permissionario);
 
   // KPIs
   const { data: kpis, isLoading: kpisLoading } = useQuery<AlvaraKPIsResponse>({
@@ -82,12 +79,9 @@ export default function RelatorioPage() {
   });
 
   // Relatório com filtros
-  const { data: relatorio, isLoading: relatarioLoading } =
+  const { data: relatorio, isLoading: relatorioLoading } =
     useQuery<AlvaraRelatorioListResponse>({
-      queryKey: [
-        "/transporte-regulado/alvaras/relatorio",
-        filters,
-      ],
+      queryKey: ["/transporte-regulado/alvaras/relatorio", filters],
       queryFn: () => api.alvaras.relatorio.list(filters),
     });
 
@@ -96,18 +90,18 @@ export default function RelatorioPage() {
       const url = api.alvaras.relatorio.exportCsv({
         tipo_servico: filters.tipo_servico,
         id_permissionario: filters.id_permissionario,
-        status: filters.status as any,
+        status: filters.status,
       });
       const link = document.createElement("a");
       link.href = url;
       link.click();
       toast({ message: "CSV exportado com sucesso!", intent: "success" });
-    } catch (err) {
+    } catch {
       toast({ message: "Erro ao exportar CSV", intent: "error" });
     }
   };
 
-  const handleFilterChange = (key: string, value: any) => {
+  const handleFilterChange = (key: "tipo_servico" | "status", value: string | undefined) => {
     setFilters((prev) => ({
       ...prev,
       [key]: value || undefined,
@@ -115,206 +109,182 @@ export default function RelatorioPage() {
     }));
   };
 
-  return (
-    <div className="space-y-6 pb-8">
-      <PageHeader title="Relatório de Alvarás" description="KPIs e análise de alvarás regulados" icon={BarChart3} />
+  const limpar = () => setFilters(FILTROS_INICIAIS);
 
-      {/* KPIs */}
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        icon={BarChart3}
+        title="Relatório de alvarás"
+        description="Situação dos alvarás do transporte regulado e o que vence nos próximos 30 dias."
+        breadcrumbs={[
+          { label: "Transporte Regulado", href: "/m/transporte" },
+          { label: "Relatório de alvarás" },
+        ]}
+        actions={
+          <Button
+            variant="secondary"
+            onClick={handleExportCsv}
+            disabled={!relatorio || relatorio.alvaras.length === 0}
+          >
+            <Download className="mr-1 h-4 w-4" aria-hidden="true" />
+            Exportar CSV
+          </Button>
+        }
+      />
+
       {kpisLoading ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-32 animate-pulse rounded-lg bg-gray-200" />
+            <SkeletonKpi key={i} />
           ))}
         </div>
       ) : kpis ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-          <KPICard
-            label="Total de Alvarás"
-            value={kpis.total_alvaras}
-            icon={() => <div className="h-8 w-8 rounded-full bg-blue-100" />}
-            color="text-blue-600"
-          />
-          <KPICard
-            label="Ativos"
-            value={kpis.ativos}
-            icon={TrendingUp}
-            color="text-green-600"
-          />
-          <KPICard
-            label="Vencidos"
-            value={kpis.vencidos}
-            icon={TrendingDown}
-            color="text-red-600"
-          />
-          <KPICard
-            label="A Renovar (30d)"
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <KpiCard label="Total de alvarás" value={kpis.total_alvaras} icon={ScrollText} />
+          <KpiCard label="Ativos" value={kpis.ativos} icon={CheckCircle2} intent="success" />
+          <KpiCard label="Vencidos" value={kpis.vencidos} icon={AlertTriangle} intent="danger" />
+          <KpiCard
+            label="A renovar (30 dias)"
             value={kpis.a_renovar_30d}
-            icon={() => <div className="h-8 w-8 rounded-full bg-yellow-100" />}
-            color="text-yellow-600"
+            icon={Clock}
+            intent="warning"
           />
         </div>
       ) : null}
 
-      {/* Filtros */}
-      <div className="rounded-lg border bg-white p-6 shadow-sm">
-        <h3 className="mb-4 text-lg font-semibold">Filtros</h3>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-          <div>
-            <Label>Tipo de Serviço</Label>
-            <Select
-              value={filters.tipo_servico || ""}
-              onChange={(e) =>
-                handleFilterChange("tipo_servico", e.target.value || undefined)
-              }
-            >
-              <option value="">Todos</option>
-              {TIPOS.map((t) => (
-                <option key={t.value} value={t.value}>
-                  {t.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-
-          <div>
-            <Label>Status</Label>
-            <Select
-              value={filters.status || ""}
-              onChange={(e) =>
-                handleFilterChange(
-                  "status",
-                  (e.target.value || undefined) as Filters["status"],
-                )
-              }
-            >
-              <option value="">Todos</option>
-              <option value="ativo">Ativo</option>
-              <option value="vencido">Vencido</option>
-              <option value="a_renovar_30d">A Renovar (30d)</option>
-              <option value="indefinido">Indefinido</option>
-            </Select>
-          </div>
-
-          <div className="flex items-end">
-            <Button
-              variant="secondary"
-              onClick={() =>
-                setFilters({
-                  tipo_servico: undefined,
-                  id_permissionario: undefined,
-                  status: undefined,
-                  limit: 50,
-                  offset: 0,
-                })
-              }
-              className="w-full"
-            >
-              Limpar Filtros
+      <FilterBar ariaLabel="Filtros do relatório">
+        <FilterBar.Group label="Tipo de serviço" className="w-full sm:w-56">
+          <Select
+            aria-label="Tipo de serviço"
+            value={filters.tipo_servico || ""}
+            onChange={(e) => handleFilterChange("tipo_servico", e.target.value)}
+          >
+            <option value="">Todos</option>
+            {TIPOS_SERVICO.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </Select>
+        </FilterBar.Group>
+        <FilterBar.Group label="Situação" className="w-full sm:w-56">
+          <Select
+            aria-label="Situação"
+            value={filters.status || ""}
+            onChange={(e) => handleFilterChange("status", e.target.value)}
+          >
+            <option value="">Todas</option>
+            {(Object.keys(STATUS) as StatusAlvara[]).map((s) => (
+              <option key={s} value={s}>
+                {STATUS[s].label}
+              </option>
+            ))}
+          </Select>
+        </FilterBar.Group>
+        {filtrando && (
+          <FilterBar.Actions>
+            <Button variant="ghost" onClick={limpar}>
+              Limpar
             </Button>
-          </div>
-
-          <div className="flex items-end">
-            <Button
-              onClick={handleExportCsv}
-              variant="secondary"
-              className="w-full"
-              disabled={!relatorio || relatorio.alvaras.length === 0}
-            >
-              <Download className="mr-2 h-4 w-4" />
-              Exportar CSV
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {/* Tabela de Alvarás */}
-      <div className="rounded-lg border bg-white shadow-sm">
-        {relatarioLoading ? (
-          <div className="p-6 text-center">Carregando relatório...</div>
-        ) : !relatorio || relatorio.alvaras.length === 0 ? (
-          <EmptyState
-            icon={Inbox}
-            title="Nenhum alvará encontrado"
-            description="Ajuste seus filtros para ver alvarás"
-          />
-        ) : (
-          <>
-            <Table>
-              <THead>
-                <TR>
-                  <TH>Número</TH>
-                  <TH>Tipo</TH>
-                  <TH>Status</TH>
-                  <TH>Validade</TH>
-                  <TH>Dias para Vencer</TH>
-                </TR>
-              </THead>
-              <TBody>
-                {relatorio.alvaras.map((alvara) => (
-                  <TR key={alvara.id}>
-                    <TD className="font-medium">{alvara.numero_alvara}</TD>
-                    <TD>{alvara.tipo_servico}</TD>
-                    <TD>
-                      <Badge className={STATUS_COLORS[alvara.status]}>
-                        {STATUS_LABELS[alvara.status]}
-                      </Badge>
-                    </TD>
-                    <TD>
-                      {alvara.data_validade
-                        ? new Date(alvara.data_validade).toLocaleDateString(
-                            "pt-BR",
-                          )
-                        : "—"}
-                    </TD>
-                    <TD>
-                      {alvara.dias_para_vencimento !== null
-                        ? `${alvara.dias_para_vencimento}d`
-                        : "—"}
-                    </TD>
-                  </TR>
-                ))}
-              </TBody>
-            </Table>
-
-            {/* Paginação */}
-            <div className="border-t px-6 py-4 flex items-center justify-between">
-              <div className="text-sm text-gray-600">
-                Total: {relatorio.total} alvarás
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={filters.offset === 0}
-                  onClick={() =>
-                    setFilters((prev) => ({
-                      ...prev,
-                      offset: Math.max(0, prev.offset - prev.limit),
-                    }))
-                  }
-                >
-                  Anterior
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={
-                    (filters.offset + filters.limit) >= relatorio.total
-                  }
-                  onClick={() =>
-                    setFilters((prev) => ({
-                      ...prev,
-                      offset: prev.offset + prev.limit,
-                    }))
-                  }
-                >
-                  Próximo
-                </Button>
-              </div>
-            </div>
-          </>
+          </FilterBar.Actions>
         )}
-      </div>
+      </FilterBar>
+
+      {relatorioLoading ? (
+        <Carregando className="py-8 text-center text-foreground-muted" />
+      ) : !relatorio || relatorio.alvaras.length === 0 ? (
+        <EmptyState
+          icon={filtrando ? SearchX : Inbox}
+          title="Nenhum alvará encontrado"
+          description={
+            filtrando
+              ? "Nenhum alvará corresponde aos filtros aplicados."
+              : "Os alvarás cadastrados aparecem aqui, com a situação de cada um."
+          }
+          action={
+            filtrando ? (
+              <Button variant="secondary" onClick={limpar}>
+                Limpar filtros
+              </Button>
+            ) : undefined
+          }
+        />
+      ) : (
+        <>
+          <Table>
+            <THead>
+              <TR>
+                <TH>Número</TH>
+                <TH>Tipo de serviço</TH>
+                <TH>Situação</TH>
+                <TH>Validade</TH>
+                <TH>Vencimento</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {relatorio.alvaras.map((alvara) => {
+                const st = STATUS[alvara.status] ?? {
+                  label: alvara.status,
+                  intent: "neutral" as const,
+                };
+                return (
+                  <TRLink key={alvara.id} href={`/m/transporte/alvaras/${alvara.id}`}>
+                    <TD className="font-mono font-medium">
+                      <Link
+                        href={`/m/transporte/alvaras/${alvara.id}`}
+                        className="text-primary hover:underline"
+                      >
+                        {alvara.numero_alvara}
+                      </Link>
+                    </TD>
+                    <TD>{rotuloTipoServico(alvara.tipo_servico)}</TD>
+                    <TD>
+                      <Badge intent={st.intent}>{st.label}</Badge>
+                    </TD>
+                    <TD className="tabular-nums">{fmtData(alvara.data_validade)}</TD>
+                    <TD className="text-foreground-muted">{prazo(alvara.dias_para_vencimento)}</TD>
+                  </TRLink>
+                );
+              })}
+            </TBody>
+          </Table>
+
+          <div className="flex flex-col items-start justify-between gap-2 text-sm text-foreground-muted sm:flex-row sm:items-center">
+            <span className="tabular-nums">
+              {relatorio.total} {relatorio.total === 1 ? "alvará" : "alvarás"}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={filters.offset === 0}
+                onClick={() =>
+                  setFilters((prev) => ({
+                    ...prev,
+                    offset: Math.max(0, prev.offset - prev.limit),
+                  }))
+                }
+              >
+                Anterior
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={filters.offset + filters.limit >= relatorio.total}
+                onClick={() =>
+                  setFilters((prev) => ({
+                    ...prev,
+                    offset: prev.offset + prev.limit,
+                  }))
+                }
+              >
+                Próxima
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

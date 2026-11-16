@@ -18,7 +18,7 @@ import {
   Workflow,
 } from "lucide-react";
 
-import { CAIXAS, ROTA_PROCESSOS, hrefDaCaixa } from "@/lib/caixas-processos";
+import { ROTA_PROCESSOS } from "@/lib/caixas-processos";
 
 import type { MenuModulo } from "./tipos";
 
@@ -44,67 +44,70 @@ export const menuProtocolo: MenuModulo = {
       title: "Processos",
       defaultOpen: true,
       items: [
-        // As caixas de trabalho ficam DIRETO no grupo. Chegaram a ser subitens
-        // de um item "Processos" — dentro de um grupo que já se chama
-        // "Processos": o nome aparecia duas vezes, uma em cima da outra, e as
-        // caixas ficavam um nível mais fundo do que precisavam.
+        // O menu lista TELAS. As caixas de trabalho (entrada, saída, análise…)
+        // são recortes de uma tela só, e moram nela, como abas com contador
+        // (`components/protocolo/AbasCaixas.tsx`). Chegaram a ser oito itens
+        // aqui, todos apontando para o mesmo caminho: o menu virava o filtro
+        // de uma tela e empurrava as outras telas do módulo para baixo da dobra.
         // O painel abre o grupo: é a porta do módulo (ver `raiz` acima).
         { label: "Painel de controle", href: "/m/protocolo/painel", icon: LayoutDashboard, perm: "processo" },
-        { label: "Todos os processos", href: ROTA_PROCESSOS, icon: Rows3, perm: "processo" },
-        ...CAIXAS.map(({ caixa, rotulo, icone }) => ({
-          label: rotulo,
-          href: hrefDaCaixa(caixa),
-          icon: icone,
-          perm: "processo",
-          filtro: { chave: "caixa", valor: caixa },
-          contador: caixa,
-        })),
-        // Mapa do caminho de um processo, com as quantidades das caixas.
-        // "Workflows", logo abaixo, é outra coisa: o desenho de fluxos BPM.
-        { label: "Fluxo do processo", href: "/m/protocolo/fluxo", icon: Workflow, perm: "processo" },
-        { label: "Workflows", href: "/m/protocolo/workflow", icon: GitBranch },
+        { label: "Caixas de trabalho", href: ROTA_PROCESSOS, icon: Rows3, perm: "processo" },
+        { label: "Balcão", href: "/m/protocolo/protocolo/balcao", icon: Inbox, perm: "processo" },
         { label: "Relatórios", href: "/m/protocolo/relatorios", icon: BarChart3, perm: "processo" },
+        // Índice do resto do módulo (`/m/protocolo/cadastros`): os três grupos
+        // abaixo moram lá, não na barra. Sem `perm`: cada cartão da tela é
+        // podado pela permissão do próprio item.
+        { label: "Cadastros e configuração", href: "/m/protocolo/cadastros", icon: FolderTree },
       ],
     },
     {
-      title: "Protocolo",
-      defaultOpen: true,
+      title: "Fluxo e prazos",
       items: [
-        { label: "Balcão", href: "/m/protocolo/protocolo/balcao", icon: Inbox, perm: "processo" },
+        // Mapa do caminho de um processo, com as quantidades das caixas.
+        // "Workflows" é outra coisa: o desenho de fluxos BPM.
+        { label: "Fluxo do processo", href: "/m/protocolo/fluxo", icon: Workflow, perm: "processo", lugar: "hub" },
+        { label: "Workflows", href: "/m/protocolo/workflow", icon: GitBranch, lugar: "hub" },
         {
           label: "Vencendo prazo",
           href: "/m/protocolo/protocolo/vencendo-prazo",
           icon: CalendarClock,
           perm: "processo",
+          lugar: "hub",
         },
+      ],
+    },
+    {
+      title: "Gestão documental",
+      items: [
         {
           label: "CCD (Classificação)",
           href: "/m/protocolo/protocolo/ccd",
           icon: FolderTree,
           perm: "catalogo",
+          lugar: "hub",
         },
         {
           label: "TTD (Temporalidade)",
           href: "/m/protocolo/protocolo/ttd",
           icon: CalendarClock,
           perm: "catalogo",
+          lugar: "hub",
         },
+        { label: "Templates de documento", href: "/m/protocolo/templates-documento", icon: FileText, perm: "minuta_template", lugar: "hub" },
+        { label: "Tipos de Anexo", href: "/m/protocolo/tipos-anexo", icon: Paperclip, perm: "catalogo", lugar: "hub" },
       ],
     },
     {
       title: "Cadastros",
-      defaultOpen: false,
       items: [
-        { label: "Manifestantes", href: "/m/protocolo/manifestantes", icon: UserCircle, perm: "manifestante" },
-        { label: "Tipos de Manifestante", href: "/m/protocolo/tipos-manifestante", icon: Tag, perm: "manifestante" },
-        { label: "Tipos de Processo", href: "/m/protocolo/tipos-processo", icon: Layers, perm: "catalogo" },
-        { label: "Assuntos", href: "/m/protocolo/assuntos", icon: BookOpen, perm: "assunto" },
-        { label: "Catálogo de Serviços", href: "/m/protocolo/servicos", icon: ClipboardList, perm: "servico" },
-        { label: "Tipos de Anexo", href: "/m/protocolo/tipos-anexo", icon: Paperclip, perm: "catalogo" },
-        { label: "Templates de documento", href: "/m/protocolo/templates-documento", icon: FileText, perm: "minuta_template" },
-        { label: "Cidades", href: "/m/protocolo/cidades", icon: MapPin, perm: "cidade" },
-        { label: "Bairros", href: "/m/protocolo/bairros", icon: Map, perm: "endereco" },
-        { label: "Endereços", href: "/m/protocolo/enderecos", icon: MapPin, perm: "endereco" },
+        { label: "Manifestantes", href: "/m/protocolo/manifestantes", icon: UserCircle, perm: "manifestante", lugar: "hub" },
+        { label: "Tipos de Manifestante", href: "/m/protocolo/tipos-manifestante", icon: Tag, perm: "manifestante", lugar: "hub" },
+        { label: "Tipos de Processo", href: "/m/protocolo/tipos-processo", icon: Layers, perm: "catalogo", lugar: "hub" },
+        { label: "Assuntos", href: "/m/protocolo/assuntos", icon: BookOpen, perm: "assunto", lugar: "hub" },
+        { label: "Catálogo de Serviços", href: "/m/protocolo/servicos", icon: ClipboardList, perm: "servico", lugar: "hub" },
+        { label: "Cidades", href: "/m/protocolo/cidades", icon: MapPin, perm: "cidade", lugar: "hub" },
+        { label: "Bairros", href: "/m/protocolo/bairros", icon: Map, perm: "endereco", lugar: "hub" },
+        { label: "Endereços", href: "/m/protocolo/enderecos", icon: MapPin, perm: "endereco", lugar: "hub" },
       ],
     },
   ],

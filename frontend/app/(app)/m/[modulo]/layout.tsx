@@ -48,7 +48,7 @@ export default function ModuloLayout({
   const liberado = data ? data.itens.some((i) => i.slug === modulo) : undefined;
 
   useEffect(() => {
-    if (!slugConhecido || liberado === false) router.replace("/modulos");
+    if (!slugConhecido || liberado === false) router.replace("/home");
   }, [slugConhecido, liberado, router]);
 
   if (!slugConhecido) return null;

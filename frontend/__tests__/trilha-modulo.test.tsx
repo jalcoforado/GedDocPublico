@@ -24,11 +24,10 @@ const links = (nav: HTMLElement) =>
     .map((a) => [a.textContent, a.getAttribute("href")]);
 
 describe("trilha do módulo (shell)", () => {
-  it("Menu principal › Meus módulos › Módulo, cada parte um link", () => {
+  it("Início › Módulo, cada parte um link (o launcher saiu da trilha com o menu único)", () => {
     render(<TrilhaDoModulo modulo={FROTA} />);
     expect(links(screen.getByRole("navigation", { name: "Trilha" }))).toEqual([
-      ["Menu principal", "/home"],
-      ["Meus módulos", "/modulos"],
+      ["Início", "/home"],
       ["Frota", "/m/frota"],
     ]);
   });

@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Tag } from "lucide-react";
 import { useRef, useState } from "react";
@@ -79,7 +81,7 @@ export function MarcadoresProcesso({
             <div className="w-64 space-y-2 p-3">
               <p className="text-xs font-semibold text-foreground-muted">Marcadores</p>
               {catalogoQ.isLoading && (
-                <p className="text-xs text-foreground-muted">Carregando…</p>
+                <Carregando className="text-xs text-foreground-muted" />
               )}
               {catalogoQ.data?.length === 0 && (
                 <p className="text-xs text-foreground-muted">

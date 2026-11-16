@@ -16,6 +16,7 @@ Regras (decisão 5):
 from __future__ import annotations
 
 import secrets
+from datetime import datetime
 
 from fastapi import HTTPException, Request, status
 from sqlalchemy import select
@@ -58,6 +59,11 @@ async def resetar_senha_usuario(
     # get_current_user devolverá 403 + X-Must-Change-Password=true até que o
     # usuário conclua /auth/alterar-senha (que zera a flag em conta.py).
     user.must_change_password = True
+    # 0137 — o reset também ATIVA convite pendente: quem entrega a senha
+    # temporária responde pela conta. Sem isto, com a conta por e-mail
+    # desligada, um convidado ficaria preso ("Conta ainda não ativada").
+    if user.email_verificado_em is None:
+        user.email_verificado_em = datetime.utcnow()
 
     # Marca claramente se o afetado é super-usuário (decisão 5).
     perms_afetado = await load_permissions(db, user.id, tenant_id=tenant_id)

@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Banknote,
   ClipboardList,
   Download,
   FileEdit,
@@ -14,17 +15,20 @@ import {
   Percent,
   Receipt,
   Trash2,
+  Undo2,
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CampoComUnidade } from "@/components/ui/campo-com-unidade";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
-import { FormField } from "@/components/ui/form-field";
+import { EscolhaSegmentada } from "@/components/ui/escolha-segmentada";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { SectionCard } from "@/components/ui/section-card";
@@ -50,12 +54,14 @@ import { ProximaAcao } from "@/components/pagamentos/ProximaAcao";
 import { SituacoesDebito } from "@/components/pagamentos/SituacoesDebito";
 import {
   FILA_ROTULO,
+  PARCELA_ROTULO,
   PEDIDO_AJUSTE_ROTULO,
   TRAMITACAO_ROTULO,
   TRANSACAO_PAGAMENTOS,
   TRANSACAO_PAGAMENTOS_ROTULO,
 } from "@/components/pagamentos/situacoes";
-import { fmtData, fmtDataHora, fmtMoeda, fmtTamanho } from "@/components/pagamentos/format";
+import { fmtCompetencia, fmtData, fmtDataHora, fmtMoeda, fmtTamanho } from "@/components/pagamentos/format";
+import { useValidacaoCampos } from "@/components/pagamentos/useValidacaoCampos";
 import {
   ApiError,
   api,
@@ -86,6 +92,72 @@ const TRANSACAO_POR_ETAPA: Record<EtapaAjuste, string> = {
   VALIDACAO: "pagamento_validar",
   AUTORIDADE: "pagamento_autorizar",
 };
+
+/**
+ * Texto do diálogo de cada ação do fluxo: título, uma frase do que acontece
+ * e o verbo do botão principal (era "Confirmar" para tudo — quem clicava não
+ * lia ali o que estava fazendo). `perigo` = botão vermelho.
+ */
+const ACAO_DIALOGO: Record<string, { titulo: string; descricao?: string; verbo: string; perigo?: boolean }> = {
+  enviar: {
+    titulo: "Enviar para o gestor",
+    descricao: "A solicitação sai do rascunho e vai para a análise do gestor da pasta.",
+    verbo: "Enviar para o gestor",
+  },
+  "gestor/autorizar": {
+    titulo: "Autorizar",
+    descricao: "A solicitação segue para a validação financeira.",
+    verbo: "Autorizar",
+  },
+  "gestor/rejeitar": {
+    titulo: "Rejeitar",
+    descricao: "A solicitação é encerrada sem pagamento.",
+    verbo: "Rejeitar solicitação",
+    perigo: true,
+  },
+  validar: {
+    titulo: "Validar",
+    descricao: "Confirma a conformidade dos documentos e envia para a autoridade.",
+    verbo: "Confirmar validação",
+  },
+  "autoridade/aprovar": {
+    titulo: "Aprovar e ordenar pagamento",
+    verbo: "Aprovar e ordenar",
+  },
+  "autoridade/indeferir": {
+    titulo: "Indeferir",
+    descricao: "A solicitação é encerrada sem pagamento.",
+    verbo: "Indeferir solicitação",
+    perigo: true,
+  },
+  "ajuste/solicitar": {
+    titulo: "Solicitar ajuste",
+    descricao: "A solicitação volta para quem precisa corrigir, com o pedido abaixo.",
+    verbo: "Pedir ajuste",
+  },
+  "ajuste/adicional": {
+    titulo: "Novo pedido de ajuste",
+    descricao: "Soma um pedido aos que já estão abertos nesta solicitação.",
+    verbo: "Abrir pedido de ajuste",
+  },
+  "ajuste/responder": {
+    titulo: "Responder ajuste",
+    descricao: "A solicitação volta para análise.",
+    verbo: "Enviar resposta",
+  },
+  cancelar: {
+    titulo: "Cancelar solicitação",
+    descricao: "A solicitação sai do fluxo e não pode ser retomada.",
+    verbo: "Cancelar solicitação",
+    perigo: true,
+  },
+};
+
+/** "aaaa-mm-dd" de hoje no horário local (o toISOString() é UTC). */
+function hojeLocal(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 /**
  * Conteúdo do detalhe de uma solicitação de pagamento — extraído de
@@ -126,6 +198,8 @@ export function DetalheDebitoContent({ id }: { id: number }) {
 
   // Resposta a um pedido de ajuste específico
   const [respostaPorPedido, setRespostaPorPedido] = useState<Record<number, string>>({});
+  // Pedido em que se clicou "Responder" com a resposta vazia: só então o erro aparece.
+  const [respostaVaziaTentada, setRespostaVaziaTentada] = useState<Record<number, boolean>>({});
 
   // Documentos do débito (F2, Task 8)
   const [anexoArquivo, setAnexoArquivo] = useState<File | null>(null);
@@ -147,6 +221,36 @@ export function DetalheDebitoContent({ id }: { id: number }) {
   const [retencaoBase, setRetencaoBase] = useState("");
   const [retencaoAliquota, setRetencaoAliquota] = useState("");
   const [retencaoValor, setRetencaoValor] = useState("");
+  // Valor retido calculado de base × alíquota até a pessoa digitar outro.
+  const [valorRetencaoCalculado, setValorRetencaoCalculado] = useState(false);
+
+  function mudarBaseOuAliquota(base: string, aliquota: string) {
+    setRetencaoBase(base);
+    setRetencaoAliquota(aliquota);
+    const b = Number(base);
+    const a = Number(aliquota);
+    if ((valorRetencaoCalculado || !retencaoValor) && b > 0 && a > 0) {
+      setRetencaoValor(((b * a) / 100).toFixed(2));
+      setValorRetencaoCalculado(true);
+    }
+  }
+
+  const vRetencao = useValidacaoCampos(
+    {
+      base: !(Number(retencaoBase) > 0) && "Informe a base de cálculo, ex.: 1000,00.",
+      valor: !(Number(retencaoValor) > 0) && "Informe o valor retido, ou a alíquota para calcular.",
+    },
+    { base: "ret-base", valor: "ret-valor" },
+  );
+  const vExcecao = useValidacaoCampos(
+    {
+      fundamento: !excecaoFundamento.trim() && "Cite o dispositivo legal que permite a exceção.",
+      justificativa:
+        !excecaoJustificativa.trim() && "Explique por que esta solicitação passa à frente.",
+      data: !excecaoData && "Informe a data da autorização.",
+    },
+    { fundamento: "exc-fundamento", justificativa: "exc-justificativa", data: "exc-data" },
+  );
 
   // Carregar débito
   const debitoQ = useQuery({
@@ -220,8 +324,58 @@ export function DetalheDebitoContent({ id }: { id: number }) {
   const contaEscolhida = contasElegiveis.find((c) => String(c.id_conta) === contaPagadora);
   const faltaSaldo =
     !!contaEscolhida && !!debito && Number(contaEscolhida.disponivel) < Number(debito.valor_total);
-  const aprovacaoIncompleta =
-    !contaEscolhida || (faltaSaldo && (!semSaldoAutorizado || !justificativaExcecao.trim()));
+  // Sem conta para escolher, não há o que preencher: o botão fica travado
+  // (é um impedimento, não um campo faltando) e o diálogo diz por quê.
+  const semContaParaEscolher =
+    aprovando && (contasQ.isLoading || contasQ.isError || contasElegiveis.length === 0);
+
+  // Erros do diálogo de ação — aparecem só depois de sair do campo ou de
+  // clicar no botão principal, que não fica mais desabilitado por isso.
+  const acaoPedeJustificativa = ["gestor/rejeitar", "autoridade/indeferir", "cancelar"].includes(
+    acaoSelecionada ?? "",
+  );
+  const acaoEhPedidoAjuste =
+    acaoSelecionada === "ajuste/solicitar" || acaoSelecionada === "ajuste/adicional";
+  const vAcao = useValidacaoCampos(
+    {
+      conta:
+        acaoSelecionada === "autoridade/aprovar" &&
+        !semContaParaEscolher &&
+        !contaEscolhida &&
+        "Escolha a conta de onde sai o pagamento.",
+      excecao:
+        acaoSelecionada === "autoridade/aprovar" &&
+        faltaSaldo &&
+        !semSaldoAutorizado &&
+        "Esta conta não cobre o valor. Escolha outra ou autorize como exceção.",
+      justificativaExcecao:
+        acaoSelecionada === "autoridade/aprovar" &&
+        faltaSaldo &&
+        semSaldoAutorizado &&
+        !justificativaExcecao.trim() &&
+        "Explique por que autorizar sem saldo — fica registrado na exceção.",
+      justificativa:
+        acaoPedeJustificativa &&
+        !justificativa.trim() &&
+        "Explique o motivo — fica no histórico da solicitação.",
+      ajusteMotivo:
+        acaoEhPedidoAjuste && !ajusteMotivo.trim() && "Resuma em uma linha o que precisa mudar.",
+      ajusteDescricao:
+        acaoEhPedidoAjuste &&
+        !ajusteDescricao.trim() &&
+        "Detalhe o que precisa ser corrigido, para quem ajusta não ter de perguntar.",
+      ajusteTransacao: acaoEhPedidoAjuste && !ajusteTransacao && "Escolha quem deve fazer o ajuste.",
+    },
+    {
+      conta: "acao-conta",
+      excecao: "acao-excecao",
+      justificativaExcecao: "acao-excecao-justificativa",
+      justificativa: "acao-justificativa",
+      ajusteMotivo: "ajuste-motivo",
+      ajusteDescricao: "ajuste-descricao",
+      ajusteTransacao: "ajuste-transacao",
+    },
+  );
 
   const pedidos = pedidosQ.data ?? [];
   const pedidosAbertos = pedidos.filter((p) => p.situacao === "ABERTO");
@@ -598,14 +752,12 @@ export function DetalheDebitoContent({ id }: { id: number }) {
     !!etapaAbertura && can(TRANSACAO_POR_ETAPA[etapaAbertura]);
   const podeReenviar = !!etapaAbertura && can("pagamento_solicitar");
 
-  const formularioAjusteValido =
-    ajusteMotivo.trim().length > 0 &&
-    ajusteDescricao.trim().length > 0 &&
-    ajusteTransacao.length > 0 &&
-    !!ajusteTipo;
-
   const dialogEhFormularioRico =
     acaoSelecionada === "ajuste/solicitar" || acaoSelecionada === "ajuste/adicional";
+  const acaoEmAndamento = [
+    enviarGestorM, gestorAutorizarM, gestorRejeitarM, validarM, autoridadeAprovarM,
+    autoridadeIndeferirM, solicitarAjusteM, criarPedidoAjusteM, responderAjusteM, cancelarM,
+  ].some((m) => m.isPending);
   const dialogEhJustificativa =
     ["gestor/rejeitar", "autoridade/indeferir", "cancelar"].includes(acaoSelecionada ?? "");
   // O backend recusa a validação com item obrigatório pendente (422). Avisar
@@ -662,7 +814,7 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                 <div className="text-foreground">{debito.nome_fornecedor}</div>
               </div>
               <div>
-                <div className="text-xs font-medium text-foreground-muted">Valor Total</div>
+                <div className="text-xs font-medium text-foreground-muted">Valor total</div>
                 <div className="tabular-nums text-foreground">{fmtMoeda(debito.valor_total)}</div>
               </div>
               <div className="sm:col-span-2">
@@ -671,7 +823,7 @@ export function DetalheDebitoContent({ id }: { id: number }) {
               </div>
               <div>
                 <div className="text-xs font-medium text-foreground-muted">Competência</div>
-                <div className="text-foreground">{debito.competencia}</div>
+                <div className="text-foreground">{fmtCompetencia(debito.competencia)}</div>
               </div>
               {!debito.id_contrato && (
                 <div>
@@ -702,7 +854,7 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                       <TH>Número</TH>
                       <TH className="text-right">Valor</TH>
                       <TH>Vencimento</TH>
-                      <TH>Status</TH>
+                      <TH>Situação</TH>
                       <TH className="text-right">Ações</TH>
                     </TR>
                   </THead>
@@ -713,39 +865,44 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                         <TD className="text-right tabular-nums">{fmtMoeda(p.valor)}</TD>
                         <TD>{fmtData(p.vencimento)}</TD>
                         <TD>
-                          <Badge intent="neutral">{p.status}</Badge>
+                          <Badge
+                            intent={PARCELA_ROTULO[p.status]?.intent ?? "neutral"}
+                            icon={PARCELA_ROTULO[p.status]?.icon}
+                          >
+                            {PARCELA_ROTULO[p.status]?.label ?? p.status}
+                          </Badge>
                         </TD>
                         <TD className="text-right">
-                          {p.status === "PAGA" && can("pagamento_pagar") && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              aria-label={`Estornar pagamento da parcela ${p.numero}`}
-                              onClick={() => setAcaoParcela({ acao: "estornar", parcela: p })}
-                            >
-                              Estornar
-                            </Button>
-                          )}
-                          {p.status === "LIBERADA" && can("pagamento_pagar") && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              aria-label={`Registrar pagamento da parcela ${p.numero}`}
-                              onClick={() => setParcelaAPagar(p)}
-                            >
-                              Pagar
-                            </Button>
-                          )}
-                          {p.status === "LIBERADA" && can("pagamento_autorizar") && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              aria-label={`Revogar liberação da parcela ${p.numero}`}
-                              onClick={() => setAcaoParcela({ acao: "revogar", parcela: p })}
-                            >
-                              Revogar liberação
-                            </Button>
-                          )}
+                          {/* Estornar só vale para PAGA; Pagar e Revogar, para
+                              LIBERADA — no máximo duas por linha, todas à vista
+                              (os testes e o leitor de tela as acham pelo nome). */}
+                          <AcoesDaLinha
+                            acoes={[
+                              {
+                                label: "Pagar",
+                                icon: Banknote,
+                                ariaLabel: `Registrar pagamento da parcela ${p.numero}`,
+                                oculta: !(p.status === "LIBERADA" && can("pagamento_pagar")),
+                                onClick: () => setParcelaAPagar(p),
+                              },
+                              {
+                                label: "Revogar liberação",
+                                icon: Undo2,
+                                perigo: true,
+                                ariaLabel: `Revogar liberação da parcela ${p.numero}`,
+                                oculta: !(p.status === "LIBERADA" && can("pagamento_autorizar")),
+                                onClick: () => setAcaoParcela({ acao: "revogar", parcela: p }),
+                              },
+                              {
+                                label: "Estornar",
+                                icon: Undo2,
+                                perigo: true,
+                                ariaLabel: `Estornar pagamento da parcela ${p.numero}`,
+                                oculta: !(p.status === "PAGA" && can("pagamento_pagar")),
+                                onClick: () => setAcaoParcela({ acao: "estornar", parcela: p }),
+                              },
+                            ]}
+                          />
                         </TD>
                       </TR>
                     ))}
@@ -770,7 +927,11 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                   </span>
                 </p>
                 {can("pagamento_pagar") && (
-                  <Button size="sm" variant="secondary" onClick={() => setRetencaoOpen(true)}>
+                  <Button size="sm" variant="secondary" onClick={() => {
+                      setValorRetencaoCalculado(false);
+                      vRetencao.reiniciar();
+                      setRetencaoOpen(true);
+                    }}>
                     Lançar retenção
                   </Button>
                 )}
@@ -804,33 +965,31 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                           <TD className="text-right tabular-nums">{fmtMoeda(r.valor)}</TD>
                           <TD>
                             {r.recolhido ? (
-                              <Badge intent="success">recolhida em {fmtData(r.data_recolhimento)}</Badge>
+                              <Badge intent="success">Recolhida em {fmtData(r.data_recolhimento)}</Badge>
                             ) : (
-                              <Badge intent="neutral">pendente</Badge>
+                              <Badge intent="neutral">Pendente</Badge>
                             )}
                           </TD>
                           <TD className="text-right">
-                            {can("pagamento_pagar") && !r.recolhido && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                aria-label={`Registrar recolhimento da retenção ${r.tipo}`}
-                                onClick={() => setRetencaoARecolher(r)}
-                              >
-                                Recolher
-                              </Button>
-                            )}
-                            {can("pagamento_pagar") && !r.recolhido && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                aria-label={`Remover retenção ${r.tipo}`}
-                                onClick={() => excluirRetencaoM.mutate(r.id)}
-                                disabled={excluirRetencaoM.isPending}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            )}
+                            <AcoesDaLinha
+                              acoes={[
+                                {
+                                  label: "Recolher",
+                                  ariaLabel: `Registrar recolhimento da retenção ${r.tipo}`,
+                                  oculta: !(can("pagamento_pagar") && !r.recolhido),
+                                  onClick: () => setRetencaoARecolher(r),
+                                },
+                                {
+                                  label: "Remover",
+                                  icon: Trash2,
+                                  perigo: true,
+                                  ariaLabel: `Remover retenção ${r.tipo}`,
+                                  oculta: !(can("pagamento_pagar") && !r.recolhido),
+                                  disabled: excluirRetencaoM.isPending,
+                                  onClick: () => excluirRetencaoM.mutate(r.id),
+                                },
+                              ]}
+                            />
                           </TD>
                         </TR>
                       ))}
@@ -903,7 +1062,9 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                       onClick={() => {
                         setExcecaoJustificativa("");
                         setExcecaoFundamento("");
-                        setExcecaoData("");
+                        // A autorização costuma ser registrada no dia em que é dada.
+                        setExcecaoData(hojeLocal());
+                        vExcecao.reiniciar();
                         setExcecaoOpen(true);
                       }}
                     >
@@ -967,25 +1128,40 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                       )}
                       {podeResponder && (
                         <div className="mt-3 space-y-2">
-                          <Textarea
-                            value={respostaPorPedido[p.id] ?? ""}
-                            onChange={(e) =>
-                              setRespostaPorPedido((r) => ({ ...r, [p.id]: e.target.value }))
+                          <FormField
+                            label="Sua resposta"
+                            required
+                            error={
+                              respostaVaziaTentada[p.id] && !(respostaPorPedido[p.id] ?? "").trim()
+                                ? "Escreva o que foi corrigido antes de responder."
+                                : undefined
                             }
-                            placeholder="Escreva a resposta ao pedido de ajuste..."
-                            className="min-h-20"
-                          />
+                            hint="Diga o que foi corrigido. Documentos novos vão na seção Documentos."
+                          >
+                            <Textarea
+                              id={`resposta-pedido-${p.id}`}
+                              value={respostaPorPedido[p.id] ?? ""}
+                              onChange={(e) =>
+                                setRespostaPorPedido((r) => ({ ...r, [p.id]: e.target.value }))
+                              }
+                              placeholder="Ex.: Valor corrigido para R$ 1.200,00, conforme a NF 4587."
+                              className="min-h-20"
+                            />
+                          </FormField>
                           <Button
                             size="sm"
-                            onClick={() =>
+                            onClick={() => {
+                              if (!(respostaPorPedido[p.id] ?? "").trim()) {
+                                setRespostaVaziaTentada((t) => ({ ...t, [p.id]: true }));
+                                document.getElementById(`resposta-pedido-${p.id}`)?.focus();
+                                return;
+                              }
                               responderPedidoM.mutate({
                                 pedidoId: p.id,
                                 resposta: respostaPorPedido[p.id] ?? "",
-                              })
-                            }
-                            disabled={
-                              !(respostaPorPedido[p.id] ?? "").trim() || responderPedidoM.isPending
-                            }
+                              });
+                            }}
+                            loading={responderPedidoM.isPending}
                           >
                             Responder pedido
                           </Button>
@@ -1016,6 +1192,8 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                     variant="secondary"
                     onClick={() => {
                       resetFormAjuste();
+                      setAjusteTransacao("pagamento_solicitar");
+                      vAcao.reiniciar();
                       setAcaoSelecionada("ajuste/adicional");
                       setOpenDialog(true);
                     }}
@@ -1237,6 +1415,9 @@ export function DetalheDebitoContent({ id }: { id: number }) {
               setContaPagadora("");
               setSemSaldoAutorizado(false);
               setJustificativaExcecao("");
+              // Quem ajusta: quase sempre a unidade que pediu — vem preenchido.
+              setAjusteTransacao("pagamento_solicitar");
+              vAcao.reiniciar();
               setAcaoSelecionada(acao);
               setEtapaSelecionada(
                 etapa === "GESTOR" || etapa === "VALIDACAO" || etapa === "AUTORIDADE"
@@ -1249,39 +1430,25 @@ export function DetalheDebitoContent({ id }: { id: number }) {
         </div>
       </div>
 
-      {/* Dialog para ações */}
+      {/* Dialog para ações. O botão principal diz o verbo da ação (não
+          "Confirmar"); só trava quando há um impedimento que o formulário não
+          resolve (checklist pendente, nenhuma conta para escolher). Campo
+          faltando não trava: clicar é o que mostra o que falta. */}
       <Dialog
         open={openDialog}
         onClose={() => setOpenDialog(false)}
         size={dialogEhFormularioRico ? "lg" : "md"}
-        title={
-          acaoSelecionada === "enviar"
-            ? "Enviar para Gestor"
-            : acaoSelecionada === "gestor/autorizar"
-              ? "Autorizar"
-              : acaoSelecionada === "gestor/rejeitar"
-                ? "Rejeitar"
-                : acaoSelecionada === "validar"
-                  ? "Validar"
-                  : acaoSelecionada === "autoridade/aprovar"
-                    ? "Aprovar e ordenar pagamento"
-                    : acaoSelecionada === "autoridade/indeferir"
-                      ? "Indeferir"
-                      : acaoSelecionada === "ajuste/solicitar"
-                        ? "Solicitar ajuste"
-                        : acaoSelecionada === "ajuste/adicional"
-                          ? "Novo pedido de ajuste"
-                          : acaoSelecionada === "ajuste/responder"
-                            ? "Responder ajuste"
-                            : "Cancelar solicitação"
-        }
+        title={ACAO_DIALOGO[acaoSelecionada ?? "cancelar"]?.titulo ?? "Cancelar solicitação"}
+        description={ACAO_DIALOGO[acaoSelecionada ?? "cancelar"]?.descricao}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setOpenDialog(false)}>
-              Cancelar
+            <Button variant="ghost" onClick={() => setOpenDialog(false)}>
+              {acaoSelecionada === "cancelar" ? "Voltar" : "Cancelar"}
             </Button>
             <Button
+              variant={ACAO_DIALOGO[acaoSelecionada ?? "cancelar"]?.perigo ? "danger" : "primary"}
               onClick={() => {
+                if (!vAcao.conferir()) return;
                 if (acaoSelecionada === "enviar") enviarGestorM.mutate();
                 if (acaoSelecionada === "gestor/autorizar") gestorAutorizarM.mutate();
                 if (acaoSelecionada === "gestor/rejeitar") gestorRejeitarM.mutate();
@@ -1293,15 +1460,10 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                 if (acaoSelecionada === "ajuste/responder") responderAjusteM.mutate();
                 if (acaoSelecionada === "cancelar") cancelarM.mutate();
               }}
-              disabled={
-                (dialogEhJustificativa && !justificativa.trim()) ||
-                (dialogEhFormularioRico && !formularioAjusteValido) ||
-                validacaoTravadaPeloChecklist ||
-                (acaoSelecionada === "autoridade/aprovar" &&
-                  (aprovacaoIncompleta || autoridadeAprovarM.isPending))
-              }
+              disabled={validacaoTravadaPeloChecklist || semContaParaEscolher}
+              loading={acaoEmAndamento}
             >
-              Confirmar
+              {ACAO_DIALOGO[acaoSelecionada ?? "cancelar"]?.verbo ?? "Confirmar"}
             </Button>
           </>
         }
@@ -1335,9 +1497,18 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                 ative uma conta em Cadastros antes de aprovar.
               </p>
             ) : (
-              <FormField label="Conta pagadora" required>
-                <Select value={contaPagadora} onChange={(e) => setContaPagadora(e.target.value)}>
-                  <option value="">Selecione…</option>
+              <FormField
+                label="Conta pagadora"
+                required
+                error={vAcao.erro("conta")}
+                hint="Só aparecem as contas ativas da fonte desta solicitação que podem pagar."
+              >
+                <Select
+                  id="acao-conta"
+                  value={contaPagadora}
+                  onChange={(e) => setContaPagadora(e.target.value)}
+                >
+                  <option value="">Escolha a conta</option>
                   {contasElegiveis.map((c) => (
                     <option key={c.id_conta} value={c.id_conta}>
                       {c.nome} — disponível {fmtMoeda(c.disponivel)}
@@ -1357,19 +1528,35 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                 </p>
                 <label className="flex items-start gap-2">
                   <input
+                    id="acao-excecao"
                     type="checkbox"
                     checked={semSaldoAutorizado}
                     onChange={(e) => setSemSaldoAutorizado(e.target.checked)}
+                    aria-invalid={vAcao.erro("excecao") ? true : undefined}
+                    aria-describedby={vAcao.erro("excecao") ? "acao-excecao-erro" : undefined}
                     className="mt-0.5 h-4 w-4 shrink-0"
                   />
                   Autorizar mesmo assim, como exceção registrada
                 </label>
+                {vAcao.erro("excecao") && (
+                  <p id="acao-excecao-erro" className="text-xs font-medium">
+                    {vAcao.erro("excecao")}
+                  </p>
+                )}
                 {semSaldoAutorizado && (
-                  <FormField label="Justificativa da exceção" required>
+                  <FormField
+                    label="Justificativa da exceção"
+                    required
+                    error={vAcao.erro("justificativaExcecao")}
+                    hint="Fica registrada junto da exceção de saldo. Até 255 caracteres."
+                  >
                     <Textarea
+                      id="acao-excecao-justificativa"
                       value={justificativaExcecao}
                       onChange={(e) => setJustificativaExcecao(e.target.value)}
+                      onBlur={vAcao.tocar("justificativaExcecao")}
                       maxLength={255}
+                      placeholder="Ex.: Decisão judicial com prazo de cumprimento até sexta."
                       className="min-h-20"
                     />
                   </FormField>
@@ -1380,41 +1567,65 @@ export function DetalheDebitoContent({ id }: { id: number }) {
         )}
 
         {dialogEhJustificativa && (
-          <div className="space-y-3">
-            <Label>Justificativa</Label>
+          <FormField
+            label="Justificativa"
+            required
+            error={vAcao.erro("justificativa")}
+            hint={
+              acaoSelecionada === "cancelar"
+                ? "Fica no histórico. A solicitação cancelada não volta ao fluxo."
+                : "Quem pediu vai ler isto no histórico da solicitação."
+            }
+          >
             <Textarea
+              id="acao-justificativa"
               value={justificativa}
               onChange={(e) => setJustificativa(e.target.value)}
-              placeholder="Explique o motivo..."
+              onBlur={vAcao.tocar("justificativa")}
+              placeholder={
+                acaoSelecionada === "cancelar"
+                  ? "Ex.: Despesa lançada em duplicidade com a solicitação 123."
+                  : "Ex.: Valor diverge da nota fiscal anexada."
+              }
               className="min-h-24"
             />
-          </div>
+          </FormField>
         )}
 
         {dialogEhFormularioRico && (
           <div className="space-y-4">
-            <FormField label="Motivo" required>
+            <FormField label="Motivo" required error={vAcao.erro("ajusteMotivo")}>
               <Input
+                id="ajuste-motivo"
                 value={ajusteMotivo}
                 onChange={(e) => setAjusteMotivo(e.target.value)}
-                placeholder="Resumo curto do que precisa ser ajustado"
+                onBlur={vAcao.tocar("ajusteMotivo")}
+                placeholder="Ex.: Nota fiscal com valor diferente"
                 maxLength={255}
               />
             </FormField>
-            <FormField label="Descrição" required>
+            <FormField label="O que corrigir" required error={vAcao.erro("ajusteDescricao")}>
               <Textarea
+                id="ajuste-descricao"
                 value={ajusteDescricao}
                 onChange={(e) => setAjusteDescricao(e.target.value)}
-                placeholder="Detalhe o que precisa ser corrigido..."
+                onBlur={vAcao.tocar("ajusteDescricao")}
+                placeholder="Ex.: A NF 4587 é de R$ 1.200,00 e a solicitação está com R$ 1.250,00. Corrija o valor ou anexe a nota certa."
                 className="min-h-24"
               />
             </FormField>
-            <FormField label="Transação responsável" required>
+            <FormField
+              label="Quem ajusta"
+              required
+              error={vAcao.erro("ajusteTransacao")}
+              hint="Recebe o pedido na caixa de trabalho. Vem preenchido com a unidade que pediu, o caso mais comum."
+            >
               <Select
+                id="ajuste-transacao"
                 value={ajusteTransacao}
                 onChange={(e) => setAjusteTransacao(e.target.value)}
               >
-                <option value="">Selecione…</option>
+                <option value="">Escolha quem ajusta</option>
                 {TRANSACAO_PAGAMENTOS.map((t) => (
                   <option key={t.value} value={t.value}>
                     {t.label}
@@ -1422,50 +1633,43 @@ export function DetalheDebitoContent({ id }: { id: number }) {
                 ))}
               </Select>
             </FormField>
-            <div className="space-y-1">
-              <Label required>Tipo</Label>
-              <div className="flex gap-4 text-sm">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="ajuste-tipo"
-                    value="NAO_MATERIAL"
-                    checked={ajusteTipo === "NAO_MATERIAL"}
-                    onChange={() => setAjusteTipo("NAO_MATERIAL")}
-                  />
-                  Não material
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="ajuste-tipo"
-                    value="MATERIAL"
-                    checked={ajusteTipo === "MATERIAL"}
-                    onChange={() => setAjusteTipo("MATERIAL")}
-                  />
-                  Alteração material
-                </label>
-              </div>
-              {ajusteTipo === "MATERIAL" && (
-                <p className="text-xs text-foreground-muted">
-                  Alteração material invalida aprovações já dadas e volta o débito ao gestor.
-                </p>
-              )}
-            </div>
-            <FormField label="Prazo" hint="Opcional">
-              <Input
-                type="date"
-                value={ajustePrazo}
-                onChange={(e) => setAjustePrazo(e.target.value)}
-              />
-            </FormField>
-            <FormField label="Campos relacionados" hint="Opcional — separe por vírgula">
-              <Input
-                value={ajusteCampos}
-                onChange={(e) => setAjusteCampos(e.target.value)}
-                placeholder="ex.: valor_total, numero_nf"
-              />
-            </FormField>
+            <EscolhaSegmentada
+              nome="ajuste-tipo"
+              titulo="Tipo de ajuste"
+              valor={ajusteTipo}
+              onChange={setAjusteTipo}
+              opcoes={[
+                {
+                  valor: "NAO_MATERIAL",
+                  rotulo: "Não material",
+                  descricao: "Não mexe em fornecedor, valor, fonte nem notas: as aprovações continuam valendo.",
+                },
+                {
+                  valor: "MATERIAL",
+                  rotulo: "Alteração material",
+                  descricao: "Alteração material invalida aprovações já dadas e volta o débito ao gestor.",
+                },
+              ]}
+              moldura={false}
+            />
+            <GradeCampos>
+              <FormField label="Prazo" opcional hint="Até quando o ajuste deve ser feito.">
+                <Input
+                  id="ajuste-prazo"
+                  type="date"
+                  value={ajustePrazo}
+                  onChange={(e) => setAjustePrazo(e.target.value)}
+                />
+              </FormField>
+              <FormField label="Campos relacionados" opcional hint="Separe por vírgula.">
+                <Input
+                  id="ajuste-campos"
+                  value={ajusteCampos}
+                  onChange={(e) => setAjusteCampos(e.target.value)}
+                  placeholder="Ex.: valor_total, numero_nf"
+                />
+              </FormField>
+            </GradeCampos>
           </div>
         )}
       </Dialog>
@@ -1492,17 +1696,20 @@ export function DetalheDebitoContent({ id }: { id: number }) {
         open={retencaoOpen}
         onClose={() => setRetencaoOpen(false)}
         title="Lançar retenção"
+        description="O valor retido sai do líquido a pagar ao fornecedor."
         size="sm"
         footer={
           <>
-            <Button variant="secondary" onClick={() => setRetencaoOpen(false)}>
+            <Button variant="ghost" onClick={() => setRetencaoOpen(false)}>
               Cancelar
             </Button>
             <Button
-              onClick={() => criarRetencaoM.mutate()}
-              disabled={!retencaoBase || !retencaoValor || criarRetencaoM.isPending}
+              onClick={() => {
+                if (vRetencao.conferir()) criarRetencaoM.mutate();
+              }}
+              loading={criarRetencaoM.isPending}
             >
-              {criarRetencaoM.isPending ? "Salvando..." : "Lançar"}
+              Lançar retenção
             </Button>
           </>
         }
@@ -1510,6 +1717,7 @@ export function DetalheDebitoContent({ id }: { id: number }) {
         <div className="space-y-4">
           <FormField label="Tipo" required>
             <Select
+              id="ret-tipo"
               value={retencaoTipo}
               onChange={(e) => setRetencaoTipo(e.target.value as TipoRetencao)}
             >
@@ -1520,35 +1728,68 @@ export function DetalheDebitoContent({ id }: { id: number }) {
               <option value="OUTRAS">Outras</option>
             </Select>
           </FormField>
-          <FormField label="Base de cálculo" required>
-            <Input
+          <GradeCampos>
+            <FormField label="Base de cálculo" required error={vRetencao.erro("base")}>
+              <CampoComUnidade
+                id="ret-base"
+                prefixo="R$"
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min="0"
+                value={retencaoBase}
+                onChange={(e) => mudarBaseOuAliquota(e.target.value, retencaoAliquota)}
+                onBlur={vRetencao.tocar("base")}
+                placeholder="0,00"
+              />
+            </FormField>
+            <FormField label="Alíquota" opcional>
+              <CampoComUnidade
+                id="ret-aliquota"
+                sufixo="%"
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min="0"
+                value={retencaoAliquota}
+                onChange={(e) => mudarBaseOuAliquota(retencaoBase, e.target.value)}
+                placeholder="Ex.: 1,5"
+              />
+            </FormField>
+          </GradeCampos>
+          <FormField
+            label="Valor retido"
+            required
+            error={vRetencao.erro("valor")}
+            hint={
+              valorRetencaoCalculado
+                ? "Calculado: base × alíquota. Pode corrigir."
+                : "Preencha a alíquota para calcular, ou digite o valor."
+            }
+          >
+            <CampoComUnidade
+              id="ret-valor"
+              prefixo="R$"
+              type="number"
               inputMode="decimal"
-              value={retencaoBase}
-              onChange={(e) => setRetencaoBase(e.target.value)}
-              placeholder="0,00"
-            />
-          </FormField>
-          <FormField label="Alíquota (%)" hint="Opcional">
-            <Input
-              inputMode="decimal"
-              value={retencaoAliquota}
-              onChange={(e) => setRetencaoAliquota(e.target.value)}
-              placeholder="ex.: 1,5"
-            />
-          </FormField>
-          <FormField label="Valor" required>
-            <Input
-              inputMode="decimal"
+              step="0.01"
+              min="0"
               value={retencaoValor}
-              onChange={(e) => setRetencaoValor(e.target.value)}
+              onChange={(e) => {
+                setValorRetencaoCalculado(false);
+                setRetencaoValor(e.target.value);
+              }}
+              onBlur={vRetencao.tocar("valor")}
               placeholder="0,00"
             />
           </FormField>
-          <FormField label="Descrição" hint="Opcional">
+          <FormField label="Descrição" opcional>
             <Input
+              id="ret-descricao"
               value={retencaoDescricao}
               onChange={(e) => setRetencaoDescricao(e.target.value)}
               maxLength={150}
+              placeholder="Ex.: ISS retido na fonte — NF 4587"
             />
           </FormField>
         </div>
@@ -1564,45 +1805,63 @@ export function DetalheDebitoContent({ id }: { id: number }) {
         size="md"
         footer={
           <>
-            <Button variant="secondary" onClick={() => setExcecaoOpen(false)}>
+            <Button variant="ghost" onClick={() => setExcecaoOpen(false)}>
               Cancelar
             </Button>
             <Button
-              onClick={() => registrarExcecaoM.mutate()}
-              disabled={
-                !excecaoJustificativa.trim() ||
-                !excecaoFundamento.trim() ||
-                !excecaoData ||
-                registrarExcecaoM.isPending
-              }
+              onClick={() => {
+                if (vExcecao.conferir()) registrarExcecaoM.mutate();
+              }}
+              loading={registrarExcecaoM.isPending}
             >
-              {registrarExcecaoM.isPending ? "Salvando..." : "Autorizar exceção"}
+              Autorizar exceção
             </Button>
           </>
         }
       >
         <div className="space-y-4">
-          <FormField label="Fundamento legal" required>
+          <FormField
+            label="Fundamento legal"
+            required
+            error={vExcecao.erro("fundamento")}
+            hint="O dispositivo que permite pagar fora da ordem."
+          >
             <Input
+              id="exc-fundamento"
               value={excecaoFundamento}
               onChange={(e) => setExcecaoFundamento(e.target.value)}
-              placeholder="ex.: art. 5º da Lei 8.666/93"
+              onBlur={vExcecao.tocar("fundamento")}
+              placeholder="Ex.: art. 141, § 1º, da Lei 14.133/2021"
               maxLength={255}
             />
           </FormField>
-          <FormField label="Justificativa" required>
+          <FormField
+            label="Justificativa"
+            required
+            error={vExcecao.erro("justificativa")}
+            hint="Por que esta solicitação passa à frente das que estão antes dela na fila."
+          >
             <Textarea
+              id="exc-justificativa"
               value={excecaoJustificativa}
               onChange={(e) => setExcecaoJustificativa(e.target.value)}
-              placeholder="Explique o motivo da preterição da ordem cronológica..."
+              onBlur={vExcecao.tocar("justificativa")}
+              placeholder="Ex.: Fornecedor único de medicamento, com risco de desabastecimento."
               className="min-h-24"
             />
           </FormField>
-          <FormField label="Data da autorização" required>
+          <FormField
+            label="Data da autorização"
+            required
+            error={vExcecao.erro("data")}
+            hint="Hoje, por padrão."
+          >
             <Input
+              id="exc-data"
               type="date"
               value={excecaoData}
               onChange={(e) => setExcecaoData(e.target.value)}
+              onBlur={vExcecao.tocar("data")}
             />
           </FormField>
         </div>

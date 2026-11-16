@@ -15,6 +15,12 @@ class CadastroCidadaoRequest(BaseModel):
     telefone_whatsapp: bool = False
 
 
+class CpfCnpjRequest(BaseModel):
+    """"Esqueci a senha" e reenvio da confirmação de e-mail do cidadão."""
+
+    cpf_cnpj: str = Field(min_length=11, max_length=18)
+
+
 class LoginCidadaoRequest(BaseModel):
     cpf_cnpj: str
     senha: str
@@ -29,6 +35,9 @@ class CidadaoMeResponse(BaseModel):
     telefone: str | None
     telefone_whatsapp: bool
     ativo: bool
+    # 0137 — `None` = cadastro esperando a confirmação por e-mail. A tela de
+    # cadastro decide por aqui se pede o link ou entra direto.
+    email_verificado_em: datetime | None = None
 
 
 class LoginCidadaoResponse(BaseModel):

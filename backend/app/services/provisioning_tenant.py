@@ -127,6 +127,7 @@ TIPO_UNIDADE_NOME = "Secretaria"
 UNIDADE_SIGLA = "PG"
 UNIDADE_NOME = "Protocolo Geral"
 TIPO_MANIFESTANTE_NOME = "Pessoa Física"
+TIPO_MANIFESTANTE_PJ_NOME = "Pessoa Jurídica"
 GRUPO_SU_NOME = "Super Usuário"
 
 
@@ -376,24 +377,32 @@ async def semear_tenant(
         db.add(unidade)
         await db.flush()
 
-    tem_tipo_manifestante = (
-        await db.execute(
-            select(TipoManifestante.id).where(
-                TipoManifestante.tenant_id == tenant_id,
-                TipoManifestante.tipo_manifestante == TIPO_MANIFESTANTE_NOME,
-                TipoManifestante.excluido.is_(False),
+    # Física primeiro: o portal do cidadão, sem tipo explícito, usa o de menor id.
+    for nome_tipo, natureza in (
+        (TIPO_MANIFESTANTE_NOME, "F"),
+        (TIPO_MANIFESTANTE_PJ_NOME, "J"),
+    ):
+        tem_tipo_manifestante = (
+            await db.execute(
+                select(TipoManifestante.id).where(
+                    TipoManifestante.tenant_id == tenant_id,
+                    TipoManifestante.tipo_manifestante == nome_tipo,
+                    TipoManifestante.excluido.is_(False),
+                )
             )
-        )
-    ).scalars().first()
-    if tem_tipo_manifestante is None:
-        db.add(
-            TipoManifestante(
-                tenant_id=tenant_id,
-                tipo_manifestante=TIPO_MANIFESTANTE_NOME,
-                id_categoria=1,
-                ativo=True,
+        ).scalars().first()
+        if tem_tipo_manifestante is None:
+            db.add(
+                TipoManifestante(
+                    tenant_id=tenant_id,
+                    tipo_manifestante=nome_tipo,
+                    id_categoria=1,
+                    natureza=natureza,
+                    ativo=True,
+                )
             )
-        )
+            # flush por tipo: garante a ordem dos ids (física antes da jurídica).
+            await db.flush()
 
     usuario = (
         await db.execute(

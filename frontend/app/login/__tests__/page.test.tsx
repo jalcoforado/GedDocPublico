@@ -52,14 +52,14 @@ function loginResponse(opts: { flag: boolean }) {
 }
 
 describe("LoginPage SEC-1 redirect", () => {
-  it("usuário NÃO flagged → router.push('/modulos')", async () => {
+  it("usuário NÃO flagged → router.push('/home')", async () => {
     apiLogin.mockResolvedValue(loginResponse({ flag: false }));
     const u = userEvent.setup();
     render(<LoginPage />);
     // Em dev as credenciais vêm pré-preenchidas; só submetemos.
     await u.click(screen.getByRole("button", { name: /entrar/i }));
     await waitFor(() => expect(apiLogin).toHaveBeenCalled());
-    await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/modulos"));
+    await waitFor(() => expect(routerPush).toHaveBeenCalledWith("/home"));
   });
 
   it("usuário FLAGGED → router.push('/alterar-senha-obrigatoria')", async () => {

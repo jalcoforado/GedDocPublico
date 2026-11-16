@@ -80,27 +80,34 @@ describe("recusar encaminhamento", () => {
     expect(screen.getByRole("button", { name: "Recusar" })).toBeDisabled();
   });
 
-  it("exige motivo: só espaço ou texto curto não libera a confirmação", () => {
+  // Padrão de formulário: o botão não fica desabilitado esperando o motivo;
+  // clicar sem motivo válido mostra o erro sob o campo e não envia.
+  it("exige motivo: só espaço ou texto curto não envia e diz o que falta", () => {
     abrir();
     fireEvent.click(screen.getByRole("button", { name: "Recusar" }));
 
     const confirmar = screen.getByRole("button", { name: "Confirmar recusa" });
-    expect(confirmar).toBeDisabled();
     // Diz para onde o processo volta.
     expect(screen.getByText("Secretaria de Obras")).toBeInTheDocument();
+    // Ao abrir, sem erro.
+    expect(screen.queryByText(/pelo menos 5 letras/)).toBeNull();
 
-    const motivo = screen.getByLabelText("Motivo da recusa");
+    const motivo = screen.getByLabelText(/Motivo da recusa/);
     fireEvent.change(motivo, { target: { value: "      " } });
-    expect(confirmar).toBeDisabled();
+    fireEvent.click(confirmar);
+    expect(screen.getByText(/pelo menos 5 letras/)).toBeInTheDocument();
+    expect(motivo).toHaveAttribute("aria-invalid", "true");
+    expect(motivo).toHaveFocus();
     fireEvent.change(motivo, { target: { value: "não" } });
-    expect(confirmar).toBeDisabled();
+    fireEvent.click(confirmar);
+    expect(screen.getByText(/pelo menos 5 letras/)).toBeInTheDocument();
     expect(recusarMock).not.toHaveBeenCalled();
   });
 
   it("envia o motivo sem espaços nas pontas e fecha", async () => {
     abrir();
     fireEvent.click(screen.getByRole("button", { name: "Recusar" }));
-    fireEvent.change(screen.getByLabelText("Motivo da recusa"), {
+    fireEvent.change(screen.getByLabelText(/Motivo da recusa/), {
       target: { value: "  Não é da competência desta unidade.  " },
     });
     fireEvent.click(screen.getByRole("button", { name: "Confirmar recusa" }));
@@ -108,19 +115,19 @@ describe("recusar encaminhamento", () => {
     await waitFor(() =>
       expect(recusarMock).toHaveBeenCalledWith(77, "Não é da competência desta unidade."),
     );
-    await waitFor(() => expect(screen.queryByLabelText("Motivo da recusa")).toBeNull());
+    await waitFor(() => expect(screen.queryByLabelText(/Motivo da recusa/)).toBeNull());
   });
 
   it("erro do servidor aparece no diálogo, que continua aberto", async () => {
     recusarMock.mockRejectedValueOnce(new Error("Nenhum encaminhamento pendente para este processo"));
     abrir();
     fireEvent.click(screen.getByRole("button", { name: "Recusar" }));
-    fireEvent.change(screen.getByLabelText("Motivo da recusa"), {
+    fireEvent.change(screen.getByLabelText(/Motivo da recusa/), {
       target: { value: "Faltam os documentos." },
     });
     fireEvent.click(screen.getByRole("button", { name: "Confirmar recusa" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Nenhum encaminhamento pendente");
-    expect(screen.getByLabelText("Motivo da recusa")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Motivo da recusa/)).toBeInTheDocument();
   });
 });

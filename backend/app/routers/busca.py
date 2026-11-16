@@ -12,6 +12,7 @@ from ..auth.deps import get_current_user, require_tenant_id
 from ..auth.perms import require_permission
 from ..database import get_db
 from ..models import Manifestante, Processo, Usuario
+from .processos import acesso_niveis_dep
 
 router = APIRouter(prefix="/busca", tags=["busca"])
 
@@ -25,6 +26,7 @@ async def busca_global(
     _: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
+    niveis: list[str] | None = Depends(acesso_niveis_dep),
 ):
     """Retorna resultados em 3 buckets (processos/manifestantes/usuarios).
     Cada bucket tem no máximo 8 resultados."""
@@ -33,10 +35,11 @@ async def busca_global(
         return {"processos": [], "manifestantes": [], "usuarios": [], "q": q}
 
     like = f"%{q}%"
-    # CPF/CNPJ de manifestante é gravado só com dígitos: "123.456.789-09"
-    # procura "12345678909".
-    digitos = "".join(ch for ch in q if ch.isdigit())
-    like_doc = f"%{digitos}%" if digitos else like
+    # CPF/CNPJ de manifestante é gravado sem máscara: "123.456.789-09" procura
+    # "12345678909", e o CNPJ alfanumérico "12.ABC.345/01DE-35" procura
+    # "12ABC34501DE35" (o ilike cobre maiúscula e minúscula).
+    chave_doc = "".join(ch for ch in q if ch.isascii() and ch.isalnum())
+    like_doc = f"%{chave_doc}%" if chave_doc else like
 
     # Processos por número (case-insensitive)
     procs = (
@@ -46,6 +49,10 @@ async def busca_global(
                 Processo.tenant_id == tenant_id,
                 Processo.excluido.is_(False),
                 Processo.numero_processo.ilike(like),
+                # Sigilo: o mesmo recorte da listagem. O detalhe de processo
+                # sigiloso responde 404 para não revelar que ele existe; a
+                # busca listava o número dele a qualquer um com `processo`.
+                *([Processo.nivel_sigilo.in_(niveis)] if niveis is not None else []),
             )
             .order_by(Processo.data_hora_abertura.desc())
             .limit(8)

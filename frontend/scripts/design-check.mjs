@@ -41,6 +41,10 @@ const PREFIXO =
 const PADROES = [
   { nome: "classe-tailwind", re: new RegExp(`\\b(?:${PREFIXO})-(?:${PALETA})-\\d{2,3}\\b`, "g") },
   { nome: "hex-cru", re: /#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3}(?:[0-9a-fA-F]{2})?)?\b/g },
+  // `text-muted` sozinho pinta o TEXTO com a cor de FUNDO `--muted`: quase
+  // invisível no claro. Quem quer texto apagado quer `text-foreground-muted`
+  // (ou `text-muted-foreground`). Achado em 17 rótulos da conciliação.
+  { nome: "texto-com-cor-de-fundo", re: /\btext-muted(?![-\w])/g },
 ];
 
 function fontes(dir, acc = []) {

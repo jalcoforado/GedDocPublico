@@ -69,7 +69,7 @@ describe("visão geral de pagamentos", () => {
     await screen.findByText("Meus rascunhos");
     expect(painelMock).not.toHaveBeenCalled();
     expect(screen.queryByRole("heading", { name: "Caixa" })).toBeNull();
-    expect(screen.queryByText("Nenhuma conta cadastrada.")).toBeNull();
+    expect(screen.queryByText("Nenhuma conta bancária cadastrada")).toBeNull();
   });
 
   it("com pagamento_cadastro: mostra o caixa e o caminho até a tela", async () => {

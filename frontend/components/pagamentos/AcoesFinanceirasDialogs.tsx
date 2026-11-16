@@ -11,7 +11,14 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { fmtMoeda } from "@/components/pagamentos/format";
+import { useValidacaoCampos } from "@/components/pagamentos/useValidacaoCampos";
 import { api, type FormaPagamentoLote, type Parcela, type Retencao } from "@/lib/api";
+
+/** "aaaa-mm-dd" de hoje no horário local (o toISOString() é UTC). */
+function hojeLocal(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 export type AcaoParcela = "estornar" | "revogar";
 
@@ -54,7 +61,15 @@ export function AcaoParcelaDialog({
 }) {
   const toast = useToast();
   const [justificativa, setJustificativa] = useState("");
-  useEffect(() => setJustificativa(""), [alvo]);
+  const v = useValidacaoCampos(
+    { justificativa: !justificativa.trim() && "Explique o motivo — fica no histórico da solicitação." },
+    { justificativa: "acao-parcela-justificativa" },
+  );
+  const { reiniciar } = v;
+  useEffect(() => {
+    setJustificativa("");
+    reiniciar();
+  }, [alvo, reiniciar]);
 
   const m = useMutation({
     mutationFn: () => {
@@ -81,13 +96,15 @@ export function AcaoParcelaDialog({
       title={texto?.titulo ?? ""}
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose}>
             Cancelar
           </Button>
           <Button
             variant="danger"
-            onClick={() => m.mutate()}
-            disabled={!justificativa.trim() || m.isPending}
+            onClick={() => {
+              if (v.conferir()) m.mutate();
+            }}
+            loading={m.isPending}
           >
             {texto?.confirmar}
           </Button>
@@ -97,12 +114,23 @@ export function AcaoParcelaDialog({
       {alvo && texto && (
         <div className="space-y-4">
           <p className="text-sm text-foreground">{texto.impacto(alvo.parcela)}</p>
-          <FormField label="Justificativa" required>
+          <FormField
+            label="Justificativa"
+            required
+            error={v.erro("justificativa")}
+            hint="Até 255 caracteres."
+          >
             <Textarea
+              id="acao-parcela-justificativa"
               value={justificativa}
               onChange={(e) => setJustificativa(e.target.value)}
+              onBlur={v.tocar("justificativa")}
               maxLength={255}
-              placeholder="Explique o motivo..."
+              placeholder={
+                alvo.acao === "estornar"
+                  ? "Ex.: Pagamento em duplicidade — o banco devolveu o valor."
+                  : "Ex.: Nota fiscal cancelada pelo fornecedor."
+              }
               className="min-h-24"
             />
           </FormField>
@@ -161,11 +189,11 @@ export function PagarParcelaDialog({
       title="Registrar pagamento"
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose}>
             Cancelar
           </Button>
-          <Button onClick={() => m.mutate()} disabled={m.isPending}>
-            {m.isPending ? "Registrando..." : "Registrar pagamento"}
+          <Button onClick={() => m.mutate()} loading={m.isPending}>
+            Registrar pagamento
           </Button>
         </>
       }
@@ -185,7 +213,7 @@ export function PagarParcelaDialog({
               <option value="OUTRO">Outro</option>
             </Select>
           </FormField>
-          <FormField label="Data do pagamento" hint="Em branco, vale a data de hoje">
+          <FormField label="Data do pagamento" opcional hint="Em branco, vale a data de hoje.">
             <Input type="date" value={data} onChange={(e) => setData(e.target.value)} />
           </FormField>
         </div>
@@ -210,10 +238,20 @@ export function RecolherRetencaoDialog({
   const toast = useToast();
   const [data, setData] = useState("");
   const [documento, setDocumento] = useState("");
+  const v = useValidacaoCampos(
+    {
+      data: !data && "Informe a data em que a guia foi paga.",
+      documento: !documento.trim() && "Informe o número da guia paga.",
+    },
+    { data: "recolher-data", documento: "recolher-documento" },
+  );
+  const { reiniciar } = v;
   useEffect(() => {
-    setData("");
+    // A guia costuma ser registrada no dia em que é paga.
+    setData(hojeLocal());
     setDocumento("");
-  }, [retencao]);
+    reiniciar();
+  }, [retencao, reiniciar]);
 
   const m = useMutation({
     mutationFn: () => {
@@ -239,11 +277,16 @@ export function RecolherRetencaoDialog({
       title="Registrar recolhimento"
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose}>
             Cancelar
           </Button>
-          <Button onClick={() => m.mutate()} disabled={!data || !documento.trim() || m.isPending}>
-            {m.isPending ? "Salvando..." : "Registrar"}
+          <Button
+            onClick={() => {
+              if (v.conferir()) m.mutate();
+            }}
+            loading={m.isPending}
+          >
+            Registrar recolhimento
           </Button>
         </>
       }
@@ -254,11 +297,29 @@ export function RecolherRetencaoDialog({
             Retenção de {retencao.tipo}, no valor de {fmtMoeda(retencao.valor)}. Depois de
             registrada como recolhida, ela não pode mais ser removida por esta tela.
           </p>
-          <FormField label="Data do recolhimento" required>
-            <Input type="date" value={data} onChange={(e) => setData(e.target.value)} />
+          <FormField label="Data do recolhimento" required error={v.erro("data")} hint="Hoje, por padrão.">
+            <Input
+              id="recolher-data"
+              type="date"
+              value={data}
+              onChange={(e) => setData(e.target.value)}
+              onBlur={v.tocar("data")}
+            />
           </FormField>
-          <FormField label="Documento de arrecadação" required hint="Número da guia (DARF, GPS, DAM...)">
-            <Input value={documento} onChange={(e) => setDocumento(e.target.value)} maxLength={50} />
+          <FormField
+            label="Documento de arrecadação"
+            required
+            error={v.erro("documento")}
+            hint="Número da guia paga (DARF, GPS, DAM…)."
+          >
+            <Input
+              id="recolher-documento"
+              value={documento}
+              onChange={(e) => setDocumento(e.target.value)}
+              onBlur={v.tocar("documento")}
+              maxLength={50}
+              placeholder="Ex.: DARF 0561 — 10/2026"
+            />
           </FormField>
         </div>
       )}

@@ -176,6 +176,22 @@ class Settings(BaseSettings):
     smtp_from: str = "noreply@aprimora.app"
     smtp_use_tls: bool = True  # STARTTLS
 
+    # Conta por e-mail (0137): convite de servidor, confirmação de e-mail do
+    # cidadão, "Não lembro a senha" e 2FA. DESLIGADA por padrão — decisão do
+    # PO em 2026-11-09: enquanto o Aprimora é POC, o sistema funciona como se
+    # o e-mail não existisse (admin define a senha, cidadão entra sem
+    # confirmar, login só com senha). Ligar exige também `SMTP_HOST`; ver
+    # `services/conta_email.conta_por_email_ativa`.
+    conta_por_email: bool = False
+
+    # 2FA por e-mail no login do servidor (0137). Ligado por padrão: todo
+    # servidor recebe um código de 6 dígitos a cada login, salvo no computador
+    # lembrado por 30 dias. Só vale com `SMTP_HOST` configurado (sem ele o
+    # código não chegaria — ver `routers/auth._dois_fatores_ativo`). Desligar
+    # (`DOIS_FATORES_EMAIL=false`) só em teste
+    # automatizado e e2e — a suíte não tem caixa de e-mail para ler o código.
+    dois_fatores_email: bool = True
+
     # WhatsApp — Fase 16. provider="zenvia"|"stub" (default stub mantém dev limpo).
     # zenvia_api_url default aponta pro endpoint v2 da Zenvia.
     whatsapp_provider: str = "stub"
@@ -206,7 +222,11 @@ class Settings(BaseSettings):
     # Obtenha em https://console.cloud.google.com/apis/credentials (OAuth 2.0 Web Application)
     google_oauth_client_id: str = ""
     google_oauth_client_secret: str = ""
-    google_oauth_redirect_uri: str = "http://localhost:8000/api/v2/auth/google/callback"
+    # Tem de ser o endereço que o NAVEGADOR usa (o nginx, :8090 em dev), não o
+    # backend direto (:8000): o callback responde com redirecionamentos
+    # relativos (/minuta-error, /m/protocolo/...) que só existem no frontend.
+    # Igual, caractere por caractere, ao cadastrado no Google Cloud (SI-32).
+    google_oauth_redirect_uri: str = "http://localhost:8090/api/v2/auth/google/callback"
     google_credentials_file: str = "/app/keys/google-credentials.json"
 
     # Login gov.br do cidadão (SSO OIDC — `services/govbr_sso.py`).

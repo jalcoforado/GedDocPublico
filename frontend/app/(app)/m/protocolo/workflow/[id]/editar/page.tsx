@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useParams, useRouter } from "next/navigation";
 
@@ -30,7 +32,7 @@ export default function EditarWorkflowPage() {
   });
 
   if (q.isLoading) {
-    return <div className="text-muted-foreground">Carregando…</div>;
+    return <Carregando className="text-muted-foreground" />;
   }
   if (q.error || !q.data) {
     return (

@@ -48,13 +48,16 @@ describe("SolicitarComplementacaoDialog (PR 4d)", () => {
       />,
     );
     const submit = screen.getByRole("button", { name: /Enviar solicitação/i });
-    // sem mensagem → desabilitado
-    expect(submit).toBeDisabled();
+    // Padrão de formulário: nunca desabilitado por validação. Sem mensagem,
+    // clicar mostra o erro sob o campo e não envia.
+    expect(screen.queryByText(/Escreva a mensagem/)).toBeNull();
+    fireEvent.click(submit);
+    expect(screen.getByText(/Escreva a mensagem/)).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText(/Mensagem ao cidadão/i), {
       target: { value: "Por favor envie." },
     });
-    expect(submit).not.toBeDisabled();
 
     fireEvent.click(submit);
     expect(onSubmit).toHaveBeenCalledTimes(1);
@@ -63,13 +66,14 @@ describe("SolicitarComplementacaoDialog (PR 4d)", () => {
     expect(new Set(payload.documentos_solicitados)).toEqual(new Set(["rg", "comp"]));
   });
 
-  it("desmarcar todos os checkboxes desabilita o submit", () => {
+  it("desmarcar todos os checkboxes impede o envio e diz o que falta", () => {
+    const onSubmit = vi.fn();
     render(
       <SolicitarComplementacaoDialog
         open
         onClose={vi.fn()}
         checklist={CHECKLIST}
-        onSubmit={vi.fn()}
+        onSubmit={onSubmit}
       />,
     );
     fireEvent.change(screen.getByLabelText(/Mensagem ao cidadão/i), {
@@ -77,8 +81,8 @@ describe("SolicitarComplementacaoDialog (PR 4d)", () => {
     });
     fireEvent.click(screen.getByLabelText("RG"));
     fireEvent.click(screen.getByLabelText("Comprovante"));
-    expect(
-      screen.getByRole("button", { name: /Enviar solicitação/i }),
-    ).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /Enviar solicitação/i }));
+    expect(screen.getByText("Marque pelo menos um documento.")).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 });

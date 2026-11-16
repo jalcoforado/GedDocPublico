@@ -34,11 +34,13 @@ import {
   YAxis,
 } from "recharts";
 
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FilterBar } from "@/components/ui/filter-bar";
 import { KpiCard } from "@/components/ui/kpi-card";
+import { Select } from "@/components/ui/select";
 import { SectionCard } from "@/components/ui/section-card";
 import { SkeletonKpi } from "@/components/ui/skeleton";
 import {
@@ -49,6 +51,7 @@ import {
   type ApiError,
   type DashboardKpis,
 } from "@/lib/api";
+import { EIXO, GRAFICO, SERIES } from "@/lib/chart-theme";
 import { cn } from "@/lib/utils";
 
 const PERIODOS = [
@@ -58,7 +61,21 @@ const PERIODOS = [
   { value: 365, label: "1 ano" },
 ];
 
-const PIE_COLORS = ["#2563eb", "#16a34a", "#f59e0b", "#a855f7", "#ef4444"];
+const PIE_COLORS = SERIES;
+
+// Caixa do tooltip do recharts no tema (o padrão é branca, fixa, e no escuro
+// virava um bloco claro sobre o gráfico).
+const DICA = {
+  contentStyle: {
+    background: "hsl(var(--surface-1))",
+    border: `1px solid ${GRAFICO.grade}`,
+    borderRadius: 8,
+    color: GRAFICO.texto,
+    fontSize: 12,
+  },
+  labelStyle: { color: GRAFICO.texto },
+  cursor: { fill: GRAFICO.cursor, stroke: GRAFICO.grade },
+} as const;
 
 function fmtNum(n: number | null | undefined, decimals = 0): string {
   if (n === null || n === undefined) return "—";
@@ -200,12 +217,11 @@ export default function DashboardPage() {
           />
         </FilterBar.Group>
         <FilterBar.Group label="Serviço" className="w-full sm:w-64">
-          <select
+          <Select
             value={idServico ?? ""}
             onChange={(e) =>
               setIdServico(e.target.value ? Number(e.target.value) : null)
             }
-            className="h-10 w-full rounded-md border border-border bg-surface-1 px-3 text-sm text-foreground"
             aria-label="Filtrar por serviço"
             data-testid="dashboard-filtro-servico"
           >
@@ -215,11 +231,11 @@ export default function DashboardPage() {
                 {s.nome}
               </option>
             ))}
-          </select>
+          </Select>
         </FilterBar.Group>
         <FilterBar.Group label="Legado">
           <label
-            className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-border bg-surface-1 px-3 text-xs text-foreground"
+            className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-md border border-border bg-surface-1 px-3 text-xs text-foreground"
             title="Processos sem serviço vinculado (anteriores ao Catálogo). Quando há filtro de serviço, este toggle não tem efeito."
           >
             <Checkbox
@@ -252,34 +268,35 @@ export default function DashboardPage() {
             ))}
           </div>
         </FilterBar.Group>
+        {/* Exportações como Button, na mesma régua (h-11) dos filtros e com o
+            rótulo no mesmo estilo dos outros grupos. */}
         <FilterBar.Actions>
-          <div>
-            <div className="mb-1 text-[10px] uppercase tracking-wide text-foreground-subtle">
-              Exportar
+          <FilterBar.Group label="Exportar">
+            <div className="flex gap-2">
+              <Button asChild variant="secondary">
+                <a
+                  href={dashboardExportPdfUrl(exportParams, false)}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Baixar PDF"
+                >
+                  <FileText className="h-4 w-4" aria-hidden="true" />
+                  PDF
+                </a>
+              </Button>
+              <Button asChild variant="secondary">
+                <a
+                  href={dashboardExportCsvUrl(exportParams)}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Baixar CSV"
+                >
+                  <FileSpreadsheet className="h-4 w-4" aria-hidden="true" />
+                  CSV
+                </a>
+              </Button>
             </div>
-            <div className="flex gap-1">
-              <a
-                href={dashboardExportPdfUrl(exportParams, false)}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex h-10 items-center gap-1.5 rounded-md border border-border-strong bg-surface-1 px-3 text-xs font-medium text-foreground transition-colors duration-fast hover:bg-muted"
-                title="Baixar PDF"
-              >
-                <FileText className="h-3.5 w-3.5" aria-hidden="true" />
-                PDF
-              </a>
-              <a
-                href={dashboardExportCsvUrl(exportParams)}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex h-10 items-center gap-1.5 rounded-md border border-border-strong bg-surface-1 px-3 text-xs font-medium text-foreground transition-colors duration-fast hover:bg-muted"
-                title="Baixar CSV"
-              >
-                <FileSpreadsheet className="h-3.5 w-3.5" aria-hidden="true" />
-                CSV
-              </a>
-            </div>
-          </div>
+          </FilterBar.Group>
         </FilterBar.Actions>
       </FilterBar>
 
@@ -527,14 +544,14 @@ export default function DashboardPage() {
                   }))}
                   margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="dia" tick={{ fontSize: 11 }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                  <Tooltip />
+                  <CartesianGrid strokeDasharray="3 3" stroke={GRAFICO.grade} />
+                  <XAxis dataKey="dia" {...EIXO} />
+                  <YAxis allowDecimals={false} {...EIXO} />
+                  <Tooltip {...DICA} />
                   <Line
                     type="monotone"
                     dataKey="count"
-                    stroke="hsl(213 53% 25%)"
+                    stroke={GRAFICO.principal}
                     strokeWidth={2}
                     dot={{ r: 3 }}
                   />
@@ -577,7 +594,7 @@ export default function DashboardPage() {
                         <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip />
+                    <Tooltip {...DICA} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
@@ -604,16 +621,16 @@ export default function DashboardPage() {
                     layout="vertical"
                     margin={{ top: 5, right: 20, left: 80, bottom: 5 }}
                   >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRAFICO.grade} />
+                    <XAxis type="number" allowDecimals={false} {...EIXO} />
                     <YAxis
                       dataKey="label"
                       type="category"
                       width={120}
-                      tick={{ fontSize: 11 }}
+                      {...EIXO}
                     />
-                    <Tooltip />
-                    <Bar dataKey="count" fill="hsl(213 53% 25%)" />
+                    <Tooltip {...DICA} />
+                    <Bar dataKey="count" fill={GRAFICO.principal} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -641,16 +658,16 @@ export default function DashboardPage() {
                   layout="vertical"
                   margin={{ top: 5, right: 20, left: 80, bottom: 5 }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={GRAFICO.grade} />
+                  <XAxis type="number" allowDecimals={false} {...EIXO} />
                   <YAxis
                     dataKey="label"
                     type="category"
                     width={160}
-                    tick={{ fontSize: 11 }}
+                    {...EIXO}
                   />
-                  <Tooltip />
-                  <Bar dataKey="count" fill="#16a34a" />
+                  <Tooltip {...DICA} />
+                  <Bar dataKey="count" fill={GRAFICO.secundaria} />
                 </BarChart>
               </ResponsiveContainer>
             </div>

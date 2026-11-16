@@ -7,6 +7,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { KpiCard } from "@/components/ui/kpi-card";
+import { AbasSolicitacoes } from "@/components/pagamentos/AbasSolicitacoes";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, type SituacaoTramitacao } from "@/lib/api";
@@ -137,15 +138,14 @@ export function FilaPorEtapa({
 
   return (
     <div className="space-y-4">
+      {/* Sem migalha "Solicitações": a volta para a lista é a aba "Todas", logo abaixo. */}
       <PageHeader
-        breadcrumbs={[
-          { label: "Pagamentos", href: "/m/pagamentos" },
-          { label: "Solicitações", href: "/m/pagamentos/solicitacoes" },
-        ]}
         title={titulo}
         description={descricao}
         icon={icon}
       />
+
+      <AbasSolicitacoes />
 
       <div className={gradeKpi}>
         {secoes.map((s) => (

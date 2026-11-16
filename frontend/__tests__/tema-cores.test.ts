@@ -155,8 +155,8 @@ describe("derivarTema", () => {
 
 describe("títulos", () => {
   const CANVAS: Record<"light" | "dark", Hsl> = {
-    light: { h: 120, s: 6, l: 97 },
-    dark: { h: 158, s: 20, l: 8 },
+    light: { h: 220, s: 22, l: 97 },
+    dark: { h: 226, s: 30, l: 8 },
   };
 
   it("a cor dos títulos lê sobre o canvas nos dois temas, seja qual for", () => {

@@ -17,20 +17,41 @@ export const ROTA_PROCESSOS = "/m/protocolo/processos";
 
 /**
  * As caixas de trabalho, na ordem do layout de referência (protótipo Figma
- * "Sistema - Aprimora"). Fonte única da ordem e dos rótulos: o menu lateral
- * monta os subitens de "Processos" daqui, e a tela valida o `?caixa=` da URL
- * contra esta lista.
+ * "Sistema - Aprimora"). Fonte única da ordem e dos rótulos: as abas da tela
+ * de Processos (`components/protocolo/AbasCaixas.tsx`) saem daqui, e a tela
+ * valida o `?caixa=` da URL contra esta lista.
+ *
+ * `rotulo` é o nome completo (título da tela, painel, leitor de tela);
+ * `rotuloCurto` é o da aba, onde as nove precisam caber lado a lado a 1280px.
  */
-export const CAIXAS: { caixa: CaixaProcesso; rotulo: string; icone: LucideIcon }[] = [
-  { caixa: "entrada", rotulo: "Caixa de entrada", icone: ArrowDownToLine },
-  { caixa: "saida", rotulo: "Caixa de saída", icone: ArrowUpFromLine },
-  // O que enviei e o destino recusou: fica logo abaixo da saída, de onde veio.
-  { caixa: "recusados", rotulo: "Recusados", icone: Undo2 },
-  { caixa: "analise", rotulo: "Análise", icone: FileSearch },
-  { caixa: "externos", rotulo: "Externos", icone: FolderInput },
-  { caixa: "aguardando_assinatura", rotulo: "Aguardando assinatura", icone: PenLine },
-  { caixa: "enviado_para_assinatura", rotulo: "Enviado para assinatura", icone: Send },
-  { caixa: "arquivados", rotulo: "Arquivados", icone: Archive },
+export const CAIXAS: {
+  caixa: CaixaProcesso;
+  rotulo: string;
+  rotuloCurto: string;
+  icone: LucideIcon;
+}[] = [
+  { caixa: "entrada", rotulo: "Caixa de entrada", rotuloCurto: "Entrada", icone: ArrowDownToLine },
+  { caixa: "saida", rotulo: "Caixa de saída", rotuloCurto: "Saída", icone: ArrowUpFromLine },
+  // O que enviei e o destino recusou: fica logo depois da saída, de onde veio.
+  { caixa: "recusados", rotulo: "Recusados", rotuloCurto: "Recusados", icone: Undo2 },
+  { caixa: "analise", rotulo: "Análise", rotuloCurto: "Análise", icone: FileSearch },
+  { caixa: "externos", rotulo: "Externos", rotuloCurto: "Externos", icone: FolderInput },
+  // Documento esperando a MINHA assinatura — a mesma regra da tela "Para
+  // assinar" (`assinaturas.listar_minhas_pendentes`), daí o nome curto igual.
+  {
+    caixa: "aguardando_assinatura",
+    rotulo: "Aguardando assinatura",
+    rotuloCurto: "Para assinar",
+    icone: PenLine,
+  },
+  // Documento que EU mandei para outros assinarem.
+  {
+    caixa: "enviado_para_assinatura",
+    rotulo: "Enviado para assinatura",
+    rotuloCurto: "Enviados p/ assinar",
+    icone: Send,
+  },
+  { caixa: "arquivados", rotulo: "Arquivados", rotuloCurto: "Arquivados", icone: Archive },
 ];
 
 export function caixaDaUrl(valor: string | null): CaixaProcesso | undefined {

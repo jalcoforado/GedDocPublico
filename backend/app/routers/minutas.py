@@ -28,6 +28,7 @@ from ..schemas.minuta import (
 )
 from ..services import editor_imagens
 from ..services import minutas as svc
+from ..services.html_pdf import CSS_DOCUMENTO, CSS_PRE_VISUALIZACAO
 from ..services.placeholders import PLACEHOLDERS_DISPONIVEIS
 
 templates_router = APIRouter(prefix="/templates-documento", tags=["minutas"])
@@ -39,6 +40,22 @@ async def list_placeholders(
     __: int = Depends(require_tenant_id),
 ) -> list[PlaceholderInfo]:
     return [PlaceholderInfo(**p) for p in PLACEHOLDERS_DISPONIVEIS]
+
+
+@templates_router.get("/estilo-impressao")
+async def estilo_impressao(
+    _: Usuario = Depends(require_permission("processo", "atualizar")),
+    __: int = Depends(require_tenant_id),
+) -> dict[str, str]:
+    """CSS com que o PDF final da minuta é impresso (SI-30).
+
+    A pré-visualização do editor aplica ESTE estilo, não uma cópia dele no
+    frontend: se a tipografia do PDF mudar, a pré-visualização muda junto.
+    `css_tela` é a moldura da prévia (folha A4, destaque de campo pendente),
+    que não entra no PDF. Declarada antes de `/{template_id}` para não cair
+    na rota de id.
+    """
+    return {"css": CSS_DOCUMENTO, "css_tela": CSS_PRE_VISUALIZACAO}
 
 
 @templates_router.get("", response_model=list[TemplateDocumentoOut])

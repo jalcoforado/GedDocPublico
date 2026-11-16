@@ -78,7 +78,11 @@ async def responder(
 
     # 2. RESOLVER. Sem `niveis_permitidos`: o guard acima já decidiu, e repetir
     #    o filtro aqui daria a impressão de que ele é opcional lá.
-    detalhe = await get_processo_detail(db, processo_id, tenant_id=tenant_id)
+    #    `usuario_id` vai junto: rascunho só aparece para o autor (SI-16), e o
+    #    guard acima já garantiu que é ele quem pergunta.
+    detalhe = await get_processo_detail(
+        db, processo_id, tenant_id=tenant_id, usuario_id=usuario.id
+    )
     if detalhe is None:
         # Não existe, ou é de outro tenant. Mesma resposta que sigilo negado —
         # os dois casos são indistinguíveis de fora, por construção.

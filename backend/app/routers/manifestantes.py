@@ -1,6 +1,6 @@
 import re
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,12 +11,15 @@ from ..database import get_db, tenant_filter
 from ..models import Manifestante, TipoManifestante, Usuario
 from ..schemas.common import Paginated
 from ..schemas.manifestante import (
+    FORMATO_DO_DOCUMENTO,
+    NOME_DO_DOCUMENTO,
     ManifestanteCreate,
     ManifestanteOut,
     ManifestanteUpdate,
     TipoManifestanteCreate,
     TipoManifestanteOut,
     TipoManifestanteUpdate,
+    documento_valido,
 )
 from ._crud import get_or_404, paginated_list
 
@@ -103,10 +106,17 @@ async def list_manifestantes(
     q: str | None = None,
     id_tipo_manifestante: int | None = None,
 ):
-    # CPF/CNPJ é gravado só com dígitos: busca que parece documento com
-    # máscara ("123.456.789-09") procura pelos dígitos.
-    if q and re.fullmatch(r"[\d.\-/\s]+", q) and any(ch.isdigit() for ch in q):
-        q = re.sub(r"\D", "", q)
+    # CPF/CNPJ é gravado sem máscara: busca que parece documento com máscara
+    # procura sem a pontuação. Parece documento o que tem dígito e é feito só
+    # de dígitos e pontuação, com espaço ou não ("123 456 789-09"), ou o que
+    # mistura letra e dígito SEM espaço — o CNPJ alfanumérico
+    # ("12.ABC.345/01DE-35"). Com espaço e letra é nome: "Escola 10" virava
+    # "Escola10" e não achava nada. E-mail tem "@" e fica de fora.
+    if q and any(ch.isdigit() for ch in q):
+        if re.fullmatch(r"[\d.\-/\s]+", q):
+            q = re.sub(r"\D", "", q)
+        elif re.fullmatch(r"[0-9A-Za-z.\-/]+", q):
+            q = re.sub(r"[^0-9A-Za-z]", "", q)
     extra = (
         Manifestante.id_tipo_manifestante == id_tipo_manifestante
         if id_tipo_manifestante
@@ -126,6 +136,23 @@ async def list_manifestantes(
     )
 
 
+def _conferir_documento(tipo: TipoManifestante, cpf_cnpj: str | None) -> None:
+    """CPF para tipo de pessoa física, CNPJ (numérico ou alfanumérico) para
+    jurídica. O schema já tirou a máscara."""
+    if cpf_cnpj is None:
+        return
+    if not documento_valido(tipo.natureza, cpf_cnpj):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"{NOME_DO_DOCUMENTO[tipo.natureza]} inválido para o tipo "
+                f"\"{tipo.tipo_manifestante}\": deve ter "
+                f"{FORMATO_DO_DOCUMENTO[tipo.natureza]}, com os dígitos "
+                "verificadores corretos."
+            ),
+        )
+
+
 @router.post(
     "/manifestantes", response_model=ManifestanteOut, status_code=status.HTTP_201_CREATED
 )
@@ -135,6 +162,13 @@ async def create_manifestante(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
+    # O tipo é FK "soft" quanto ao tenant: a FK do Postgres aceitaria o tipo
+    # de outra prefeitura. Carregar com o tenant fecha isso e dá a natureza.
+    tipo = await get_or_404(
+        db, TipoManifestante, payload.id_tipo_manifestante,
+        tenant_id=tenant_id, label="Tipo de manifestante",
+    )
+    _conferir_documento(tipo, payload.cpf_cnpj)
     m = Manifestante(**payload.model_dump(), tenant_id=tenant_id, excluido=False)
     db.add(m)
     await db.commit()
@@ -151,7 +185,20 @@ async def update_manifestante(
     db: AsyncSession = Depends(get_db),
 ):
     m = await get_or_404(db, Manifestante, manif_id, tenant_id=tenant_id, label="Manifestante")
-    for k, v in payload.model_dump(exclude_unset=True).items():
+    mudancas = payload.model_dump(exclude_unset=True)
+    id_tipo = mudancas.get("id_tipo_manifestante", m.id_tipo_manifestante)
+    documento = mudancas.get("cpf_cnpj", m.cpf_cnpj)
+    # Só confere o que muda. A tela manda o formulário inteiro na edição, e há
+    # cadastro anterior à conferência do dígito verificador (a demonstração
+    # inteira usa CPF fictício): exigir correção dele travaria trocar o
+    # telefone. Mudou o tipo ou o documento, aí vale a regra toda.
+    if id_tipo != m.id_tipo_manifestante or documento != m.cpf_cnpj:
+        tipo = await get_or_404(
+            db, TipoManifestante, id_tipo,
+            tenant_id=tenant_id, label="Tipo de manifestante",
+        )
+        _conferir_documento(tipo, documento)
+    for k, v in mudancas.items():
         setattr(m, k, v)
     await db.commit()
     await db.refresh(m)

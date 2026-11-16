@@ -112,6 +112,18 @@ async def test_cadastrado_hoje_faz_login(admin_engine, tenant) -> None:
             app="portal",
         )
 
+    # 0136 — o autocadastro só entra com o e-mail confirmado (o link do
+    # e-mail; ver `test_conta_email_2fa.py`). Aqui interessa a senha.
+    async with _sm(admin_engine)() as s:
+        await s.execute(
+            text(
+                "UPDATE utils.usuario_externo SET email_verificado_em = NOW() "
+                "WHERE tenant_id = :t AND cpf_cnpj = :c"
+            ),
+            {"t": tenant.id, "c": cpf},
+        )
+        await s.commit()
+
     async with _sm(admin_engine)() as s:
         logado = await cidadao_auth.login(
             s, tenant_id=tenant.id, cpf_cnpj=cpf, senha=SENHA
