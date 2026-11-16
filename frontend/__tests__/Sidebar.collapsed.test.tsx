@@ -53,13 +53,13 @@ afterEach(() => {
 });
 
 describe("sidebar colapsada (UX-03 fatia 3.6)", () => {
-  it("no menu único não há item-pai na barra: os cadastros moram na tela-índice", async () => {
+  it("os cadastros moram numa tela-índice: na barra, um link direto, sem filhos", async () => {
     // O flyout de item-pai (fatia 3.6) existia para o "Cadastros" de
-    // Pagamentos, que tinha filhos. Desde o menu único (2026-11-05) ele é um
-    // link direto para `/m/pagamentos/cadastros`, onde os cadastros estão.
+    // Pagamentos, que tinha filhos. Desde o menu por área (2026-11-14) os
+    // cadastros de todos os módulos são um link direto para `/cadastros`.
     renderSidebar({ modulo: "pagamentos", open: false, onClose: () => {} });
-    const link = await screen.findByRole("link", { name: /cadastros e controle/i });
-    expect(link).toHaveAttribute("href", "/m/pagamentos/cadastros");
+    const link = await screen.findByRole("link", { name: /cadastros e configuração/i });
+    expect(link).toHaveAttribute("href", "/cadastros");
     expect(screen.queryByRole("link", { name: /naturezas/i })).toBeNull();
   });
 

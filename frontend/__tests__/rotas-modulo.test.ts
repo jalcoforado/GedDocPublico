@@ -38,7 +38,9 @@ const DIR_M = join(DIR_APP, "m");
  * nenhum. Acrescentar nome aqui é decisão de arquitetura — se a tela é de um
  * módulo, o lugar dela é `m/<slug>/`.
  */
-const TRANSVERSAIS = new Set(["home", "dashboard", "perfil", "para-assinar", "minuta-error", "m"]);
+// `cadastros` (menu por área, 2026-11-14): junta os cadastros e a configuração
+// de TODOS os módulos numa tela, por área — agrega através dos módulos.
+const TRANSVERSAIS = new Set(["home", "dashboard", "perfil", "para-assinar", "minuta-error", "cadastros", "m"]);
 
 function subdiretorios(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true })
@@ -202,6 +204,20 @@ describe("F3 — o nginx precisa conhecer as rotas", () => {
       expect(
         tokens.has(token),
         `token legado removido. Sem ele a URL antiga cai no fallback ANTES de chegar ao Next, e o 308 nunca acontece — ou seja, remover aqui mata o redirect.`,
+      ).toBe(true);
+    },
+  );
+
+  // Menu por área (2026-11-14): `/cadastros` nasceu em `app/(app)/` e
+  // funcionava no Next, mas dava 502 pelo nginx — fora da regex, a rota cai
+  // no fallback PHP (que não existe mais). Toda tela transversal tem de
+  // estar na regex; `m` tem teste próprio acima.
+  it.each(Array.from(TRANSVERSAIS).filter((d) => d !== "m"))(
+    "a tela transversal `/%s` está na regex do nginx",
+    (token) => {
+      expect(
+        tokens.has(token),
+        `sem o token \`${token}\` em nginx/default.conf, /${token} cai no fallback legado e dá 502 pelo :8090, mesmo funcionando no Next`,
       ).toBe(true);
     },
   );

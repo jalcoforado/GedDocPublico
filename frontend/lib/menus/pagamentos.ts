@@ -51,8 +51,11 @@ export const menuPagamentos: MenuModulo = {
       items: [
         { label: "Visão geral", href: "/m/pagamentos", icon: Inbox,
           anyOf: PERMS_LEITURA_PAGAMENTOS },
-        { label: "Dashboard", href: "/m/pagamentos/dashboard", icon: BarChart3,
-          anyOf: PERMS_LEITURA_PAGAMENTOS },
+        // Menu por área (2026-11-14): o antigo "Dashboard" é a aba
+        // "Indicadores" da Visão geral (`NavVisaoFinanceiro`), não item da
+        // barra — eram duas entradas para a mesma pergunta.
+        { label: "Indicadores", href: "/m/pagamentos/dashboard", icon: BarChart3,
+          anyOf: PERMS_LEITURA_PAGAMENTOS, lugar: "aba" },
         // Mapa do processo inteiro, para quem opera entender o antes e o
         // depois da própria mesa. As quantidades vêm de endpoints de leitura
         // do módulo, daí o mesmo conjunto.

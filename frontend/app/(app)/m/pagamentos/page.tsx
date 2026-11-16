@@ -6,6 +6,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { fmtData, fmtMoeda } from "@/components/pagamentos/format";
+import { NavVisaoFinanceiro } from "@/components/pagamentos/NavVisaoFinanceiro";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -276,6 +277,7 @@ export default function PagamentosHomePage() {
           </Button>
         }
       />
+      <NavVisaoFinanceiro />
 
       {!fila ? (
         <div role="status" className="space-y-6 animate-aparece-depois motion-reduce:animate-none">

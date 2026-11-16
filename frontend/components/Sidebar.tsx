@@ -16,6 +16,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canSeeItem, MENUS, type NavGroup, type NavItem } from "@/lib/menus";
+import { navPorArea } from "@/lib/menus/areas";
 import { nomeDoModulo } from "@/lib/modulos";
 import { cn } from "@/lib/utils";
 import { MarcaDoMunicipio } from "./MarcaDoMunicipio";
@@ -58,9 +59,9 @@ interface SidebarProps {
 }
 
 const COLLAPSED_KEY = "aprimora.sidebar.collapsed";
-// v2: os títulos dos grupos viraram nomes de módulo no menu único — o estado
-// salvo da v1 ("Processos", "Cadastros"…) não se aplica mais.
-const GROUP_STATE_KEY = "aprimora.sidebar.groups.v2";
+// v3: os títulos dos grupos viraram ÁREAS (menu por área, 2026-11-14) — o
+// estado salvo da v2 (títulos = nomes de módulo) não se aplica mais.
+const GROUP_STATE_KEY = "aprimora.sidebar.groups.v3";
 const FOCUSABLE =
   'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -84,22 +85,16 @@ export function Sidebar({ modulo, open, onClose }: SidebarProps) {
         .sort((a, b) => a.ordem - b.ordem)
         .map((m) => m.slug)
         .filter((s) => s !== "comum" && !!MENUS[s]);
-  const naBarra = (items: NavItem[]) => items.filter((i) => (i.lugar ?? "barra") === "barra");
-  const secao = (slug: string): NavGroup => {
-    const m = MENUS[slug];
-    const quieto = m.grupos.some((g) => g.quieto);
-    return {
-      title: nomeDoModulo(slug),
-      items: naBarra(m.grupos.flatMap((g) => g.items)),
-      defaultOpen: !quieto,
-      quieto,
-    };
-  };
+  // MENU POR ÁREA (2026-11-14): as seções são áreas de trabalho (Atendimento,
+  // Financeiro, Mobilidade), não módulos — cada módulo repetia a sua "Visão
+  // geral", "Dashboard", "Relatórios" e "Cadastros". Cadastros de todos os
+  // módulos viram uma entrada só; Administração continua no fim. As áreas e as
+  // redes de segurança (nada some em silêncio) estão em `lib/menus/areas.ts`.
   const NAV: NavGroup[] = [
-    ...MENUS.comum.grupos,
-    // Os de trabalho na ordem do catálogo; os "quietos" (Administração) no fim.
-    ...contratados.filter((s) => !MENUS[s].grupos.some((g) => g.quieto)).map(secao),
-    ...contratados.filter((s) => MENUS[s].grupos.some((g) => g.quieto)).map(secao),
+    // Do grupo comum, só o que é de barra (Início); "Cadastros e configuração"
+    // é `hub` lá e quem o põe na barra, no lugar certo, é `navPorArea`.
+    ...MENUS.comum.grupos.map((g) => ({ ...g, items: g.items.filter((i) => (i.lugar ?? "barra") === "barra") })),
+    ...navPorArea(contratados, nomeDoModulo),
   ];
   // PR3a — link de plataforma só aparece para admin de plataforma (allowlist).
   const adminMeQ = useQuery({
