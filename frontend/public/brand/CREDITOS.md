@@ -27,3 +27,11 @@ assunto à esquerda.
 Foto de login pesa na primeira impressão do sistema: a da Serra tinha 385 KB e,
 no link da homologação, levava perto de 30 s. Mantenha as fotos abaixo de ~100 KB
 (WebP, até 1600 px de largura).
+
+## google-g.svg
+
+O "G" do Google, no botão "Entrar com o Google" da tela de login (SI-32). Marca
+do Google, usada como pedem as diretrizes de marca do Sign in with Google
+(https://developers.google.com/identity/branding-guidelines): o "G" em cores,
+sem alteração, ao lado do texto. Fica em `public/` e não em componente porque as
+cores são da marca, não do tema — e o `design:check` reprovaria hex cru no JSX.

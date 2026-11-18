@@ -209,6 +209,12 @@ ENDPOINTS_TRANSVERSAIS: set[tuple[str, str]] = {
     ("GET", "/api/v2/auth/govbr/callback"),
     # Se o portal mostra o botão (só lê a configuração, sem dado de ninguém).
     ("GET", "/api/v2/auth/govbr/disponivel"),
+    # Login do SERVIDOR com a conta Google (SI-32): mesma porta que
+    # `/auth/login`, só que por OIDC. Roda antes de haver sessão — não há
+    # sujeito para permissionar nem módulo a exigir.
+    ("GET", "/api/v2/auth/google-login/inicio"),
+    ("GET", "/api/v2/auth/google-login/callback"),
+    ("GET", "/api/v2/auth/google-login/disponivel"),
 
     # -- API M2M de integrações (Pagamentos C2.3, Task 7): outro realm de
     # autenticação inteiro, por `X-Api-Key` (`get_current_sistema_integrado`),
