@@ -98,7 +98,7 @@ async def cen(admin_engine):
                 RETURNING id
                 """,
                 a=assunto, m=manif, d=unid[dona], l=unid[local], u=admin, ativo=ativo, ab=abertura,
-                n=f"{rotulo}-{uuid.uuid4().hex[:4]}",
+                n=f"{rotulo}-{uuid.uuid4().hex[:12]}",
             )).scalar_one()
 
         async def envio(rotulo, origem, destino, enviado, recebido=None, prazo=None, recusado=False):
@@ -332,7 +332,7 @@ async def _monta_prazo(cen, admin_engine):
                 RETURNING id
                 """,
                 a=base.id_assunto, m=base.id_manifestante, u=base.id_usuario, ua=unid["A"],
-                uc=unid["C"], n=f"{rotulo}-{uuid.uuid4().hex[:4]}", ab=datetime(2026, 10, 10, 13, 0),
+                uc=unid["C"], n=f"{rotulo}-{uuid.uuid4().hex[:12]}", ab=datetime(2026, 10, 10, 13, 0),
             )).scalar_one()
             for origem, destino, enviado, recebido, prazo in (
                 ("A", "B", chegada_b.replace(hour=chegada_b.hour - 1), chegada_b, date(2026, 10, 15)),
@@ -518,7 +518,7 @@ async def test_prazo_em_sql_igual_a_calcular_prazo(cen, admin_engine):
                         false, false, :ab, :dias) RETURNING id
                 """),
                 {"t": t.id, "a": base.id_assunto, "m": base.id_manifestante, "u": base.id_unidade_proprietaria,
-                 "usr": base.id_usuario, "n": f"pz-{rotulo}-{uuid.uuid4().hex[:4]}", "ab": abertura, "dias": dias},
+                 "usr": base.id_usuario, "n": f"pz-{rotulo}-{uuid.uuid4().hex[:12]}", "ab": abertura, "dias": dias},
             )).scalar_one()
             arquivado = abertura + rel_arq if rel_arq is not None else None
             if arquivado is not None:
