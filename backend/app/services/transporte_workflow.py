@@ -139,11 +139,11 @@ SEMENTES: dict[str, dict] = {
     "transporte-ocorrencia": {
         "estado_inicial": "registrada",
         "estados": [
-            {"slug": "registrada", "label": "Registrada"},
-            {"slug": "em_apuracao", "label": "Em apuração"},
-            {"slug": "procedente", "label": "Procedente", "final": True},
-            {"slug": "improcedente", "label": "Improcedente", "final": True},
-            {"slug": "arquivada", "label": "Arquivada", "final": True},
+            {"slug": "registrada", "nome": "Registrada"},
+            {"slug": "em_apuracao", "nome": "Em apuração"},
+            {"slug": "procedente", "nome": "Procedente", "final": True},
+            {"slug": "improcedente", "nome": "Improcedente", "final": True},
+            {"slug": "arquivada", "nome": "Arquivada", "final": True},
         ],
         "transicoes": [
             {"de": "registrada", "para": "em_apuracao", "label": "iniciar_apuracao"},
@@ -159,9 +159,9 @@ SEMENTES: dict[str, dict] = {
     "transporte-alvara": {
         "estado_inicial": "vigente",
         "estados": [
-            {"slug": "vigente", "label": "Vigente"},
-            {"slug": "renovado", "label": "Renovado", "final": True},
-            {"slug": "revogado", "label": "Revogado", "final": True},
+            {"slug": "vigente", "nome": "Vigente"},
+            {"slug": "renovado", "nome": "Renovado", "final": True},
+            {"slug": "revogado", "nome": "Revogado", "final": True},
         ],
         "transicoes": [
             {"de": "vigente", "para": "renovado", "label": "renovar",
@@ -179,11 +179,11 @@ SEMENTES: dict[str, dict] = {
     "transporte-recadastramento": {
         "estado_inicial": "convocado",
         "estados": [
-            {"slug": "convocado", "label": "Convocado"},
-            {"slug": "em_analise", "label": "Em análise"},
-            {"slug": "suspenso", "label": "Suspenso"},
-            {"slug": "deferido", "label": "Deferido", "final": True},
-            {"slug": "indeferido", "label": "Indeferido", "final": True},
+            {"slug": "convocado", "nome": "Convocado"},
+            {"slug": "em_analise", "nome": "Em análise"},
+            {"slug": "suspenso", "nome": "Suspenso"},
+            {"slug": "deferido", "nome": "Deferido", "final": True},
+            {"slug": "indeferido", "nome": "Indeferido", "final": True},
         ],
         "transicoes": [
             {"de": "convocado", "para": "em_analise", "label": "iniciar_analise"},
