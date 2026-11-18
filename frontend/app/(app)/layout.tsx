@@ -56,9 +56,16 @@ function Shell({ children }: { children: React.ReactNode }) {
         <Header onOpenSidebar={() => setSidebarOpen(true)} />
         <div className="flex min-h-0 flex-1">
           <Sidebar modulo={modulo} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+          {/* `relative` é o que mantém UMA barra de rolagem só (SI-50).
+              Sem ele, elemento `absolute` sem ancestral posicionado — o
+              `sr-only` dos avisos para leitor de tela, por exemplo — é
+              medido contra a página inteira e não contra o <main>: ele
+              "vaza" para baixo do fim da tela e a página ganha uma segunda
+              barra, além da do <main>. Aparecia no Painel e no montar
+              relatório. */}
           <main
             id="conteudo"
-            className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-[var(--density-space)]"
+            className="relative min-w-0 flex-1 overflow-y-auto p-4 sm:p-[var(--density-space)]"
           >
             {/* Contrato de largura (spec §12.2): max-w-7xl centrado por padrão;
                 página full-width (dashboard) opta por fora marcando qualquer
