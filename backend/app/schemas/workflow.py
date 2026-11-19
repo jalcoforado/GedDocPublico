@@ -63,6 +63,24 @@ class WorkflowEstado(BaseModel):
     # (bypass pra super-usuário). Null = sem amarração.
     id_unidade_responsavel: int | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _aceitar_label_legado(cls, dados: object) -> object:
+        """Aceita `label` como sinônimo de `nome` em DSL já gravado (SI-57).
+
+        As sementes de `services/transporte_workflow.py` gravaram os estados
+        com `label` desde set/2026, e o schema sempre exigiu `nome`. Como a
+        semente só é copiada para o banco na primeira vez, as definições já
+        criadas continuam com `label` mesmo depois de corrigir a semente — e
+        abrir qualquer uma delas dava 500 na validação da resposta. Ler as duas
+        formas conserta as linhas antigas sem migration; o que for salvo de
+        novo pelo editor já sai com `nome`.
+        """
+        if isinstance(dados, dict) and "nome" not in dados and "label" in dados:
+            dados = {**dados, "nome": dados["label"]}
+            dados.pop("label")
+        return dados
+
 
 class WorkflowTransicao(BaseModel):
     de: str = Field(..., description="slug do estado de origem")
