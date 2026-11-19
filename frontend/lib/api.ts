@@ -38,6 +38,9 @@ export interface BrandingResponse {
   /** Conta por e-mail ligada (convite, confirmação, "Não lembro a senha",
    * 2FA)? Desligada por padrão desde 2026-11-09: a tela esconde essas partes. */
   conta_por_email?: boolean;
+  /** "Entrar com o Google" (SI-32): o servidor tem client ID/secret do Google.
+   * Sem eles o botão não aparece (backend: `auth_google_login.py`). */
+  login_google?: boolean;
   cor_primaria: string | null;
   /** Tema do município: com `cor_primaria`, `lib/tema-cores.ts` deriva a paleta. */
   cor_destaque: string | null;
@@ -6204,6 +6207,16 @@ export const apensamentoApi = {
  */
 export function govbrLoginUrl(next: string): string {
   return `${BROWSER_API_URL}/auth/govbr/login?next=${encodeURIComponent(next)}`;
+}
+
+/**
+ * Início do login do SERVIDOR com a conta Google (SI-32): navegação de topo,
+ * pelo mesmo motivo do gov.br — o navegador segue o redirect até o Google
+ * levando o cookie de estado. `next` volta à tela pedida; o backend aplica a
+ * mesma allowlist de `lib/destino-login.ts`.
+ */
+export function googleLoginUrl(next: string): string {
+  return `${BROWSER_API_URL}/auth/google-login/inicio?next=${encodeURIComponent(next)}`;
 }
 
 export function termoApensamentoPdfUrl(apensamentoId: number): string {

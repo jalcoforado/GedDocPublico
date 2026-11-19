@@ -43,7 +43,7 @@ travar um comportamento, escreva a guarda — a lista delas está no fim.
 | **tocar o admin de plataforma** | [ADR-016](architecture/adr/ADR-016-platform-operator-identity.md) · [matriz de claims](architecture/security/platform-operator-claims-matrix.md) | Outro realm: RS256 de IdP dedicado, `get_platform_db`, nunca `deps.py`. |
 | **mexer no frontend** | `CLAUDE.md` §Frontend · [design-system](design-system.md) | `lib/api.ts` é o cliente único; o tipo tem de casar com o `response_model`. `tsc --noEmit` antes de commitar. |
 | **integrar pagamentos** | [INTEGRACAO-PAGAMENTOS](INTEGRACAO-PAGAMENTOS.md) | Contrato de arrecadação/conciliação. |
-| **ligar o Google Docs** | [GOOGLE-DOCS-OAUTH-SETUP](GOOGLE-DOCS-OAUTH-SETUP.md) | OAuth das minutas. |
+| **ligar o login com Google ou o Google Docs** | [GOOGLE-DOCS-OAUTH-SETUP](GOOGLE-DOCS-OAUTH-SETUP.md) | OAuth do login do servidor e das minutas. |
 | **saber o que falta** | [BACKLOG-PENDENCIAS](BACKLOG-PENDENCIAS.md) | Fonte viva. Não redescubra do zero. |
 | **entender por que algo é assim** | `git log` · [docs/archive/](archive/README.md) · [HISTORICO-FASES](HISTORICO-FASES.md) | Arqueologia. Nada aqui descreve o presente. |
 
@@ -70,7 +70,7 @@ contrato — e o leitor precisa saber a diferença antes de agir.
 | [design-system](design-system.md) | Tokens, componentes, padrões de UI. |
 | [INTEGRACAO-PAGAMENTOS](INTEGRACAO-PAGAMENTOS.md) | Contrato de arrecadação e conciliação. |
 | [relatorios-protocolo](relatorios-protocolo.md) | O que cada número dos relatórios do protocolo mede, quem vê, limitações. |
-| [GOOGLE-DOCS-OAUTH-SETUP](GOOGLE-DOCS-OAUTH-SETUP.md) | Setup do OAuth das minutas. |
+| [GOOGLE-DOCS-OAUTH-SETUP](GOOGLE-DOCS-OAUTH-SETUP.md) | Setup do OAuth do Google: login do servidor e minutas. |
 | [runbooks/platform-operator-bootstrap](runbooks/platform-operator-bootstrap.md) | Concessão/revogação de principal de plataforma. |
 | [architecture/security/threat-model-platform-operator](architecture/security/threat-model-platform-operator.md) | Modelo de ameaça da fronteira de plataforma. |
 | [acessos-teste-local](acessos-teste-local.md) | Credenciais e atalhos do ambiente local. |

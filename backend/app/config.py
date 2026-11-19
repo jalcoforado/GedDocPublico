@@ -228,6 +228,12 @@ class Settings(BaseSettings):
     # Igual, caractere por caractere, ao cadastrado no Google Cloud (SI-32).
     google_oauth_redirect_uri: str = "http://localhost:8090/api/v2/auth/google/callback"
     google_credentials_file: str = "/app/keys/google-credentials.json"
+    # "Entrar com o Google" do servidor municipal (SI-32 — `services/google_login.py`).
+    # Usa o MESMO client ID/secret acima; só o endereço de retorno é outro, e
+    # tem de estar cadastrado no Google Cloud ao lado do das minutas. Vazio =
+    # deriva do `GOOGLE_OAUTH_REDIRECT_URI` trocando `/auth/google/callback`
+    # por `/auth/google-login/callback` (mesmo host, mesma porta).
+    google_login_redirect_uri: str = ""
 
     # Login gov.br do cidadão (SSO OIDC — `services/govbr_sso.py`).
     #
@@ -248,6 +254,30 @@ class Settings(BaseSettings):
     # só serve a instalação de um tenant: o cookie de estado é do host de
     # origem, e callback em outro host é recusado.
     govbr_redirect_uri: str = ""
+
+    @property
+    def google_login_configurado(self) -> bool:
+        """Client ID e secret do Google presentes (o valor de exemplo do
+        `.env.example`, "YOUR_…", conta como ausente — mesma regra de
+        `GoogleOAuthFlow.configurado`). O login não guarda token nenhum, então,
+        ao contrário das minutas, não depende da chave de cifra."""
+
+        def real(v: str) -> bool:
+            v = v.strip()
+            return bool(v) and not v.upper().startswith("YOUR_")
+
+        return real(self.google_oauth_client_id) and real(self.google_oauth_client_secret)
+
+    @property
+    def google_login_redirect(self) -> str:
+        fixo = self.google_login_redirect_uri.strip()
+        if fixo:
+            return fixo
+        base = self.google_oauth_redirect_uri.strip()
+        sufixo = "/auth/google/callback"
+        if base.endswith(sufixo):
+            return base[: -len(sufixo)] + "/auth/google-login/callback"
+        return ""
 
     @property
     def govbr_configurado(self) -> bool:

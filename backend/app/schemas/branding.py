@@ -23,3 +23,6 @@ class BrandingResponse(BaseModel):
     # Conta por e-mail ligada? A tela esconde "Não lembro a senha", o convite
     # e a confirmação de e-mail quando não (`conta_email.conta_por_email_ativa`).
     conta_por_email: bool = False
+    # "Entrar com o Google" do servidor (SI-32): client ID/secret configurados
+    # no servidor. Sem eles o botão não aparece (`services/google_login.py`).
+    login_google: bool = False

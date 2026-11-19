@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import get_settings
 from ..database import get_db
 from ..models import Tenant
 from ..schemas.branding import BrandingResponse
@@ -34,4 +35,5 @@ async def branding_me(
         )
     resposta = BrandingResponse.model_validate(tenant, from_attributes=True)
     resposta.conta_por_email = conta_por_email_ativa()
+    resposta.login_google = get_settings().google_login_configurado
     return resposta
