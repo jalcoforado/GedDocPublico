@@ -83,7 +83,7 @@ async def _documentacao(cen, admin_engine) -> dict:
                 RETURNING id
                 """,
                 a=base.id_assunto, m=base.id_manifestante, u=base.id_unidade_proprietaria,
-                usr=base.id_usuario, n=f"doc-{rotulo}-{uuid.uuid4().hex[:4]}", nivel=nivel,
+                usr=base.id_usuario, n=f"doc-{rotulo}-{uuid.uuid4().hex[:12]}", nivel=nivel,
                 ext=externo, sv=out["servico"][servico],
             )).scalar_one()
 
