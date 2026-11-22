@@ -6,7 +6,9 @@
  *   está na tela, não o rascunho do formulário;
  * - abrir um salvo (`?salvo=`) aplica a definição que veio do servidor;
  * - salvar manda nome e definição e passa a URL para o salvo;
- * - sem coluna não se gera nem se salva.
+ * - sem coluna não se gera nem se salva;
+ * - SI-49: o salvo abre no resultado, com os parâmetros atrás do "Editar";
+ *   e o cabeçalho avisa quando o resultado na tela não é o que está salvo.
  *
  * Quem vê o quê é do backend (`backend/tests/test_relatorio_montado.py`):
  * nenhum teste daqui afirma proteger dado.
@@ -72,6 +74,9 @@ const SALVO: DefinicaoMontado = { colunas: ["assunto", "tram_atrasos"], filtros:
 const getMock = vi.fn((id: number) =>
   Promise.resolve({ id, nome: "Atrasados do mês", criado_em: "", atualizado_em: "", definicao: SALVO, avisos: [] }),
 );
+const updateMock = vi.fn((id: number, body: { nome?: string; definicao?: DefinicaoMontado }) =>
+  Promise.resolve({ id, nome: body.nome ?? "Atrasados do mês", criado_em: "", atualizado_em: "", definicao: body.definicao ?? SALVO, avisos: [] }),
+);
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -88,7 +93,7 @@ vi.mock("@/lib/api", async () => {
           list: () => Promise.resolve([]),
           get: (id: number) => getMock(id),
           create: (b: { nome: string; definicao: DefinicaoMontado }) => createMock(b),
-          update: vi.fn(),
+          update: (id: number, b: { nome?: string; definicao?: DefinicaoMontado }) => updateMock(id, b),
           remove: vi.fn(),
         },
       },
@@ -99,7 +104,9 @@ vi.mock("@/lib/api", async () => {
   };
 });
 
-async function abrir(busca = "") {
+/** `esperar`: o que tem de aparecer antes do teste seguir. Relatório novo
+ * mostra os parâmetros; salvo abre no resultado (SI-49). */
+async function abrir(busca = "", esperar: "parametros" | "resultado" | "nada" = "parametros") {
   nav.busca = busca;
   const { default: Pagina } = await import("@/app/(app)/m/protocolo/relatorios/montar/page");
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -112,8 +119,14 @@ async function abrir(busca = "") {
       </ToastProvider>
     </QueryClientProvider>,
   );
-  await screen.findByRole("group", { name: "Processo" });
+  if (esperar === "parametros") await screen.findByRole("group", { name: "Processo" });
+  if (esperar === "resultado") await screen.findByRole("table");
   return r;
+}
+
+/** Como a tela fica depois de abrir o salvo 7: `?salvo=` e a definição na URL. */
+function buscaDoSalvo(d: DefinicaoMontado = SALVO): string {
+  return `salvo=7&d=${encodeURIComponent(JSON.stringify(d))}`;
 }
 
 function definicaoDe(url: string): DefinicaoMontado {
@@ -126,6 +139,7 @@ beforeEach(() => {
   montadoMock.mockClear();
   createMock.mockClear();
   getMock.mockClear();
+  updateMock.mockClear();
 });
 afterEach(cleanup);
 
@@ -164,7 +178,7 @@ describe("montar relatório", () => {
   });
 
   it("abrir um salvo aplica a definição que veio do servidor", async () => {
-    await abrir("salvo=7");
+    await abrir("salvo=7", "nada");
     await waitFor(() => expect(nav.replace).toHaveBeenCalled());
     expect(getMock).toHaveBeenCalledWith(7);
     const url = nav.replace.mock.calls.at(-1)![0] as string;
@@ -229,5 +243,101 @@ describe("montar relatório", () => {
     // no topo, seta para cima não faz nada
     fireEvent.keyDown(within(lista).getByRole("button", { name: /Mover Aberto em/ }), { key: "ArrowUp" });
     expect(within(lista).getAllByRole("listitem")[0]).toHaveTextContent("Aberto em");
+  });
+});
+
+describe("relatório salvo abre no resultado (SI-49)", () => {
+  const marcarAbertoEm = () =>
+    fireEvent.click(within(screen.getByRole("group", { name: "Processo" })).getByLabelText("Aberto em"));
+
+  it("abre no resultado, sem os parâmetros, com Editar e sem Salvar alterações", async () => {
+    await abrir(buscaDoSalvo(), "resultado");
+    expect(await screen.findByRole("button", { name: /Editar/ })).toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "Montar relatório" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Processo" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Salvar alterações/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Salvar como…" })).toBeInTheDocument();
+    expect(screen.queryByText("Alterações não salvas")).toBeNull();
+  });
+
+  it("Editar mostra os parâmetros; Cancelar descarta o que mudou e fecha", async () => {
+    await abrir(buscaDoSalvo(), "resultado");
+    fireEvent.click(await screen.findByRole("button", { name: /Editar/ }));
+    expect(screen.getByRole("form", { name: "Montar relatório" })).toBeInTheDocument();
+    marcarAbertoEm();
+    expect(await screen.findByRole("button", { name: /Salvar alterações/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByRole("form", { name: "Montar relatório" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Salvar alterações/ })).toBeNull();
+    expect(nav.replace).not.toHaveBeenCalled();
+    // Reabrindo, a mudança descartada não está lá.
+    fireEvent.click(screen.getByRole("button", { name: /Editar/ }));
+    expect(within(screen.getByRole("group", { name: "Processo" })).getByLabelText("Aberto em")).not.toBeChecked();
+  });
+
+  it("Gerar relatório aplica no salvo e fecha os parâmetros", async () => {
+    await abrir(buscaDoSalvo(), "resultado");
+    fireEvent.click(await screen.findByRole("button", { name: /Editar/ }));
+    marcarAbertoEm();
+    fireEvent.click(screen.getByRole("button", { name: "Gerar relatório" }));
+    const url = nav.replace.mock.calls.at(-1)![0] as string;
+    expect(new URL(url, "http://x").searchParams.get("salvo")).toBe("7");
+    expect(definicaoDe(url).colunas).toEqual(["assunto", "tram_atrasos", "aberto_em"]);
+    expect(screen.queryByRole("form", { name: "Montar relatório" })).toBeNull();
+  });
+
+  it("Salvar alterações manda a definição editada ao salvo", async () => {
+    await abrir(buscaDoSalvo(), "resultado");
+    fireEvent.click(await screen.findByRole("button", { name: /Editar/ }));
+    marcarAbertoEm();
+    fireEvent.click(await screen.findByRole("button", { name: /Salvar alterações/ }));
+    await waitFor(() => expect(updateMock).toHaveBeenCalled());
+    expect(updateMock.mock.calls[0][0]).toBe(7);
+    expect(updateMock.mock.calls[0][1].definicao!.colunas).toEqual(["assunto", "tram_atrasos", "aberto_em"]);
+  });
+
+  it("Salvar como… cria um relatório novo com a definição e passa a URL para ele", async () => {
+    await abrir(buscaDoSalvo(), "resultado");
+    fireEvent.click(await screen.findByRole("button", { name: "Salvar como…" }));
+    const dialogo = await screen.findByRole("dialog");
+    expect(within(dialogo).getByLabelText(/Nome do relatório/)).toHaveValue("Atrasados do mês (cópia)");
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Salvar" }));
+    await waitFor(() => expect(createMock).toHaveBeenCalled());
+    expect(createMock.mock.calls[0][0].definicao.colunas).toEqual(["assunto", "tram_atrasos"]);
+    await waitFor(() => expect(nav.replace).toHaveBeenCalled());
+    expect(new URL(nav.replace.mock.calls.at(-1)![0] as string, "http://x").searchParams.get("salvo")).toBe("9");
+  });
+
+  it("resultado na tela diferente do salvo: avisa e oferece salvar", async () => {
+    await abrir(buscaDoSalvo({ ...SALVO, colunas: ["assunto"] }), "resultado");
+    expect(await screen.findByText("Alterações não salvas")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Salvar alterações/ })).toBeInTheDocument();
+  });
+
+  it("os mesmos filtros em outra ordem não contam como alteração", async () => {
+    const doServidor: DefinicaoMontado = { ...SALVO, filtros: { com_atraso: true, sigilo: "sigiloso" } };
+    getMock.mockImplementationOnce((id: number) =>
+      Promise.resolve({ id, nome: "Atrasados do mês", criado_em: "", atualizado_em: "", definicao: doServidor, avisos: [] }),
+    );
+    await abrir(buscaDoSalvo({ ...SALVO, filtros: { sigilo: "sigiloso", com_atraso: true } }), "resultado");
+    await screen.findByRole("button", { name: /Editar/ });
+    expect(screen.queryByText("Alterações não salvas")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Salvar alterações/ })).toBeNull();
+  });
+
+  it("antes de a definição do salvo ir para a URL, não oferece Editar nem Salvar alterações", async () => {
+    // O mock não atualiza a URL no replace: a tela fica no instante entre o
+    // salvo chegar e a definição dele ser aplicada, com o rascunho padrão.
+    await abrir("salvo=7", "nada");
+    await waitFor(() => expect(nav.replace).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: /Salvar alterações/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Editar/ })).toBeNull();
+  });
+
+  it("salvo que não consegue gerar abre com os parâmetros, para corrigir", async () => {
+    await abrir(buscaDoSalvo({ ...SALVO, colunas: [] }), "parametros");
+    expect(screen.getByRole("alert")).toHaveTextContent("Escolha pelo menos uma coluna.");
+    expect(screen.queryByRole("button", { name: "Cancelar" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Editar/ })).toBeNull();
   });
 });

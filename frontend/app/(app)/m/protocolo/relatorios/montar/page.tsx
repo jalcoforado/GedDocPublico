@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, FileText, GripVertical, Lock, Pencil, Save, Trash2, X } from "lucide-react";
+import { Download, FileText, GripVertical, Lock, Pencil, Save, SlidersHorizontal, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -62,6 +62,14 @@ import {
  *
  * Quem decide o que a pessoa vê é o backend: o resultado roda com o sigilo de
  * quem abre, na hora em que abre — o salvo guarda a definição, não os dados.
+ *
+ * SI-49: o relatório SALVO abre no resultado; os parâmetros ficam atrás do
+ * botão "Editar" ("Gerar" aplica e fecha, "Cancelar" descarta e fecha). O
+ * relatório novo, ainda sem salvar, mostra os parâmetros sempre — não há
+ * resultado antes de montar —, e o salvo que não consegue gerar também.
+ * Quando o resultado na tela não é o que está salvo, o cabeçalho diz
+ * "Alterações não salvas": com os parâmetros escondidos, nada mais avisaria,
+ * e o PDF sai com o nome do salvo.
  */
 
 const ROTULO_DOC: Record<StatusDocFiltroMontado, string> = {
@@ -111,6 +119,17 @@ function limpar(d: DefinicaoMontado): DefinicaoMontado {
   };
 }
 
+/** Mesma definição, depois de limpar? A do servidor e a da URL podem trazer
+ * os mesmos filtros em outra ordem de chaves — comparar o JSON cru diria
+ * "mudou" sem ter mudado. A ordem das COLUNAS conta: é escolha da pessoa. */
+function mesmaDefinicao(a: DefinicaoMontado, b: DefinicaoMontado): boolean {
+  const ordenado = (v: unknown): unknown =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([x], [y]) => x.localeCompare(y)).map(([k, w]) => [k, ordenado(w)]))
+      : v;
+  return JSON.stringify(ordenado(limpar(a))) === JSON.stringify(ordenado(limpar(b)));
+}
+
 export default function MontarRelatorioPage() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -151,6 +170,22 @@ export default function MontarRelatorioPage() {
   const pendente = !!aplicada && JSON.stringify(limpo) !== JSON.stringify(limpar(aplicada));
   const nomeSalvo = salvoQ.data?.nome;
 
+  // SI-49 — quando os parâmetros aparecem. Novo (sem `?salvo=`): sempre.
+  // Salvo: só no "Editar", ou quando ele não consegue gerar (sem resultado
+  // para mostrar, a pessoa precisa corrigir).
+  const [editando, setEditando] = useState(false);
+  // Outro salvo aberto com a página já montada (link do índice): começa fechado.
+  useEffect(() => { setEditando(false); }, [idSalvo]);
+  const naoGera = !!aplicada && (!!problemaDe(limpar(aplicada)) || !!resultadoQ.error);
+  const mostrarParametros = !idSalvo || editando || naoGera;
+  const definicaoSalva = salvoQ.data?.definicao ?? null;
+  // O que está NA TELA difere do salvo (gerou sem salvar): o selo avisa.
+  const resultadoNaoSalvo = !!definicaoSalva && !!aplicada && !mesmaDefinicao(aplicada, definicaoSalva);
+  // Há o que gravar com "Salvar alterações" — inclui mudança ainda não gerada.
+  // Exige `aplicada`: ao abrir pelo link, o salvo chega um instante antes de a
+  // definição dele ir para a URL, e nesse instante o rascunho ainda é o padrão.
+  const temAlteracao = !!definicaoSalva && !!aplicada && !mesmaDefinicao(rascunho, definicaoSalva);
+
   function aplicar(d: DefinicaoMontado, salvo: number | null = idSalvo) {
     router.replace(urlDoMontador(limpar(d), salvo), { scroll: false });
   }
@@ -161,6 +196,7 @@ export default function MontarRelatorioPage() {
       qc.invalidateQueries({ queryKey: ["relatorios-salvos"] });
       qc.setQueryData(["relatorio-salvo", r.id], r);
       toast.success(`Relatório "${r.nome}" salvo.`);
+      setEditando(false);
       aplicar(limpo, r.id);
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Não foi possível salvar."),
@@ -172,7 +208,10 @@ export default function MontarRelatorioPage() {
       qc.invalidateQueries({ queryKey: ["relatorios-salvos"] });
       qc.setQueryData(["relatorio-salvo", r.id], r);
       toast.success(body.nome ? `Renomeado para "${r.nome}".` : "Alterações salvas.");
-      if (body.definicao) aplicar(body.definicao);
+      if (body.definicao) {
+        setEditando(false);
+        aplicar(body.definicao);
+      }
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Não foi possível salvar."),
   });
@@ -217,9 +256,26 @@ export default function MontarRelatorioPage() {
       <PageHeader
         breadcrumbs={[{ label: "Relatórios", href: ROTA_RELATORIOS }, { label: nomeSalvo ?? "Montar relatório" }]}
         title={nomeSalvo ?? "Montar relatório"}
-        description="Escolha as colunas e os filtros, gere o resultado e salve para abrir de novo. Só você vê os relatórios que salvar."
+        description={
+          resultadoNaoSalvo ? (
+            <span className="inline-flex flex-wrap items-center gap-2">
+              <Badge intent="warning">Alterações não salvas</Badge>
+              O resultado abaixo não é o que está salvo. Salve as alterações ou salve como um relatório novo.
+            </span>
+          ) : idSalvo ? (
+            "Só você vê os relatórios que salvar. Para mudar filtros, colunas ou agrupamento, use Editar."
+          ) : (
+            "Escolha as colunas e os filtros, gere o resultado e salve para abrir de novo. Só você vê os relatórios que salvar."
+          )
+        }
         actions={
           <div className="flex flex-wrap gap-2">
+            {idSalvo && salvoQ.data && aplicada && !mostrarParametros ? (
+              <Button size="sm" variant="secondary" aria-expanded={false} aria-controls="parametros-relatorio"
+                onClick={() => setEditando(true)}>
+                <SlidersHorizontal className="h-4 w-4" aria-hidden="true" /> Editar
+              </Button>
+            ) : null}
             {exportavel ? (
               <>
                 <a href={montadoCsvUrl(exportavel)} target="_blank" rel="noreferrer"
@@ -234,13 +290,15 @@ export default function MontarRelatorioPage() {
             ) : null}
             {idSalvo && salvoQ.data ? (
               <>
-                <Button
-                  size="sm"
-                  disabled={!!problema || salvarAlteracoes.isPending}
-                  onClick={() => salvarAlteracoes.mutate({ definicao: limpo })}
-                >
-                  <Save className="h-4 w-4" aria-hidden="true" /> Salvar alterações
-                </Button>
+                {temAlteracao ? (
+                  <Button
+                    size="sm"
+                    disabled={!!problema || salvarAlteracoes.isPending}
+                    onClick={() => salvarAlteracoes.mutate({ definicao: limpo })}
+                  >
+                    <Save className="h-4 w-4" aria-hidden="true" /> Salvar alterações
+                  </Button>
+                ) : null}
                 <Button size="sm" variant="secondary" disabled={!!problema || salvarNovo.isPending}
                   onClick={async () => { const n = await pedirNome("Salvar como novo relatório", `${nomeSalvo} (cópia)`); if (n) salvarNovo.mutate(n); }}>
                   Salvar como…
@@ -275,10 +333,19 @@ export default function MontarRelatorioPage() {
         </Alert>
       ) : null}
 
+      {idSalvo && salvoQ.isLoading && <Carregando />}
+
+      {mostrarParametros && (
       <form
+        id="parametros-relatorio"
         aria-label="Montar relatório"
         className="space-y-4"
-        onSubmit={(e) => { e.preventDefault(); if (!problema) aplicar(rascunho); }}
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (problema) return;
+          setEditando(false);
+          aplicar(rascunho);
+        }}
       >
         {/* Recorte em largura inteira: os campos são os mesmos da barra das
             listas (`CamposDoRecorte`) e têm a mesma grade de quatro colunas. */}
@@ -295,12 +362,21 @@ export default function MontarRelatorioPage() {
           ) : pendente ? (
             <p className="text-sm text-foreground-muted">Há mudanças ainda não aplicadas ao resultado.</p>
           ) : null}
-          <Button type="button" variant="secondary" onClick={() => setRascunho(aplicada ?? definicaoInicial())}>
-            Desfazer mudanças
-          </Button>
+          {idSalvo && !naoGera ? (
+            // Salvo: fecha sem aplicar o que mudou — o resultado na tela fica.
+            <Button type="button" variant="secondary"
+              onClick={() => { setRascunho(aplicada ?? definicaoInicial()); setEditando(false); }}>
+              Cancelar
+            </Button>
+          ) : (
+            <Button type="button" variant="secondary" onClick={() => setRascunho(aplicada ?? definicaoInicial())}>
+              Desfazer mudanças
+            </Button>
+          )}
           <Button type="submit" disabled={!!problema}>Gerar relatório</Button>
         </div>
       </form>
+      )}
 
       {resultadoQ.isLoading && <Carregando />}
       {resultadoQ.error && (
