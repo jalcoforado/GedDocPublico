@@ -57,6 +57,10 @@ interface Props {
   /** Minuta existente para retomar edição; ausente = criar nova. */
   minutaId?: number;
   onSaved?: () => void;
+  /** SI-62 — "despacho": título fixo, sem Google Docs, e "Concluir e assinar…"
+   * no rodapé, que salva e chama `onConcluirDespacho` com o id do rascunho. */
+  finalidade?: "documento" | "despacho";
+  onConcluirDespacho?: (minutaId: number) => void;
 }
 
 /**
@@ -71,9 +75,12 @@ export function RedigirDocumentoDialog({
   processoId,
   minutaId,
   onSaved,
+  finalidade = "documento",
+  onConcluirDespacho,
 }: Props) {
   const qc = useQueryClient();
   const toast = useToast();
+  const despacho = finalidade === "despacho";
 
   const [minutaAtualId, setMinutaAtualId] = useState<number | undefined>(minutaId);
   const [titulo, setTitulo] = useState("");
@@ -99,7 +106,7 @@ export function RedigirDocumentoDialog({
   useEffect(() => {
     if (open) {
       setMinutaAtualId(minutaId);
-      setTitulo("");
+      setTitulo(despacho ? "Despacho" : "");
       setDestinatario("");
       setOrigem("interno");
       setTemplateId("");
@@ -142,7 +149,8 @@ export function RedigirDocumentoDialog({
       api.minutas.create(processoId, {
         titulo: titulo.trim(),
         destinatario: destinatario.trim() || null,
-        origem: origem,
+        origem: despacho ? "interno" : origem,
+        finalidade,
         id_template_origem: origem === "interno" ? (templateId ? Number(templateId) : null) : null,
       }),
     onSuccess: (m) => {
@@ -216,6 +224,25 @@ export function RedigirDocumentoDialog({
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // SI-62 — salva o que está na tela e passa ao passo de assinar.
+  const concluirM = useMutation({
+    mutationFn: () =>
+      api.minutas.update(minutaAtualId as number, {
+        titulo: titulo.trim(),
+        destinatario: destinatario.trim() || null,
+        corpo_html: corpo,
+        versao,
+      }),
+    onSuccess: (m) => {
+      setVersao(m.versao);
+      qc.invalidateQueries({ queryKey: ["minutas", processoId] });
+      qc.invalidateQueries({ queryKey: ["minuta", m.id] });
+      onConcluirDespacho?.(m.id);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const textoVazio = corpo.replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim() === "";
+
   const emEdicao = minutaAtualId !== undefined;
   const carregando = emEdicao && minutaQ.isLoading;
   // Minuta de origem Google não tem conteúdo pra editar aqui — o texto vive
@@ -265,9 +292,22 @@ export function RedigirDocumentoDialog({
       <Button variant="ghost" onClick={onClose}>
         Fechar
       </Button>
-      <Button onClick={() => salvarM.mutate()} disabled={salvarM.isPending || carregando}>
+      <Button
+        variant={despacho ? "secondary" : "primary"}
+        onClick={() => salvarM.mutate()}
+        disabled={salvarM.isPending || carregando || concluirM.isPending}
+      >
         {salvarM.isPending ? "Salvando…" : "Salvar rascunho"}
       </Button>
+      {despacho && (
+        <Button
+          onClick={() => concluirM.mutate()}
+          disabled={carregando || salvarM.isPending || textoVazio}
+          loading={concluirM.isPending}
+        >
+          Concluir e assinar…
+        </Button>
+      )}
     </div>
   ) : (
     <div className="flex justify-end gap-2">
@@ -289,7 +329,16 @@ export function RedigirDocumentoDialog({
     <Dialog
       open={open}
       onClose={onClose}
-      title={emEdicao ? "Editar documento" : "Redigir documento"}
+      title={
+        despacho
+          ? "Registrar despacho"
+          : emEdicao ? "Editar documento" : "Redigir documento"
+      }
+      description={
+        despacho
+          ? "O processo continua nesta unidade. Até ser assinado, o despacho é um rascunho que só você vê."
+          : undefined
+      }
       size={emEdicao && !ehGoogle && modo === "lado" ? "2xl" : "xl"}
       footer={footer}
     >
@@ -327,6 +376,9 @@ export function RedigirDocumentoDialog({
               placeholder="Ex.: Secretaria de Obras"
             />
           </FormField>
+          {/* Despacho é redigido só aqui: no Google Docs o texto sairia do
+              sistema antes de virar ato (o servidor também recusa). */}
+          {!despacho && (
           <div>
             {/* Google Docs sem conta conectada: escolher a opção abre a
                 conexão (se o servidor tiver a integração configurada), em vez
@@ -379,6 +431,7 @@ export function RedigirDocumentoDialog({
               </p>
             )}
           </div>
+          )}
           {origem === "interno" && (
             <FormField
               label="Modelo"

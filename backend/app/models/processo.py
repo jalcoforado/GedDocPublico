@@ -335,3 +335,8 @@ class AnexoProcesso(Base):
     )
     motivo_desentranhamento: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     autoridade_desentranhamento: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # SI-62: documento que este arquivo acompanha (ex.: os anexos do despacho
+    # são filhos do PDF assinado). Nulo no anexo avulso. Migration 0140.
+    id_anexo_principal: Mapped[int | None] = mapped_column(
+        ForeignKey("protocolos.anexo.id"), nullable=True
+    )

@@ -250,6 +250,9 @@ async def concluir_despacho(
             publico=False,
             usuario_id=usuario.id,
             commit=False,
+            # Filhos do PDF do despacho: o vínculo pela movimentação não serve,
+            # porque anexo enviado depois cairia nela também (migration 0140).
+            id_anexo_principal=anexo.id,
         )
 
     await assinaturas_svc.autoassinar_sem_commit(

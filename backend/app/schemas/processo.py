@@ -390,6 +390,8 @@ class AnexoNoProcesso(BaseModel):
     # cache, não uma releitura do arquivo a cada listagem.
     documento_numero: int | None = None
     pagina_processo: int | None = None
+    # SI-62: documento que este arquivo acompanha (anexos do despacho).
+    id_anexo_principal: int | None = None
 
 
 class EncaminhamentoOut(BaseModel):
@@ -407,6 +409,12 @@ class EncaminhamentoOut(BaseModel):
     motivo_recusa: str | None = None
 
 
+class AnexoDoDespacho(BaseModel):
+    """Arquivo que acompanha o despacho (filho do PDF assinado, SI-62)."""
+    id: int
+    descricao: str | None
+
+
 class DespachoOut(BaseModel):
     id: int
     despacho: str
@@ -414,6 +422,8 @@ class DespachoOut(BaseModel):
     # SI-62: PDF assinado do despacho avulso; nulo nos despachos que vêm
     # junto de encaminhar, recusar, cancelar ou arquivar.
     id_anexo: int | None = None
+    # Os arquivos enviados junto (filhos do PDF), não assinados.
+    anexos: list[AnexoDoDespacho] = []
 
 
 class PermanenciaNo(BaseModel):

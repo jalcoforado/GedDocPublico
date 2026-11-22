@@ -42,6 +42,7 @@ from ..schemas.processo import (
     CotaAnexacaoOut,
     OrdemProcesso,
     OrdenarProcesso,
+    AnexoDoDespacho,
     DespachoOut,
     EscopoProcesso,
     EncaminhamentoOut,
@@ -931,6 +932,33 @@ async def _load_movimentacoes(
         for e, uo, ud, prio in enc_rows:
             encs[e.id_movimentacao] = (e, uo, ud, prio)
 
+    # SI-62 — arquivos que acompanham o despacho: filhos do PDF dele
+    # (`anexo_processo.id_anexo_principal`), não "anexos da movimentação" —
+    # anexo enviado depois do despacho também cairia na movimentação dele.
+    anexos_do_despacho: dict[int, list[AnexoDoDespacho]] = {}
+    pdfs_de_despacho = {d.id_anexo for d in despachos.values() if d.id_anexo}
+    if pdfs_de_despacho:
+        filhos = (
+            await db.execute(
+                select(AnexoProcesso.id_anexo_principal, Anexo.id, Anexo.descricao)
+                .join(Anexo, Anexo.id == AnexoProcesso.id_anexo)
+                .where(
+                    AnexoProcesso.id_processo == processo_id,
+                    AnexoProcesso.tenant_id == tenant_id,
+                    AnexoProcesso.id_anexo_principal.in_(pdfs_de_despacho),
+                    AnexoProcesso.excluido.is_(False),
+                    AnexoProcesso.desentranhado_em.is_(None),
+                    Anexo.excluido.is_(False),
+                    Anexo.ativo.is_(True),
+                )
+                .order_by(AnexoProcesso.ordem.nulls_last(), Anexo.id)
+            )
+        ).all()
+        for principal, id_anexo, descricao in filhos:
+            anexos_do_despacho.setdefault(principal, []).append(
+                AnexoDoDespacho(id=id_anexo, descricao=descricao)
+            )
+
     desp_user_ids = {d.id_usuario for d in despachos.values()}
     users_by_id: dict[int, str] = {}
     if desp_user_ids:
@@ -970,6 +998,7 @@ async def _load_movimentacoes(
                 despacho=d.despacho,
                 usuario=users_by_id.get(d.id_usuario),
                 id_anexo=d.id_anexo,
+                anexos=anexos_do_despacho.get(d.id_anexo, []) if d.id_anexo else [],
             )
 
         enc_out: EncaminhamentoOut | None = None
@@ -1065,6 +1094,7 @@ async def _load_anexos(
                 ordem=ap.ordem,
                 documento_numero=idx,
                 pagina_processo=pagina_processo,
+                id_anexo_principal=ap.id_anexo_principal,
             )
         )
     return resultado

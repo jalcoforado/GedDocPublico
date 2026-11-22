@@ -263,6 +263,10 @@ async def test_concluir_despacho_fica_na_unidade_e_entra_na_linha_do_tempo(admin
     m = despachos[0]
     assert m["despacho"]["despacho"] == TEXTO
     assert m["despacho"]["id_anexo"] == resp["id_anexo"]
+    # O arquivo enviado junto acompanha o despacho (filho do PDF).
+    assert [x["descricao"] for x in m["despacho"]["anexos"]] == ["parecer.txt"]
+    filho = next(an for an in det["anexos"] if an["descricao"] == "parecer.txt")
+    assert filho["id_anexo_principal"] == resp["id_anexo"]
     assert m["unidade_responsavel"] is not None
     # Entra no detalhe do processo, que é de onde sai o PDF do processo.
     assert resp["id_anexo"] in {an["id"] for an in det["anexos"]}
@@ -370,3 +374,24 @@ async def test_rascunho_de_despacho_nao_finaliza_nem_vai_ao_google(admin_engine,
         r = await cli.post(f"/api/v2/processos/{a['na_mesa']}/minutas", json={
             "titulo": "Despacho", "finalidade": "despacho", "origem": "google"})
         assert r.status_code == 400, r.text
+
+
+@pytest.mark.asyncio
+async def test_anexo_enviado_depois_nao_vira_anexo_do_despacho(admin_engine, cen):
+    """Todo anexo se liga à ÚLTIMA movimentação; depois do despacho, sem o
+    processo andar, um upload cai na movimentação dele. O vínculo com o
+    despacho é o documento principal, e é isso que a linha do tempo mostra."""
+    a = cen["a"]
+    async with _como(admin_engine, a, "chefe") as cli:
+        mid = await _rascunho(cli, a["na_mesa"])
+        r = await _concluir(cli, mid, arquivos=[("arquivos", ("parecer.txt", b"x", "text/plain"))])
+        assert r.status_code == 201, r.text
+        r = await cli.post(f"/api/v2/processos/{a['na_mesa']}/anexos",
+                           data={"descricao": "depois.txt"},
+                           files={"file": ("depois.txt", b"y", "text/plain")})
+        assert r.status_code in (200, 201), r.text
+        det = (await cli.get(f"/api/v2/processos/{a['na_mesa']}")).json()
+    despacho = next(m for m in det["movimentacoes"] if m["acao_flag"] == "DESPACHO")
+    assert [x["descricao"] for x in despacho["despacho"]["anexos"]] == ["parecer.txt"]
+    depois = next(an for an in det["anexos"] if an["descricao"] == "depois.txt")
+    assert depois["id_anexo_principal"] is None

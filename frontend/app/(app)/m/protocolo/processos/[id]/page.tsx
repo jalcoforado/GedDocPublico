@@ -9,6 +9,7 @@ import {
   Hourglass,
   Inbox,
   Lock,
+  Paperclip,
   Pencil,
   Printer,
   Tags,
@@ -165,6 +166,32 @@ function MovimentacaoCard({
               <FileDown className="h-4 w-4" aria-hidden="true" /> Documento assinado
             </Button>
           ) : null}
+          {m.despacho.anexos && m.despacho.anexos.length > 0 && (
+            <div className="mt-2">
+              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Anexos do despacho
+              </div>
+              <ul className="flex flex-wrap gap-1" aria-label="Anexos do despacho">
+                {m.despacho.anexos.map((a) => (
+                  <li key={a.id}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        onOpenViewer({
+                          title: a.descricao ?? `Anexo #${a.id}`,
+                          src: anexoInlineUrl(a.id),
+                          downloadUrl: anexoDownloadUrl(a.id),
+                        })
+                      }
+                    >
+                      <Paperclip className="h-4 w-4" aria-hidden="true" /> {a.descricao ?? `Anexo #${a.id}`}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
       {m.encaminhamento && (

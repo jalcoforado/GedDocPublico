@@ -364,6 +364,8 @@ export const NIVEL_PRAZO_MAX: Partial<Record<NivelSigilo, number>> = {
 
 export interface AnexoNoProcesso {
   id: number;
+  /** SI-62 — documento que este arquivo acompanha (ex.: anexo do despacho). */
+  id_anexo_principal?: number | null;
   /** Fase P6 — id do JOIN (necessário pra desentranhar) */
   id_anexo_processo?: number | null;
   descricao: string | null;
@@ -403,6 +405,8 @@ export interface DespachoOut {
   /** SI-62 — PDF assinado do despacho avulso; null nos despachos que vêm junto
    * de encaminhar, recusar, cancelar ou arquivar. */
   id_anexo?: number | null;
+  /** SI-62 — arquivos enviados junto com o despacho (filhos do PDF). */
+  anexos?: { id: number; descricao: string | null }[];
 }
 
 /**
