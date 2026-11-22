@@ -97,6 +97,7 @@ Quando a documentação e uma destas discordarem, a guarda está certa:
 | `test_guarda_modularizacao.py` | Transação nova declara módulo; leitura gateada. |
 | `test_guarda_ordem_rotas.py` | Rota literal declarada antes da paramétrica irmã. |
 | `test_guarda_anexo_sigiloso.py` | Carregador cru de anexo proibido em router. |
+| `test_guarda_minuta_sigilosa.py` | Toda rota que mexe numa minuta confere o sigilo do processo. |
 | `test_guarda_link_url.py` | `notificacao.link_url` nasce com `/m/<slug>/`. |
 | `test_guarda_portas_publicadas.py` | Nada volta a publicar em `0.0.0.0`. |
 | `test_guarda_portao_de_deploy.py` | O portão de deploy e o SHA aprovado. |

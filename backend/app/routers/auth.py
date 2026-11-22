@@ -47,7 +47,7 @@ from ..schemas.auth import (
 from ..services import conta_email, conta_tokens
 from ..services.conta import ContaError, alterar_senha
 from ..services.google_oauth_flow import GoogleOAuthFlow, OutroUsuarioError
-from ..services.minutas import criar_google_doc_para_minuta
+from ..services.minutas import criar_google_doc_para_minuta, obter_minuta_autorizada
 from ..services.permissoes import listar_lotacoes, load_permissions, resolver_unidade_ativa
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -499,6 +499,9 @@ async def initiate_google_oauth(
     servidor, 307 para a tela de erro (navegação do browser — um 500 em JSON
     aparecia cru na tela).
     """
+    # SI-62: aqui o `minuta_id` só vai para o `state`; nenhum conteúdo sai.
+    # Quem confere o sigilo é o callback, onde a minuta é copiada para o
+    # Google (exceção registrada em `tests/test_guarda_minuta_sigilosa.py`).
     oauth_flow = GoogleOAuthFlow(redis)
     if not oauth_flow.configurado:
         return _erro_google("google_nao_configurado", processo_id)
@@ -575,6 +578,17 @@ async def handle_google_oauth_callback(
             url=f"/m/protocolo/processos/{processo_id}?tab=documentos",
             status_code=307,
         )
+
+    # SI-62: o callback COPIA o conteúdo da minuta para a conta Google de
+    # quem pediu. Sem esta checagem, bastava pôr o id de uma minuta de
+    # processo sigiloso no início do fluxo. Resposta igual à de erro do
+    # Google: não confirma que a minuta existe.
+    try:
+        await obter_minuta_autorizada(
+            db, tenant_id=tenant_id, minuta_id=minuta_id, usuario=user
+        )
+    except HTTPException:
+        return _erro_google("google_api_error", None)
 
     # Auto-cria Google Doc e redireciona para editor
     try:

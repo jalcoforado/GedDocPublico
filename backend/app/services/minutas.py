@@ -243,6 +243,54 @@ async def obter_minuta(db: AsyncSession, *, tenant_id: int, minuta_id: int) -> M
     return m
 
 
+async def exigir_acesso_ao_processo(
+    db: AsyncSession, *, tenant_id: int, processo_id: int, usuario: Usuario
+) -> None:
+    """404 se o usuário não alcança o processo (sigilo, ou rascunho de outra
+    pessoa) — o guard único de `services/sigilo.py`. Para as rotas de minuta
+    que recebem o id do PROCESSO (listar, criar)."""
+    from .sigilo import SigiloAcessoError, assert_acesso_processo
+
+    try:
+        await assert_acesso_processo(
+            db, tenant_id=tenant_id, processo_id=processo_id, usuario=usuario
+        )
+    except SigiloAcessoError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado"
+        )
+
+
+async def obter_minuta_autorizada(
+    db: AsyncSession, *, tenant_id: int, minuta_id: int, usuario: Usuario
+) -> Minuta:
+    """Carrega a minuta SÓ para quem alcança o processo dela (SI-62).
+
+    Até aqui as rotas de minuta filtravam a prefeitura e mais nada: qualquer
+    servidor com `processo.atualizar` lia (e editava, finalizava, apagava) a
+    minuta de processo sigiloso acima da credencial dele iterando o id — a
+    mesma classe do download de anexo que ficou aberto sete meses. A
+    minuta é conteúdo do processo, então passa pelo mesmo guard dele.
+
+    O 404 é o MESMO para "não existe", "é de outra prefeitura" e "não pode
+    ver": a resposta não confirma a existência. Toda rota com `minuta_id`
+    chama isto antes do serviço — `tests/test_guarda_minuta_sigilosa.py`
+    reprova a que esquecer, e reprova `obter_minuta` cru em router.
+    """
+    from .sigilo import SigiloAcessoError, assert_acesso_processo
+
+    m = await obter_minuta(db, tenant_id=tenant_id, minuta_id=minuta_id)
+    try:
+        await assert_acesso_processo(
+            db, tenant_id=tenant_id, processo_id=m.id_processo, usuario=usuario
+        )
+    except SigiloAcessoError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Minuta não encontrada"
+        )
+    return m
+
+
 async def listar_minutas(
     db: AsyncSession, *, tenant_id: int, processo_id: int
 ) -> list[Minuta]:

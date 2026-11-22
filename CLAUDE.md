@@ -331,6 +331,13 @@ autenticado do tenant baixava anexo de processo ultrassecreto iterando o id. Hoj
 `get_anexo_path` é proibido em router (`tests/test_guarda_anexo_sigiloso.py`); use
 `get_anexo_path_autorizado`.
 
+A minuta repetiu o defeito até 2026-11-22 (SI-62): as rotas filtravam o tenant e mais nada, e o
+callback do OAuth do Google — sem `minuta_id` na assinatura, o id vem do `state` — copiava a minuta
+de processo sigiloso para a conta Google de quem pedisse. Hoje toda rota que mexe numa minuta chama
+`services.minutas.obter_minuta_autorizada`, e as que recebem o processo, `exigir_acesso_ao_processo`;
+`tests/test_guarda_minuta_sigilosa.py` reprova quem esquecer, inclusive a rota que chama um serviço
+de minuta por id sem receber `minuta_id`.
+
 Duas regras que saíram daquele conserto: **a autorização vem antes de resolver o recurso** (senão a
 mensagem de erro distingue "existe" de "não existe" para quem não pode saber), e **teste de service
 não cobre esta classe de defeito** — ela mora na costura router↔service, que é onde o `Depends`
