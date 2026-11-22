@@ -1,7 +1,7 @@
 # Relatórios do Protocolo
 
 > **Status:** vivo · **Autoridade sobre:** o que cada número de `/m/protocolo/relatorios` mede, quem vê, e as limitações conhecidas.
-> **Última verificação:** 2026-11-22 (SI-62: despacho sem encaminhar conta como movimentação).
+> **Última verificação:** 2026-11-14 (Panorama no Painel; Relatórios como índice).
 > Índice: [docs/INDEX.md](INDEX.md) · precedência: código > `CLAUDE.md` > este doc.
 
 Fonte de verdade executável: `backend/app/services/relatorios_comum.py` (as
