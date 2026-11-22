@@ -150,6 +150,11 @@ em toda tela, e cobrá-las obrigaria todo grupo a receber `catalogo` só para ab
 A leitura da trilha de auditoria pede a transação `auditoria` (migration `0090`), que é do módulo
 `administracao`.
 
+**Desarquivar processo** pede a transação `processo_desarquivar` (migration `0139`, SI-60), do
+módulo `protocolo`, e **não** vem junto com `processo`: quem tramita não ganha, com isso, o poder de
+reabrir o que foi encerrado. Fica fora do conjunto mínimo acima de propósito — conceda só a quem
+responde pelo arquivo.
+
 ### Provisionamento que parou no meio (tenant inerte)
 
 Desde `SEC-RLS-00C` o provisionamento são **dois atos**, em papéis de banco

@@ -8,6 +8,7 @@ import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { ArquivarDialog } from "@/components/ArquivarDialog";
+import { DesarquivarDialog } from "@/components/DesarquivarDialog";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { CampoComUnidade } from "@/components/ui/campo-com-unidade";
@@ -26,7 +27,14 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
-type ModalKind = null | "encaminhar" | "receber" | "recusar" | "cancelar" | "arquivar";
+type ModalKind =
+  | null
+  | "encaminhar"
+  | "receber"
+  | "recusar"
+  | "cancelar"
+  | "arquivar"
+  | "desarquivar";
 
 /** Como o processo aparece em título de diálogo: rascunho não tem número. */
 function nomeDoProcesso(p: ProcessoDetail): string {
@@ -48,6 +56,7 @@ export function AcoesProcesso({ processo }: { processo: ProcessoDetail }) {
 
 function AcoesTramitacao({ processo }: { processo: ProcessoDetail }) {
   const qc = useQueryClient();
+  const { can } = useAuth();
   const [modal, setModal] = useState<ModalKind>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -63,17 +72,19 @@ function AcoesTramitacao({ processo }: { processo: ProcessoDetail }) {
     return mov?.encaminhamento ?? null;
   }, [processo.movimentacoes]);
 
-  // F4 — já arquivado não arquiva de novo. A fonte é a linha do tempo e não
-  // `processo.ativo`: arquivar NÃO mexe naquele campo (decisão registrada em
-  // `services/acoes_processo.py::arquivar`), então usá-lo aqui daria sempre
-  // "pode arquivar".
-  const jaArquivado = useMemo(
-    () => processo.movimentacoes.some((m) => m.acao_flag === "ARQUIVAMENTO"),
-    [processo.movimentacoes],
-  );
+  // F4 — já arquivado não arquiva de novo. A fonte é `processo.arquivado`, que
+  // o servidor calcula (arquivamento EM VIGOR). Não é `processo.ativo`, que
+  // arquivar não mexe, nem "há ARQUIVAMENTO na linha do tempo": desde o SI-60
+  // um processo desarquivado continua com o arquivamento antigo no histórico.
+  const jaArquivado = processo.arquivado;
   const podeArquivar = !jaArquivado && !encaminhamentoPendente;
+  // SI-60 — transação própria, não `processo`/`atualizar`. O servidor
+  // confere de novo; isto só esconde o botão de quem não pode.
+  const podeDesarquivar = jaArquivado && can("processo_desarquivar");
 
-  const podeEncaminhar = processo.ativo && !encaminhamentoPendente;
+  // SI-60 — processo arquivado não tramita: o servidor recusa, e a tela não
+  // oferece.
+  const podeEncaminhar = processo.ativo && !encaminhamentoPendente && !jaArquivado;
   // Receber/recusar são da unidade de destino e cancelar, da de origem. O
   // servidor diz se quem consulta pode; `false` explícito desabilita, ausente
   // não restringe (o servidor continua sendo a barreira).
@@ -139,16 +150,35 @@ function AcoesTramitacao({ processo }: { processo: ProcessoDetail }) {
         >
           Cancelar encaminhamento
         </Button>
-        <Button
-          variant="secondary"
-          onClick={() => {
-            setErr(null);
-            setModal("arquivar");
-          }}
-          disabled={!podeArquivar}
-        >
-          Arquivar
-        </Button>
+        {jaArquivado ? (
+          podeDesarquivar && (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setErr(null);
+                setModal("desarquivar");
+              }}
+            >
+              Desarquivar
+            </Button>
+          )
+        ) : (
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setErr(null);
+              setModal("arquivar");
+            }}
+            disabled={!podeArquivar}
+          >
+            Arquivar
+          </Button>
+        )}
+        {jaArquivado && (
+          <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-surface-2 px-2 py-0.5 text-xs font-semibold text-foreground-muted">
+            Arquivado
+          </span>
+        )}
 
         {encaminhamentoPendente && (
           <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-warning-soft px-2 py-0.5 text-xs font-semibold text-warning-soft-foreground">
@@ -164,6 +194,12 @@ function AcoesTramitacao({ processo }: { processo: ProcessoDetail }) {
 
       <ArquivarDialog
         open={modal === "arquivar"}
+        onClose={() => setModal(null)}
+        processo={processo}
+      />
+
+      <DesarquivarDialog
+        open={modal === "desarquivar"}
         onClose={() => setModal(null)}
         processo={processo}
       />

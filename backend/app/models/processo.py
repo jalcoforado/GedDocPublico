@@ -130,6 +130,12 @@ class Processo(Base):
     prazo_servico_dias_snapshot: Mapped[int | None] = mapped_column(
         Integer, nullable=True
     )
+    # SI-60 (0139) — desarquivar reinicia a contagem do prazo do serviço a
+    # partir daqui. Nula = nunca desarquivado: o prazo conta da abertura.
+    # Quem lê é `prazos.inicio_do_prazo` (e o espelho SQL dele).
+    data_reinicio_prazo: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
 
 
 class Movimentacao(Base):

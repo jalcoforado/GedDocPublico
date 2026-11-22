@@ -90,6 +90,7 @@ const ACAO_INTENT: Record<string, "info" | "warning" | "success" | "neutral" | "
   ENCAMINHAMENTO: "warning",
   RECEBIMENTO: "success",
   ARQUIVAMENTO: "neutral",
+  DESARQUIVAMENTO: "info",
   CANCELAMENTO: "danger",
 };
 
