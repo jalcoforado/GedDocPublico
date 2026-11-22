@@ -71,11 +71,11 @@ contrato — e o leitor precisa saber a diferença antes de agir.
 | [design-system](design-system.md) | Tokens, componentes, padrões de UI. |
 | [INTEGRACAO-PAGAMENTOS](INTEGRACAO-PAGAMENTOS.md) | Contrato de arrecadação e conciliação. |
 | [relatorios-protocolo](relatorios-protocolo.md) | O que cada número dos relatórios do protocolo mede, quem vê, limitações. |
-| [catalogo-protocolo](catalogo-protocolo.md) | Tipo de processo × assunto, o catálogo sugerido de demonstração e o que ele não faz. |
 | [GOOGLE-DOCS-OAUTH-SETUP](GOOGLE-DOCS-OAUTH-SETUP.md) | Setup do OAuth das minutas. |
 | [runbooks/platform-operator-bootstrap](runbooks/platform-operator-bootstrap.md) | Concessão/revogação de principal de plataforma. |
 | [architecture/security/threat-model-platform-operator](architecture/security/threat-model-platform-operator.md) | Modelo de ameaça da fronteira de plataforma. |
 | [acessos-teste-local](acessos-teste-local.md) | Credenciais e atalhos do ambiente local. |
+| [catalogo-protocolo](catalogo-protocolo.md) | Tipo de processo × assunto, o catálogo sugerido de demonstração e o que ele não faz. |
 
 ### Registro — não descrevem o presente
 
