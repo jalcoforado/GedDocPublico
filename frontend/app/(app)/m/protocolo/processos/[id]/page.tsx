@@ -58,6 +58,8 @@ import { Skeleton, SkeletonLine } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import {
   api,
+  anexoDownloadUrl,
+  anexoInlineUrl,
   comprovanteUrl,
   etiquetaDuplaUrl,
   etiquetaUnicaUrl,
@@ -90,6 +92,7 @@ const ACAO_INTENT: Record<string, "info" | "warning" | "success" | "neutral" | "
   ENCAMINHAMENTO: "warning",
   RECEBIMENTO: "success",
   ARQUIVAMENTO: "neutral",
+  DESPACHO: "info",
   CANCELAMENTO: "danger",
 };
 
@@ -146,6 +149,22 @@ function MovimentacaoCard({
             Despacho
           </div>
           <p className="whitespace-pre-wrap text-foreground">{m.despacho.despacho}</p>
+          {m.despacho.id_anexo ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mt-2"
+              onClick={() =>
+                onOpenViewer({
+                  title: "Despacho assinado",
+                  src: anexoInlineUrl(m.despacho!.id_anexo as number),
+                  downloadUrl: anexoDownloadUrl(m.despacho!.id_anexo as number),
+                })
+              }
+            >
+              <FileDown className="h-4 w-4" aria-hidden="true" /> Documento assinado
+            </Button>
+          ) : null}
         </div>
       )}
       {m.encaminhamento && (

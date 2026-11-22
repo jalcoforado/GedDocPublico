@@ -5,6 +5,7 @@ import { CheckCircle2, FileText, Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { RedigirDocumentoDialog } from "@/components/RedigirDocumentoDialog";
+import { RegistrarDespachoDialog } from "@/components/protocolo/RegistrarDespachoDialog";
 import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,8 @@ export function MinutasProcesso({ processo }: { processo: ProcessoDetail }) {
   const confirm = useConfirm();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editId, setEditId] = useState<number | undefined>(undefined);
+  // SI-62 — rascunho de despacho abre no diálogo próprio (assina com senha).
+  const [despachoId, setDespachoId] = useState<number | undefined>(undefined);
 
   const minutasQ = useQuery({
     queryKey: ["minutas", processo.id],
@@ -132,9 +135,28 @@ export function MinutasProcesso({ processo }: { processo: ProcessoDetail }) {
                   <Badge intent={STATUS_INTENT[m.status]}>{STATUS_LABEL[m.status]}</Badge>
                   <span>v{m.versao}</span>
                   {m.origem === "google" && <span>· Google Docs</span>}
+                  {m.finalidade === "despacho" && (
+                    <span>
+                      · Despacho{m.status === "rascunho" ? " — só você vê até assinar" : " assinado"}
+                    </span>
+                  )}
                 </div>
               </div>
-              {m.status === "rascunho" && (
+              {m.status === "rascunho" && m.finalidade === "despacho" && (
+                <AcoesDaLinha
+                  acoes={[
+                    { label: "Continuar despacho", icon: Pencil, onClick: () => setDespachoId(m.id) },
+                    {
+                      label: "Excluir",
+                      icon: Trash2,
+                      perigo: true,
+                      onClick: () => excluir(m.id),
+                      disabled: removeM.isPending,
+                    },
+                  ]}
+                />
+              )}
+              {m.status === "rascunho" && m.finalidade !== "despacho" && (
                 <AcoesDaLinha
                   acoes={[
                     { label: "Editar", icon: Pencil, onClick: () => abrirEdicao(m.id) },
@@ -159,6 +181,12 @@ export function MinutasProcesso({ processo }: { processo: ProcessoDetail }) {
         </ul>
       )}
 
+      <RegistrarDespachoDialog
+        open={despachoId !== undefined}
+        onClose={() => setDespachoId(undefined)}
+        processoId={processo.id}
+        minutaId={despachoId}
+      />
       <RedigirDocumentoDialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}

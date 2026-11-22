@@ -969,6 +969,7 @@ async def _load_movimentacoes(
                 id=d.id,
                 despacho=d.despacho,
                 usuario=users_by_id.get(d.id_usuario),
+                id_anexo=d.id_anexo,
             )
 
         enc_out: EncaminhamentoOut | None = None

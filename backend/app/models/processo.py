@@ -176,6 +176,9 @@ class Despacho(Base):
     ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     id_movimentacao: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # SI-62: PDF assinado do despacho avulso. Nulo nos despachos de
+    # encaminhar/recusar/cancelar/arquivar, que são só texto.
+    id_anexo: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class Encaminhamento(Base):

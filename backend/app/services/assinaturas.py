@@ -185,6 +185,186 @@ async def solicitar_assinatura(
     return solicitacao
 
 
+def _registrar_assinatura_com_senha(
+    aa: AssinaturaAnexo,
+    *,
+    usuario_id: int,
+    documento_hash: str,
+    hash_algoritmo: str,
+    ip: str | None,
+    user_agent: str | None,
+) -> None:
+    """Marca `aa` como assinada por senha, com as evidências de integridade.
+    Comum a `assinar` (pedido a outra pessoa) e `autoassinar_sem_commit`
+    (despacho, SI-62): as duas assinaturas têm de ser indistinguíveis na
+    validação pública."""
+    now = datetime.now()
+    aa.assinado = True
+    aa.dt_assinatura = now
+    aa.id_usuario = usuario_id
+    aa.status = "assinada"
+    aa.nivel_assinatura = "simples"
+    aa.metodo_autenticacao = "senha_bcrypt"
+    aa.documento_hash = documento_hash
+    aa.hash_algoritmo = hash_algoritmo
+    aa.documento_versao = aa.documento_versao or 1
+    # Token público de validação (PR2e): opaco, ~128 bits, não-enumerável.
+    aa.codigo_validacao = secrets.token_urlsafe(16)
+    aa.ip_assinatura = ip
+    aa.user_agent_assinatura = user_agent[:512] if user_agent else None
+    aa.evidencias = {
+        "ip": ip,
+        "user_agent": user_agent,
+        "metodo_autenticacao": "senha_bcrypt",
+        "documento_hash": documento_hash,
+        "hash_algoritmo": hash_algoritmo,
+        "dt_assinatura": now.isoformat(),
+    }
+
+
+async def conferir_senha_para_assinar(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    usuario_id: int,
+    senha: str,
+    chave_throttle: int,
+    entidade: str,
+    id_entidade: int,
+    id_processo: int,
+) -> None:
+    """Confere a senha com as MESMAS regras de `assinar`: bloqueio temporário
+    por excesso de tentativas, tentativa errada auditada (em commit próprio —
+    quem chama ainda não gravou nada) e recusa de credencial só-MD5.
+
+    `chave_throttle` separa os contadores de tentativa; no despacho (SI-62) é
+    o id da minuta com sinal trocado, para nunca coincidir com um anexo."""
+    if await throttle.esta_bloqueado(tenant_id, usuario_id, chave_throttle):
+        raise AssinaturaThrottleError(
+            "Muitas tentativas malsucedidas. Tente novamente em alguns minutos."
+        )
+    usuario = (
+        await db.execute(
+            select(Usuario).where(Usuario.id == usuario_id, Usuario.tenant_id == tenant_id)
+        )
+    ).scalar_one()
+    ok, needs_rehash = verify_password(
+        senha, bcrypt_hash=usuario.senha_bcrypt, md5_hash=usuario.senha
+    )
+    if not ok:
+        total = await throttle.registrar_falha(tenant_id, usuario_id, chave_throttle)
+        await audit_log(
+            db,
+            tenant_id=tenant_id,
+            id_usuario=usuario_id,
+            acao="assinatura.tentativa_falha",
+            entidade=entidade,
+            id_entidade=id_entidade,
+            payload={"id_processo": id_processo, "tentativa": total},
+        )
+        await db.commit()
+        raise AssinaturaError("Senha incorreta")
+    if needs_rehash:
+        raise AssinaturaCredencialLegadaError(
+            "Para assinar documentos, sua senha precisa ser atualizada para o "
+            "padrão atual de segurança. Saia do sistema e faça login novamente. "
+            "Se o bloqueio continuar, altere sua senha no perfil ou solicite suporte."
+        )
+    await throttle.limpar(tenant_id, usuario_id, chave_throttle)
+
+
+async def autoassinar_sem_commit(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    tenant_slug: str,
+    processo_id: int,
+    anexo_id: int,
+    usuario_id: int,
+    id_unidade: int,
+    ip: str | None = None,
+    user_agent: str | None = None,
+) -> AssinaturaAnexo:
+    """O autor assina o próprio documento (despacho, SI-62). A senha JÁ foi
+    conferida por `conferir_senha_para_assinar`. Grava a mesma trilha de uma
+    assinatura pedida — solicitação, destinatário e assinatura, todos já
+    realizados — para o documento aparecer como assinado e passar na
+    validação pública como qualquer outro. Sem commit."""
+    now = datetime.now()
+    solicitacao = SolicitacaoAssinatura(
+        tenant_id=tenant_id,
+        id_processo=processo_id,
+        id_solicitante=usuario_id,
+        id_usuario=usuario_id,
+        id_unidade_solicitante=id_unidade,
+        dt_inicio=now,
+        dt_fim=now,
+        realizada=True,
+        cancelada=False,
+        ativo=True,
+        excluido=False,
+    )
+    db.add(solicitacao)
+    await db.flush()
+    ua = UsuarioAssinatura(
+        tenant_id=tenant_id,
+        id_solicitacao_assinatura=solicitacao.id,
+        id_assinante=usuario_id,
+        id_tipo_assinatura=None,
+        id_unidade_trabalho=id_unidade,
+        ordem=1,
+        id_usuario=usuario_id,
+        ativo=True,
+        excluido=False,
+        realizada=True,
+        status="realizada",
+    )
+    db.add(ua)
+    await db.flush()
+
+    documento_hash, hash_algoritmo = await anexos_svc.hash_anexo(
+        db, anexo_id, tenant_id=tenant_id, tenant_slug=tenant_slug
+    )
+    aa = AssinaturaAnexo(
+        tenant_id=tenant_id,
+        id_usuario_assinatura=ua.id,
+        id_anexo=anexo_id,
+        id_processo=processo_id,
+        id_usuario=usuario_id,
+        ativo=True,
+        excluido=False,
+    )
+    _registrar_assinatura_com_senha(
+        aa,
+        usuario_id=usuario_id,
+        documento_hash=documento_hash,
+        hash_algoritmo=hash_algoritmo,
+        ip=ip,
+        user_agent=user_agent,
+    )
+    db.add(aa)
+    await db.flush()
+    aa.id_audit_log = await audit_log(
+        db,
+        tenant_id=tenant_id,
+        id_usuario=usuario_id,
+        acao="assinatura.assinada",
+        entidade="assinatura_anexo",
+        id_entidade=aa.id,
+        payload={
+            "id_processo": processo_id,
+            "id_anexo": anexo_id,
+            "id_usuario_assinatura": ua.id,
+            "documento_hash": documento_hash,
+            "hash_algoritmo": hash_algoritmo,
+            "nivel": "simples",
+            "metodo": "senha_bcrypt",
+            "origem": "despacho",
+        },
+    )
+    return aa
+
+
 async def assinar(
     db: AsyncSession,
     assinatura_anexo_id: int,
@@ -266,28 +446,14 @@ async def assinar(
         db, aa.id_anexo, tenant_id=tenant_id, tenant_slug=tenant_slug
     )
 
-    now = datetime.now()
-    aa.assinado = True
-    aa.dt_assinatura = now
-    aa.id_usuario = usuario_id
-    aa.status = "assinada"
-    aa.nivel_assinatura = "simples"
-    aa.metodo_autenticacao = "senha_bcrypt"
-    aa.documento_hash = documento_hash
-    aa.hash_algoritmo = hash_algoritmo
-    aa.documento_versao = aa.documento_versao or 1
-    # Token público de validação (PR2e): opaco, ~128 bits, não-enumerável.
-    aa.codigo_validacao = secrets.token_urlsafe(16)
-    aa.ip_assinatura = ip
-    aa.user_agent_assinatura = user_agent[:512] if user_agent else None
-    aa.evidencias = {
-        "ip": ip,
-        "user_agent": user_agent,
-        "metodo_autenticacao": "senha_bcrypt",
-        "documento_hash": documento_hash,
-        "hash_algoritmo": hash_algoritmo,
-        "dt_assinatura": now.isoformat(),
-    }
+    _registrar_assinatura_com_senha(
+        aa,
+        usuario_id=usuario_id,
+        documento_hash=documento_hash,
+        hash_algoritmo=hash_algoritmo,
+        ip=ip,
+        user_agent=user_agent,
+    )
 
     pendentes_user = (
         await db.execute(

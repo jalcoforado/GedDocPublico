@@ -10,7 +10,7 @@
   (`obter_minuta_autorizada` / `exigir_acesso_ao_processo`, SI-62) — ver
   `tests/test_guarda_minuta_sigilosa.py`.
 """
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +19,7 @@ from ..auth.perms import require_permission
 from ..database import get_db
 from ..models import Usuario
 from ..schemas.minuta import (
+    DespachoConcluidoOut,
     MinutaCreate,
     MinutaHistoricoListResponse,
     MinutaListItem,
@@ -29,8 +30,15 @@ from ..schemas.minuta import (
     TemplateDocumentoOut,
     TemplateDocumentoUpdate,
 )
+from ..services import despacho as despacho_svc
 from ..services import editor_imagens
 from ..services import minutas as svc
+from ..services.anexos import AnexoError
+from ..services.assinaturas import (
+    AssinaturaCredencialLegadaError,
+    AssinaturaError,
+    AssinaturaThrottleError,
+)
 from ..services.html_pdf import CSS_DOCUMENTO, CSS_PRE_VISUALIZACAO
 from ..services.placeholders import PLACEHOLDERS_DISPONIVEIS
 
@@ -196,7 +204,9 @@ async def list_minutas(
     await svc.exigir_acesso_ao_processo(
         db, tenant_id=tenant_id, processo_id=processo_id, usuario=usuario
     )
-    rows = await svc.listar_minutas(db, tenant_id=tenant_id, processo_id=processo_id)
+    rows = await svc.listar_minutas(
+        db, tenant_id=tenant_id, processo_id=processo_id, usuario_id=usuario.id
+    )
     return [MinutaListItem.model_validate(r) for r in rows]
 
 
@@ -307,6 +317,52 @@ async def finalizar_minuta(
         usuario_id=usuario.id,
     )
     return MinutaOut.model_validate(m)
+
+
+# ===================== Despacho sem encaminhar (SI-62) =====================
+
+
+@minutas_router.post(
+    "/minutas/{minuta_id}/concluir-despacho",
+    response_model=DespachoConcluidoOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def concluir_despacho(
+    minuta_id: int,
+    request: Request,
+    senha: str = Form(..., min_length=1),
+    arquivos: list[UploadFile] = File(default=[]),
+    usuario: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    tenant_slug: str = Depends(require_tenant_slug),
+    db: AsyncSession = Depends(get_db),
+) -> DespachoConcluidoOut:
+    """Conclui o rascunho de despacho: assina com a senha e registra no
+    processo sem mudar a unidade. Ver `services/despacho.py`."""
+    await svc.obter_minuta_autorizada(
+        db, tenant_id=tenant_id, minuta_id=minuta_id, usuario=usuario
+    )
+    try:
+        d = await despacho_svc.concluir_despacho(
+            db,
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            minuta_id=minuta_id,
+            usuario=usuario,
+            senha=senha,
+            arquivos=arquivos,
+            ip=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+    except AssinaturaThrottleError as e:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(e))
+    except AssinaturaCredencialLegadaError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except (AssinaturaError, AnexoError) as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return DespachoConcluidoOut(
+        id=d.id, id_movimentacao=d.id_movimentacao, id_anexo=d.id_anexo
+    )
 
 
 # ======================== Google Docs (PR-F) ========================

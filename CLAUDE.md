@@ -177,7 +177,8 @@ São **quatro**, com papéis distintos:
 ```bash
 # 1. Pré-requisitos globais — roda a cada deploy, idempotente. Garante
 #    utils.sistema/nivel, o tenant+admin padrão, o segredo JWT e o catálogo
-#    protocolos.acao (ABERTURA/ENCAMINHAMENTO/RECEBIMENTO). Sem as ações não
+#    protocolos.acao (ABERTURA/ENCAMINHAMENTO/RECEBIMENTO/ARQUIVAMENTO e, desde
+#    o SI-62, DESPACHO). Sem as ações não
 #    se abre nem tramita processo. Garante também o catálogo de módulos e a
 #    CONTRATAÇÃO INICIAL do tenant — só quando ele não tem nenhuma linha em
 #    tenant_modulo, para não ressuscitar descontratação deliberada do admin.

@@ -411,6 +411,9 @@ class DespachoOut(BaseModel):
     id: int
     despacho: str
     usuario: str | None
+    # SI-62: PDF assinado do despacho avulso; nulo nos despachos que vêm
+    # junto de encaminhar, recusar, cancelar ou arquivar.
+    id_anexo: int | None = None
 
 
 class PermanenciaNo(BaseModel):

@@ -1,7 +1,7 @@
 # Relatórios do Protocolo
 
 > **Status:** vivo · **Autoridade sobre:** o que cada número de `/m/protocolo/relatorios` mede, quem vê, e as limitações conhecidas.
-> **Última verificação:** 2026-11-14 (Panorama no Painel; Relatórios como índice).
+> **Última verificação:** 2026-11-22 (SI-62: despacho sem encaminhar conta como movimentação).
 > Índice: [docs/INDEX.md](INDEX.md) · precedência: código > `CLAUDE.md` > este doc.
 
 Fonte de verdade executável: `backend/app/services/relatorios_comum.py` (as
@@ -132,8 +132,12 @@ entram: processo antigo pode ser de um serviço que saiu do catálogo.
   envio ainda não recebido nem desfeito; *em andamento* = o resto. São as
   mesmas condições das caixas de trabalho. O campo `processo.ativo` **não é
   usado**: nenhuma parte do sistema o escreve.
-- **Parado:** não arquivado e **sem nenhuma movimentação** (envio, recebimento,
-  despacho, assinatura…) há N dias — padrão 15, escolhido na tela.
+- **Parado:** não arquivado e **sem nenhuma movimentação** há N dias — padrão
+  15, escolhido na tela. Conta como movimentação o que vira linha na linha do
+  tempo: abertura, envio, recebimento e, desde o SI-62 (2026-11-22), o
+  **despacho sem encaminhar**. "Analisei, aguardando parecer" tira o processo
+  de Parados: é ato registrado. Assinar, anexar e redigir documento **não**
+  contam — não criam movimentação.
 - **Unidade, em três sentidos:** *envolvida* (dona ou onde está agora —
   padrão), *dona* (a unidade proprietária escolhida na abertura) e *onde está
   agora*. "Por onde passou" saiu do filtro em 2026-11-12. Na **tramitação pela
