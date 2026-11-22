@@ -855,10 +855,25 @@ async def get_processo_detail(
     pode_receber, pode_cancelar = await _competencia_no_pendente(
         db, processo_id, tenant_id=tenant_id, usuario_id=usuario_id)
 
+    # SI-61 — o último recebimento pode ser desfeito por quem consulta?
+    pode_cancelar_receb: bool | None = None
+    motivo_cancelar_receb: str | None = None
+    if usuario_id is not None:
+        from .acoes_processo import situacao_cancelar_recebimento
+        from .permissoes import load_permissions
+
+        perms = await load_permissions(db, usuario_id, tenant_id=tenant_id)
+        pode_cancelar_receb, motivo_cancelar_receb = await situacao_cancelar_recebimento(
+            db, processo_id, tenant_id=tenant_id, usuario_id=usuario_id,
+            is_super_usuario=perms.is_super_usuario,
+        )
+
     return ProcessoDetail(
         **base_item.model_dump(),
         pode_receber_encaminhamento=pode_receber,
         pode_cancelar_encaminhamento=pode_cancelar,
+        pode_cancelar_recebimento=pode_cancelar_receb,
+        motivo_cancelar_recebimento=motivo_cancelar_receb,
         id_assunto=p.id_assunto,
         id_tipo_processo=row.id_tipo_processo,
         id_manifestante=p.id_manifestante,

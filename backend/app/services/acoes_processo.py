@@ -9,6 +9,8 @@ Espelha o fluxo de aprimora/app/models/Processo.php:
   cria nova movimentação, e SÓ ENTÃO atualiza id_local_atual.
 - Cancelar (sem flag dedicada — usa registro lógico): só permite cancelar
   encaminhamento ainda não recebido. Mantém histórico (não deleta).
+- Cancelar recebimento (flag CANCELAMENTO_RECEBIMENTO, SI-61): desfaz o
+  último ato do processo quando ele foi um recebimento por engano.
 - Arquivar (flag ARQUIVAMENTO) / desarquivar (flag DESARQUIVAMENTO, SI-60):
   "está arquivado" é ter movimentação de arquivamento ATIVA
   (`processos.condicao_arquivado`); desarquivar a desativa, sem apagá-la.
@@ -36,6 +38,7 @@ from ..models import (
 from ..schemas.processo import (
     ArquivarRequest,
     CancelarEncaminhamentoRequest,
+    CancelarRecebimentoRequest,
     DesarquivarRequest,
     RecusarEncaminhamentoRequest,
     EncaminharRequest,
@@ -1088,3 +1091,426 @@ async def desarquivar(
     await db.commit()
     await db.refresh(movimentacao)
     return movimentacao
+
+
+# ---------------------------------------------------------------------------
+# SI-61 — cancelar recebimento feito por engano (RF-02)
+# ---------------------------------------------------------------------------
+
+# Registros de auditoria que NÃO são ato sobre o processo: tentativa que
+# falhou e conferência pública de assinatura (leitura). Sem esta lista,
+# alguém validar um documento no portal travaria o cancelamento.
+_AUDITORIA_QUE_NAO_E_ATO = frozenset({
+    "assinatura.tentativa_falha",
+    "assinatura.validada",
+    "assinatura.validada_publica",
+    "assinatura.validacao_publica_negada",
+})
+
+
+def _descreve_ato(acao: str) -> str:
+    if acao.startswith("minuta."):
+        return "documento redigido"
+    if acao.startswith("assinatura."):
+        return "assinatura"
+    if acao.startswith("processo.responsavel_"):
+        return "designação de responsável"
+    if acao in ("processo.apensado", "processo.desapensado"):
+        return "apensamento"
+    if acao == "processo.classificado_sigilo":
+        return "mudança de sigilo"
+    if acao == "processo.anexo_desentranhado":
+        return "desentranhamento de documento"
+    if acao.startswith("processo.volume_"):
+        return "mudança de volume"
+    return f"outro ato ({acao})"
+
+
+async def _ultimo_recebimento(
+    db: AsyncSession, processo_id: int, tenant_id: int, *, travar: bool = False
+) -> tuple[Encaminhamento, Movimentacao] | None:
+    """O encaminhamento recebido mais recente e a movimentação do recebimento
+    dele, ainda ativa. `None` se o processo nunca foi recebido, ou se o último
+    recebimento já foi cancelado e não houve outro.
+
+    `travar` põe `FOR UPDATE` no encaminhamento: dois cliques em "cancelar
+    recebimento" ficam em fila, e o segundo já encontra `recebido=false`.
+    """
+    stmt = (
+        select(Encaminhamento)
+        .where(
+            Encaminhamento.id_processo == processo_id,
+            Encaminhamento.tenant_id == tenant_id,
+            Encaminhamento.excluido.is_(False),
+            Encaminhamento.recebido.is_(True),
+            Encaminhamento.cancelado.is_(False),
+        )
+        .order_by(Encaminhamento.id.desc())
+        .limit(1)
+    )
+    if travar:
+        stmt = stmt.with_for_update()
+    enc = (await db.execute(stmt)).scalar_one_or_none()
+    if enc is None:
+        return None
+    mov = (
+        await db.execute(
+            select(Movimentacao)
+            .join(Acao, Acao.id == Movimentacao.id_acao)
+            .where(
+                Movimentacao.id_processo == processo_id,
+                Movimentacao.tenant_id == tenant_id,
+                Movimentacao.id_encaminhamento == enc.id,
+                Movimentacao.excluido.is_(False),
+                Movimentacao.ativo.is_(True),
+                Acao.flag == "RECEBIMENTO",
+            )
+            .order_by(Movimentacao.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if mov is None:
+        return None
+    return enc, mov
+
+
+async def motivo_bloqueio_cancelar_recebimento(
+    db: AsyncSession,
+    processo_id: int,
+    tenant_id: int,
+    receb: Movimentacao,
+    enc: Encaminhamento,
+) -> str | None:
+    """Por que este recebimento NÃO pode mais ser cancelado — ou `None`.
+
+    A regra do RF-02: só se nada aconteceu depois do recebimento. "Nada" é
+    conferido em quatro lugares, porque nenhum sozinho enxerga tudo:
+
+    1. **Movimentação posterior** — encaminhamento, arquivamento, despacho
+       avulso (RF-03) e qualquer ato futuro que vire movimentação.
+    2. **Despacho e documento anexado** — não têm data nem auditoria, mas se
+       ligam à movimentação corrente do processo (`anexos.py` usa
+       `id_ultima_movimentacao`). Ligado ao recebimento ou depois dele é
+       posterior. Comparar por `id`, e não por relógio, é o que deixa isto
+       imune a fuso.
+    3. **Trilha de auditoria** — documento redigido, assinatura, responsável,
+       apensamento, sigilo, volume. Também por `id`, contra o registro do
+       próprio recebimento.
+    4. **Workflow** — o recebimento pode ter disparado uma transição, e
+       desfazê-lo deixaria o fluxo num estado que o processo não alcançou.
+
+    O motivo vira a mensagem do 400 e o aviso ao lado do botão.
+    """
+    from ..models import AnexoProcesso, AuditLog, WorkflowInstance, WorkflowTransicaoLog
+
+    depois = (
+        await db.execute(
+            select(Acao.acao)
+            .join(Movimentacao, Movimentacao.id_acao == Acao.id)
+            .where(
+                Movimentacao.id_processo == processo_id,
+                Movimentacao.tenant_id == tenant_id,
+                Movimentacao.id > receb.id,
+                Movimentacao.excluido.is_(False),
+                Movimentacao.ativo.is_(True),
+            )
+            .order_by(Movimentacao.id)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if depois is not None:
+        return (
+            f"Depois do recebimento o processo já teve outra movimentação "
+            f"({depois.lower()}). O recebimento não pode mais ser cancelado."
+        )
+
+    despacho = (
+        await db.execute(
+            select(Despacho.id).where(
+                Despacho.id_processo == processo_id,
+                Despacho.tenant_id == tenant_id,
+                Despacho.excluido.is_(False),
+                Despacho.id_movimentacao >= receb.id,
+            ).limit(1)
+        )
+    ).scalar_one_or_none()
+    if despacho is not None:
+        return "Depois do recebimento o processo já recebeu despacho. O recebimento não pode mais ser cancelado."
+
+    anexo = (
+        await db.execute(
+            select(AnexoProcesso.id).where(
+                AnexoProcesso.id_processo == processo_id,
+                AnexoProcesso.tenant_id == tenant_id,
+                AnexoProcesso.excluido.is_(False),
+                AnexoProcesso.id_movimentacao >= receb.id,
+            ).limit(1)
+        )
+    ).scalar_one_or_none()
+    if anexo is not None:
+        return "Depois do recebimento o processo já recebeu documento. O recebimento não pode mais ser cancelado."
+
+    do_processo = (
+        (AuditLog.entidade == "processo") & (AuditLog.id_entidade == processo_id)
+    ) | (AuditLog.payload["id_processo"].astext == str(processo_id))
+    base = (
+        await db.execute(
+            select(AuditLog.id)
+            .where(
+                AuditLog.tenant_id == tenant_id,
+                AuditLog.acao == "processo.recebido",
+                AuditLog.entidade == "processo",
+                AuditLog.id_entidade == processo_id,
+                AuditLog.payload["id_encaminhamento"].astext == str(enc.id),
+            )
+            .order_by(AuditLog.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    posterior = (
+        AuditLog.id > base
+        if base is not None
+        # Recebimento sem registro na trilha (anterior a ela): cai no relógio.
+        else AuditLog.criado_em >= receb.data_hora_movimentacao
+    )
+    ato = (
+        await db.execute(
+            select(AuditLog.acao)
+            .where(
+                AuditLog.tenant_id == tenant_id,
+                do_processo,
+                posterior,
+                AuditLog.acao.not_in(_AUDITORIA_QUE_NAO_E_ATO),
+            )
+            .order_by(AuditLog.id)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if ato is not None:
+        return (
+            f"Depois do recebimento o processo já teve {_descreve_ato(ato)}. "
+            "O recebimento não pode mais ser cancelado."
+        )
+
+    transicao = (
+        await db.execute(
+            select(WorkflowTransicaoLog.id)
+            .join(
+                WorkflowInstance,
+                WorkflowInstance.id == WorkflowTransicaoLog.id_workflow_instance,
+            )
+            .where(
+                WorkflowInstance.id_processo == processo_id,
+                WorkflowInstance.tenant_id == tenant_id,
+                WorkflowTransicaoLog.executada_em >= receb.data_hora_movimentacao,
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if transicao is not None:
+        return (
+            "O fluxo do processo já avançou com este recebimento. O recebimento "
+            "não pode mais ser cancelado."
+        )
+    return None
+
+
+async def situacao_cancelar_recebimento(
+    db: AsyncSession,
+    processo_id: int,
+    *,
+    tenant_id: int,
+    usuario_id: int,
+    is_super_usuario: bool,
+) -> tuple[bool | None, str | None]:
+    """O que o detalhe mostra a quem consulta: `(None, None)` se não há
+    recebimento a desfazer; `(False, motivo)` se há e está bloqueado; `(True,
+    None)` se pode. A permissão específica fica de fora — a tela usa `can`."""
+    achado = await _ultimo_recebimento(db, processo_id, tenant_id)
+    if achado is None:
+        return None, None
+    enc, receb = achado
+    if await _esta_arquivado(db, processo_id, tenant_id):
+        return None, None
+    if not is_super_usuario and not await _lotado_em(
+        db, id_usuario=usuario_id, id_unidade=enc.id_unidade_destino, tenant_id=tenant_id
+    ):
+        return None, None
+    motivo = await motivo_bloqueio_cancelar_recebimento(
+        db, processo_id, tenant_id, receb, enc)
+    return (motivo is None), motivo
+
+
+async def cancelar_recebimento(
+    db: AsyncSession,
+    processo_id: int,
+    payload: CancelarRecebimentoRequest,
+    *,
+    tenant_id: int,
+    usuario_id: int,
+    is_super_usuario: bool = False,
+) -> Encaminhamento:
+    """Desfaz um "Receber" clicado por engano. SI-61, RF-02 do documento
+    "GEDPub – Requisitos de evolução v1.0".
+
+    Diferente de recusar: recusar é dizer "não é meu" ANTES de receber.
+    Cancelar o recebimento devolve o processo a esse ponto — em trânsito,
+    aguardando a unidade de destino —, e dali ela pode recusar, e o processo
+    volta para quem enviou.
+
+    O que muda e o que fica
+    -----------------------
+    - o encaminhamento volta a pendente (`recebido=false`,
+      `data_hora_recebimento=None`). É o que todo predicado de "em trânsito"
+      lê: caixas de entrada e saída, painel, relatórios;
+    - a movimentação do recebimento passa a `ativo=false`, sem ser apagada:
+      fica na linha do tempo, com quem recebeu e quando. A trilha de
+      auditoria guarda também a data original;
+    - entra uma movimentação nova, `CANCELAMENTO_RECEBIMENTO`, com a
+      justificativa como despacho;
+    - `id_local_atual` volta para a origem, que é onde o processo estava
+      antes do recebimento (só o recebimento o move).
+
+    Quem pode
+    ---------
+    A transação `processo_cancelar_recebimento` (no router) E ser lotado na
+    unidade que recebeu: o engano é dela. Super-usuário passa, como em todo
+    gate.
+
+    Bloqueios: qualquer ato depois do recebimento
+    (`motivo_bloqueio_cancelar_recebimento`) e processo arquivado.
+    """
+    processo = await _get_processo(db, processo_id, tenant_id)
+
+    achado = await _ultimo_recebimento(db, processo_id, tenant_id, travar=True)
+    if achado is None:
+        raise AcaoError("Este processo não tem recebimento para cancelar")
+    enc, receb = achado
+
+    if await _esta_arquivado(db, processo_id, tenant_id):
+        raise AcaoError(
+            "Processo arquivado não pode ter o recebimento cancelado. Desarquive-o antes."
+        )
+
+    if not is_super_usuario and not await _lotado_em(
+        db, id_usuario=usuario_id, id_unidade=enc.id_unidade_destino, tenant_id=tenant_id
+    ):
+        nome = (
+            await db.execute(
+                select(UnidadeTrabalho.unidade_trabalho).where(
+                    UnidadeTrabalho.id == enc.id_unidade_destino
+                )
+            )
+        ).scalar_one_or_none()
+        raise NaoLotadoNoDestinoError(
+            f"Só quem é lotado na unidade que recebeu ({nome or 'destino'}) pode "
+            "cancelar este recebimento."
+        )
+
+    motivo = await motivo_bloqueio_cancelar_recebimento(
+        db, processo_id, tenant_id, receb, enc)
+    if motivo:
+        raise AcaoError(motivo)
+
+    acao = await _get_acao(db, "CANCELAMENTO_RECEBIMENTO")
+    now = datetime.now()
+    recebido_em = enc.data_hora_recebimento
+
+    enc.recebido = False
+    enc.data_hora_recebimento = None
+    receb.ativo = False
+
+    movimentacao = Movimentacao(
+        tenant_id=tenant_id,
+        id_processo=processo_id,
+        id_unidade_responsavel=enc.id_unidade_destino,
+        id_acao=acao.id,
+        id_usuario=usuario_id,
+        data_hora_movimentacao=now,
+        ativo=True,
+        excluido=False,
+    )
+    db.add(movimentacao)
+    await db.flush()
+
+    db.add(
+        Despacho(
+            tenant_id=tenant_id,
+            id_processo=processo_id,
+            despacho=payload.justificativa,
+            id_usuario=usuario_id,
+            id_movimentacao=movimentacao.id,
+            ativo=True,
+            excluido=False,
+        )
+    )
+
+    if enc.id_unidade_origem is not None:
+        processo.id_local_atual = enc.id_unidade_origem
+    processo.id_ultima_movimentacao = movimentacao.id
+
+    from .audit import log as audit_log
+
+    await audit_log(
+        db,
+        tenant_id=tenant_id,
+        id_usuario=usuario_id,
+        acao="processo.recebimento_cancelado",
+        entidade="processo",
+        id_entidade=processo_id,
+        payload={
+            "id_encaminhamento": enc.id,
+            "id_movimentacao_recebimento": receb.id,
+            "id_movimentacao": movimentacao.id,
+            "recebido_em": recebido_em.isoformat() if recebido_em else None,
+            "id_unidade_origem": enc.id_unidade_origem,
+            "id_unidade_destino": enc.id_unidade_destino,
+            "justificativa": payload.justificativa,
+        },
+    )
+
+    await db.commit()
+    await db.refresh(enc)
+    return enc
+
+
+async def avisar_cancelamento_recebimento(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    enc: Encaminhamento,
+    numero_processo: str | None,
+    usuario_id: int,
+    justificativa: str,
+) -> None:
+    """Avisa quem enviou que o recebimento foi desfeito e o processo voltou a
+    aguardar a unidade de destino. Mesmo contrato de `avisar_recusa`: roda
+    DEPOIS do commit e nunca desfaz o cancelamento."""
+    import logging
+
+    from . import notificacoes
+    from .notificacoes import Destinatario
+
+    if enc.id_usuario == usuario_id:
+        return  # quem cancelou é quem enviou: não há o que avisar
+    try:
+        await notificacoes.enviar(
+            db,
+            tenant_id=tenant_id,
+            destinatarios=[Destinatario(id_usuario=enc.id_usuario)],
+            canais=("in_app",),
+            tipo="recebimento_cancelado",
+            titulo="Recebimento cancelado",
+            mensagem=(
+                f"O recebimento do processo {numero_processo or f'#{enc.id_processo}'} "
+                f"foi cancelado pela unidade de destino, e ele voltou a aguardar "
+                f"recebimento: {justificativa}"
+            )[:500],
+            link_url=f"/m/protocolo/processos/{enc.id_processo}",
+            payload={"id_processo": enc.id_processo, "id_encaminhamento": enc.id},
+        )
+    except Exception:  # noqa: BLE001 — notificação é cortesia
+        await db.rollback()
+        logging.getLogger(__name__).exception(
+            "falha ao notificar cancelamento de recebimento do encaminhamento %s", enc.id
+        )

@@ -69,6 +69,8 @@ MODULO_TRANSACOES: dict[str, tuple[str, ...]] = {
         # SI-60 (0139): reabrir processo encerrado é poder à parte do
         # `processo`/`atualizar` de quem tramita.
         "processo_desarquivar",
+        # SI-61 (0140): desfazer recebimento por engano, idem.
+        "processo_cancelar_recebimento",
     ),
     "pagamentos": (
         "pagamento_cadastro", "pagamento_solicitar", "pagamento_autorizar",
@@ -485,6 +487,11 @@ async def seed(db: AsyncSession) -> dict:
         # contar o tempo dele de novo.
         ("DESARQUIVAMENTO", "Desarquivamento", "aberto", "recebido",
          "Processo desarquivado"),
+        # SI-61 — `encaminhado`: desfeito o recebimento, o processo volta a
+        # estar EM TRÂNSITO, aguardando a unidade de destino, e
+        # `services/permanencia.py` conta esse trecho como espera.
+        ("CANCELAMENTO_RECEBIMENTO", "Cancelamento de recebimento", "aberto",
+         "encaminhado", "Recebimento cancelado"),
     ]:
         existe = (
             await db.execute(
