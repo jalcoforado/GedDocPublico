@@ -92,6 +92,23 @@ class RecusarEncaminhamentoRequest(BaseModel):
         return v
 
 
+class DesarquivarRequest(BaseModel):
+    """SI-60 (RF-01) — reabrir processo arquivado. Justificativa obrigatória:
+    é ela que o histórico mostra ao lado do arquivamento que foi desfeito."""
+
+    justificativa: str = Field(min_length=5, max_length=2000)
+
+    @field_validator("justificativa")
+    @classmethod
+    def _justificativa_nao_e_so_espaco(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 5:
+            raise ValueError(
+                "Informe a justificativa do desarquivamento (mínimo de 5 caracteres)."
+            )
+        return v
+
+
 class CancelarEncaminhamentoRequest(BaseModel):
     despacho: str | None = Field(default=None, max_length=2000)
     override_motivo: str | None = Field(default=None, max_length=500)
@@ -130,6 +147,11 @@ class ProcessoListItem(BaseModel):
     )
     prazo_caixa_vence_em: datetime | None = None
     prazo_caixa_origem: Literal["encaminhamento", "servico"] | None = None
+    # SI-60 — há arquivamento EM VIGOR (`processos.condicao_arquivado`). A tela
+    # decidia isso procurando "ARQUIVAMENTO" na linha do tempo, o que deixou de
+    # servir quando o processo passou a poder ser desarquivado: o arquivamento
+    # antigo continua no histórico.
+    arquivado: bool = False
     ativo: bool
     publico: bool
     nivel_sigilo: str = "ostensivo"

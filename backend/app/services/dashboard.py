@@ -120,7 +120,7 @@ async def _counts_intervalo(
         )
     ).scalar_one()
 
-    # Arquivados (via Movimentacao com id_arquivamento NOT NULL).
+    # Arquivados (via Movimentacao ATIVA com id_arquivamento NOT NULL).
     # Movimentacao filtra por janela; Processo aplica filtros do gestor.
     arq_stmt = (
         select(func.count(Movimentacao.id))
@@ -129,6 +129,9 @@ async def _counts_intervalo(
         .where(
             Movimentacao.tenant_id == tenant_id,
             Movimentacao.id_arquivamento.is_not(None),
+            # SI-60: arquivamento desfeito por desarquivamento fica com
+            # `ativo=false` e não é mais conclusão de ninguém.
+            Movimentacao.ativo.is_(True),
             Movimentacao.data_hora_movimentacao >= desde,
             Movimentacao.data_hora_movimentacao < ate,
             Processo.excluido.is_(False),
@@ -158,6 +161,9 @@ async def _counts_intervalo(
         .where(
             Movimentacao.tenant_id == tenant_id,
             Movimentacao.id_arquivamento.is_not(None),
+            # SI-60: arquivamento desfeito por desarquivamento fica com
+            # `ativo=false` e não é mais conclusão de ninguém.
+            Movimentacao.ativo.is_(True),
             Movimentacao.data_hora_movimentacao >= desde,
             Movimentacao.data_hora_movimentacao < ate,
             Processo.excluido.is_(False),
@@ -529,7 +535,9 @@ async def _prazos_kpis(
         f"""
         WITH em_andamento AS (
             SELECT p.id,
-                   p.data_hora_abertura,
+                   -- SI-60: o prazo conta do último desarquivamento, se houve
+                   -- (espelho de `prazos.inicio_do_prazo`).
+                   COALESCE(p.data_reinicio_prazo, p.data_hora_abertura) AS inicio_prazo,
                    p.prazo_servico_dias_snapshot AS snap
             FROM protocolos.processo p
             WHERE p.tenant_id = :tenant_id
@@ -547,7 +555,7 @@ async def _prazos_kpis(
         ),
         com_prazo AS (
             SELECT id,
-                   data_hora_abertura + (snap * INTERVAL '1 day') AS prazo_previsto,
+                   inicio_prazo + (snap * INTERVAL '1 day') AS prazo_previsto,
                    GREATEST(1, CEIL(snap * 0.2)) AS limiar
             FROM em_andamento
             WHERE snap IS NOT NULL
@@ -593,7 +601,7 @@ async def _prazos_kpis(
         ),
         concluidos AS (
             SELECT p.id,
-                   p.data_hora_abertura,
+                   COALESCE(p.data_reinicio_prazo, p.data_hora_abertura) AS inicio_prazo,
                    p.prazo_servico_dias_snapshot AS snap,
                    ua.data_conclusao
             FROM ultimo_arquiv ua
@@ -605,24 +613,24 @@ async def _prazos_kpis(
         SELECT
             COUNT(*) FILTER (
                 WHERE snap IS NOT NULL
-                  AND data_conclusao <= data_hora_abertura + (snap * INTERVAL '1 day')
+                  AND data_conclusao <= inicio_prazo + (snap * INTERVAL '1 day')
             ) AS concluido_no_prazo,
             COUNT(*) FILTER (
                 WHERE snap IS NOT NULL
-                  AND data_conclusao >  data_hora_abertura + (snap * INTERVAL '1 day')
+                  AND data_conclusao >  inicio_prazo + (snap * INTERVAL '1 day')
             ) AS concluido_atrasado,
             AVG(
                 EXTRACT(
                     EPOCH FROM (data_conclusao
-                                - (data_hora_abertura + (snap * INTERVAL '1 day')))
+                                - (inicio_prazo + (snap * INTERVAL '1 day')))
                 ) / 86400.0
             ) FILTER (
                 WHERE snap IS NOT NULL
-                  AND data_conclusao >  data_hora_abertura + (snap * INTERVAL '1 day')
+                  AND data_conclusao >  inicio_prazo + (snap * INTERVAL '1 day')
             ) AS atraso_medio_concluidos,
             COUNT(*) FILTER (
                 WHERE snap IS NOT NULL
-                  AND data_conclusao >  data_hora_abertura + (snap * INTERVAL '1 day')
+                  AND data_conclusao >  inicio_prazo + (snap * INTERVAL '1 day')
             ) AS qtd_concluido_atrasado_for_avg
         FROM concluidos;
         """
@@ -777,7 +785,7 @@ async def _breakdown_servico(
                         AND mv.ativo = true
                         AND mv.id_arquivamento IS NOT NULL
                   )
-                  AND NOW() > pp.data_hora_abertura
+                  AND NOW() > COALESCE(pp.data_reinicio_prazo, pp.data_hora_abertura)
                               + (pp.prazo_servico_dias_snapshot * INTERVAL '1 day')
                   {pp_id_unidade_clause}
             ) AS atrasados

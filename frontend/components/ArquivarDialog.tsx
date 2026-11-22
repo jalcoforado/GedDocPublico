@@ -14,13 +14,12 @@ import { api, type ProcessoDetail } from "@/lib/api";
 /**
  * Arquivamento do processo (F4).
  *
- * Por que o diálogo avisa que é definitivo
- * ----------------------------------------
- * Não há desarquivar. Não por esquecimento: os seis leitores do dashboard
- * filtram por `id_arquivamento IS NOT NULL` **sem** olhar
- * `movimentacao.excluido`, então desfazer por soft-delete não desfaria nada nas
- * contagens. Enquanto essa decisão não for tomada no backend, arquivar é de
- * mão única — e a tela tem de dizer isso antes, não depois.
+ * O que o diálogo avisa
+ * ---------------------
+ * Arquivar encerra o processo, mas desde o SI-60 não é mais de mão única:
+ * quem tem a permissão de desarquivar pode reabri-lo (`DesarquivarDialog`).
+ * A tela diz isso antes, para que ninguém deixe de arquivar por medo de não
+ * ter volta — nem arquive achando que qualquer um desfaz.
  *
  * O endereçamento físico fica recolhido
  * -------------------------------------
@@ -99,7 +98,7 @@ export function ArquivarDialog({
       open={open}
       onClose={fechar}
       title={processo.numero_processo ? `Arquivar processo ${processo.numero_processo}` : "Arquivar processo"}
-      description="Encerra o processo. Esta ação não pode ser desfeita pelo sistema."
+      description="Encerra o processo. Depois, só quem tem permissão de desarquivar pode reabri-lo."
       footer={
         <>
           <Button variant="ghost" onClick={fechar}>

@@ -46,7 +46,7 @@ from ..schemas.cidadao import (
     ProcessoCidadaoListItem,
 )
 from .audit import log as audit_log
-from .prazos import calcular_prazo, status_cidadao
+from .prazos import calcular_prazo, inicio_do_prazo, status_cidadao
 
 logger = logging.getLogger("cidadao_processos")
 
@@ -257,7 +257,7 @@ async def get_meu_detail(
         )
     ).scalar_one_or_none()
     calc = calcular_prazo(
-        data_abertura=p.data_hora_abertura,
+        data_abertura=inicio_do_prazo(p.data_hora_abertura, p.data_reinicio_prazo),
         prazo_snapshot_dias=p.prazo_servico_dias_snapshot,
         data_conclusao=data_conclusao,
         now=datetime.now(),

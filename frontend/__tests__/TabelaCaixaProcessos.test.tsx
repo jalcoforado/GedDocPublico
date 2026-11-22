@@ -30,6 +30,7 @@ function item(id: number, extra: Partial<ProcessoListItem> = {}): ProcessoListIt
     situacao: "protocolado",
     data_hora_abertura: haDias(60),
     parado_desde: haDias(1),
+    arquivado: false,
     ativo: true,
     publico: true,
     nivel_sigilo: "ostensivo",

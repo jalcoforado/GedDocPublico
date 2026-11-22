@@ -57,7 +57,7 @@ from ..schemas.processo import (
 from . import cota_anexacao
 from .permanencia import No as NoDaLinha
 from .permanencia import calcular as calcular_permanencia
-from .prazos import calcular_prazo, prazo_da_caixa
+from .prazos import calcular_prazo, inicio_do_prazo, prazo_da_caixa
 
 
 # "Tempo na caixa": desde a última movimentação, ou desde a abertura quando o
@@ -122,9 +122,11 @@ def _base_select(tenant_id: int, *, usuario_id: int | None = None):
             favorito_expr,
             _PARADO_DESDE.label("parado_desde"),
             _PRAZO_ENCAMINHAMENTO.label("prazo_encaminhamento"),
-            # Arquivado = a última movimentação é um arquivamento. É o mesmo
-            # critério de `_predicado_caixa`, lido do JOIN que já existe.
-            func.coalesce(_UltimaMov.id_arquivamento.is_not(None), False).label("arquivado"),
+            # Arquivado = há arquivamento EM VIGOR, o mesmo critério de
+            # `_predicado_caixa`. Até o SI-60 isto lia "a última movimentação é
+            # um arquivamento", que discordava das caixas assim que qualquer
+            # ato entrasse depois do arquivamento.
+            condicao_arquivado(tenant_id).label("arquivado"),
         )
         .join(Assunto, Assunto.id == Processo.id_assunto)
         .join(TipoProcesso, TipoProcesso.id == Assunto.id_tipo_processo, isouter=True)
@@ -234,13 +236,18 @@ def condicao_em_transito(tenant_id: int):
 
 
 def condicao_arquivado(tenant_id: int):
-    """Condição sobre `Processo`: foi arquivado.
+    """Condição sobre `Processo`: está arquivado AGORA.
 
-    `Movimentacao.id_arquivamento IS NOT NULL`, o critério de
+    Há uma `Movimentacao` de arquivamento ATIVA — o critério de
     `acoes_processo.arquivar` e do dashboard. `Processo.ativo` não serve:
-    nenhum caminho o escreve. Caixas de trabalho e relatórios leem daqui —
-    duas cópias divergiriam, e o relatório contaria arquivados que a caixa
-    não mostra.
+    nenhum caminho o escreve. Caixas de trabalho, lista e relatórios leem
+    daqui — duas cópias divergiriam, e o relatório contaria arquivados que a
+    caixa não mostra.
+
+    Por que `ativo`: desde o SI-60 o processo pode ser desarquivado, e o
+    desarquivamento DESATIVA a movimentação do arquivamento em vez de
+    excluí-la. Ela continua na linha do tempo (que não filtra `ativo`), e
+    deixa de contar como encerramento em todo leitor que filtra.
     """
     return (
         select(Movimentacao.id)
@@ -249,6 +256,7 @@ def condicao_arquivado(tenant_id: int):
             Movimentacao.tenant_id == tenant_id,
             Movimentacao.id_arquivamento.is_not(None),
             Movimentacao.excluido.is_(False),
+            Movimentacao.ativo.is_(True),
         )
         .exists()
     )
@@ -277,8 +285,8 @@ def _predicado_caixa(
       `id_local_atual` só muda no recebimento (`acoes_processo.receber`), então
       é o encaminhamento, e não o local, que diz que o processo está em
       trânsito.
-    - ARQUIVADO é `Movimentacao.id_arquivamento IS NOT NULL`, o critério de
-      `acoes_processo.arquivar` e do dashboard. `Processo.ativo` não serve:
+    - ARQUIVADO é `condicao_arquivado`: movimentação de arquivamento ATIVA
+      (o desarquivamento do SI-60 a desativa). `Processo.ativo` não serve:
       nenhum caminho o escreve.
     """
     pendente = condicao_encaminhamento_pendente(tenant_id)
@@ -437,6 +445,7 @@ async def painel_unidade(
             select(
                 Processo.id,
                 Processo.data_hora_abertura,
+                Processo.data_reinicio_prazo,
                 Processo.prazo_servico_dias_snapshot,
                 Processo.id_usuario_responsavel,
                 _PRAZO_ENCAMINHAMENTO.label("prazo_encaminhamento"),
@@ -462,7 +471,7 @@ async def painel_unidade(
             atribuidos += 1
         # Na Análise nada está arquivado: o predicado já exclui.
         status = prazo_da_caixa(
-            data_abertura=r.data_hora_abertura,
+            data_abertura=inicio_do_prazo(r.data_hora_abertura, r.data_reinicio_prazo),
             prazo_snapshot_dias=r.prazo_servico_dias_snapshot,
             prazo_encaminhamento=r.prazo_encaminhamento,
             arquivado=False,
@@ -481,7 +490,7 @@ async def painel_unidade(
     for r in (await db.execute(_base(CaixaProcesso.saida))).all():
         retorno.total += 1
         if prazo_da_caixa(
-            data_abertura=r.data_hora_abertura,
+            data_abertura=inicio_do_prazo(r.data_hora_abertura, r.data_reinicio_prazo),
             prazo_snapshot_dias=r.prazo_servico_dias_snapshot,
             prazo_encaminhamento=r.prazo_encaminhamento,
             arquivado=False,
@@ -706,7 +715,7 @@ def _row_to_list(r) -> ProcessoListItem:
     p: Processo = r[0]
     # `datetime.now()` ingênuo, como o resto deste arquivo (ver `calcular_prazo`).
     prazo = prazo_da_caixa(
-        data_abertura=p.data_hora_abertura,
+        data_abertura=inicio_do_prazo(p.data_hora_abertura, p.data_reinicio_prazo),
         prazo_snapshot_dias=p.prazo_servico_dias_snapshot,
         prazo_encaminhamento=r.prazo_encaminhamento,
         arquivado=bool(r.arquivado),
@@ -723,6 +732,7 @@ def _row_to_list(r) -> ProcessoListItem:
         prazo_caixa_status=prazo.status,
         prazo_caixa_vence_em=prazo.vence_em,
         prazo_caixa_origem=prazo.origem,
+        arquivado=bool(r.arquivado),
         ativo=p.ativo,
         publico=p.publico,
         nivel_sigilo=p.nivel_sigilo,
@@ -827,7 +837,7 @@ async def get_processo_detail(
         )
     ).scalar_one_or_none()
     calc = calcular_prazo(
-        data_abertura=p.data_hora_abertura,
+        data_abertura=inicio_do_prazo(p.data_hora_abertura, p.data_reinicio_prazo),
         prazo_snapshot_dias=p.prazo_servico_dias_snapshot,
         data_conclusao=data_conclusao,
         now=datetime.now(),

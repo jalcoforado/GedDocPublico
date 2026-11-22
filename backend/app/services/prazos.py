@@ -16,6 +16,12 @@ Conceito (D-SNAPSHOT, D-NOME, D-CONCLUSAO, D-VENCENDO do PR 5b):
 - Fim do processo (`data_conclusao`) = data da ÚLTIMA `Movimentacao` ativa
   com `id_arquivamento IS NOT NULL`. Caller resolve antes de chamar o
   helper; quando não há, passa `None` → tratado como "em andamento".
+  Desarquivar (SI-60) desativa aquela movimentação, então processo
+  desarquivado volta a ser "em andamento" sem nada mudar aqui.
+- Início da contagem = `inicio_do_prazo(...)`: a abertura, ou o último
+  desarquivamento (SI-60, decisão do PO em 22/11/2026: o prazo REINICIA). O
+  parâmetro continua chamado `data_abertura` porque é isso em quase todo
+  processo; quem chama passa o início já resolvido.
 - "Vencendo" = restante ≤ 20% do prazo, com mínimo de 1 dia, sem teto.
 """
 from __future__ import annotations
@@ -111,6 +117,15 @@ def prazo_da_caixa(
     # Sem `data_conclusao`, `calcular_prazo` só devolve os três estados em
     # andamento.
     return PrazoDaCaixa(calc.status, calc.prazo_previsto_em, "servico")  # type: ignore[arg-type]
+
+
+def inicio_do_prazo(
+    data_abertura: datetime, data_reinicio_prazo: datetime | None
+) -> datetime:
+    """De quando o prazo do serviço conta: o último desarquivamento, se houve,
+    senão a abertura. Espelho SQL em `relatorios_comum.inicio_do_prazo_sql` e
+    nas consultas cruas de `dashboard.py` — mudou aqui, mude lá."""
+    return data_reinicio_prazo or data_abertura
 
 
 def limiar_vencendo_dias(prazo_snapshot_dias: int) -> int:

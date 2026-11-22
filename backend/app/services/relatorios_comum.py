@@ -127,19 +127,29 @@ def hora_local(dt: datetime | None) -> datetime | None:
 def data_arquivamento(tenant_id: int):
     """Subconsulta escalar: quando o processo foi arquivado (ou NULL).
 
-    Arquivar não tem volta (`acoes_processo.arquivar`), então há no máximo uma
-    movimentação de arquivamento viva; `min` só blinda contra lixo legado.
+    Só o arquivamento EM VIGOR conta: desde o SI-60 o processo pode ser
+    desarquivado, e o desarquivamento desativa a movimentação do arquivamento
+    (`processos.condicao_arquivado`). Há no máximo uma viva — `arquivar` recusa
+    a segunda —; `max` só blinda contra lixo legado e, se houver, fica com a
+    mais recente (decisão do time em 18/11/2026: vale a ÚLTIMA data).
     """
     return (
-        select(func.min(Movimentacao.data_hora_movimentacao))
+        select(func.max(Movimentacao.data_hora_movimentacao))
         .where(
             Movimentacao.id_processo == Processo.id,
             Movimentacao.tenant_id == tenant_id,
             Movimentacao.id_arquivamento.is_not(None),
             Movimentacao.excluido.is_(False),
+            Movimentacao.ativo.is_(True),
         )
         .scalar_subquery()
     )
+
+
+def inicio_do_prazo_sql():
+    """Espelho SQL de `prazos.inicio_do_prazo`: o último desarquivamento
+    (SI-60), ou a abertura."""
+    return func.coalesce(Processo.data_reinicio_prazo, Processo.data_hora_abertura)
 
 
 def ultima_movimentacao(tenant_id: int):
@@ -177,14 +187,15 @@ def situacao_prazo(tenant_id: int, agora_utc: datetime):
     `calcular_prazo`? Mude aqui — o teste reprova se esquecer.
 
     - sem snapshot → `sem_prazo`;
-    - arquivado → `concluido_no_prazo` se arquivou até abertura + N dias
-      corridos, senão `concluido_atrasado`;
+    - arquivado → `concluido_no_prazo` se arquivou até início + N dias
+      corridos, senão `concluido_atrasado` (início = abertura, ou o último
+      desarquivamento — `inicio_do_prazo_sql`);
     - aberto → `atrasado` se já passou; `vencendo` se faltam menos de
       `limiar + 1` dias (o `.days` do Python arredonda para baixo), com
       limiar = 20% do prazo, mínimo 1; senão `dentro_do_prazo`.
     """
     dias = Processo.prazo_servico_dias_snapshot
-    previsto = Processo.data_hora_abertura + func.make_interval(0, 0, 0, dias)
+    previsto = inicio_do_prazo_sql() + func.make_interval(0, 0, 0, dias)
     # `ceil` devolve double; `make_interval` só aceita inteiro em dias.
     limiar = func.greatest(1, cast(func.ceil(dias * 0.2), Integer))
     arquivado_em = data_arquivamento(tenant_id)

@@ -1,4 +1,5 @@
-"""Ações de tramitação: encaminhar, receber, cancelar encaminhamento.
+"""Ações de tramitação: encaminhar, receber, cancelar encaminhamento,
+arquivar e desarquivar.
 
 Espelha o fluxo de aprimora/app/models/Processo.php:
 - Encaminhar (flag ENCAMINHAMENTO): cria movimentação + encaminhamento + despacho opcional.
@@ -8,6 +9,9 @@ Espelha o fluxo de aprimora/app/models/Processo.php:
   cria nova movimentação, e SÓ ENTÃO atualiza id_local_atual.
 - Cancelar (sem flag dedicada — usa registro lógico): só permite cancelar
   encaminhamento ainda não recebido. Mantém histórico (não deleta).
+- Arquivar (flag ARQUIVAMENTO) / desarquivar (flag DESARQUIVAMENTO, SI-60):
+  "está arquivado" é ter movimentação de arquivamento ATIVA
+  (`processos.condicao_arquivado`); desarquivar a desativa, sem apagá-la.
 
 Fase 13a: recebe `tenant_id` e propaga em todas as escritas e filtra leituras.
 """
@@ -32,6 +36,7 @@ from ..models import (
 from ..schemas.processo import (
     ArquivarRequest,
     CancelarEncaminhamentoRequest,
+    DesarquivarRequest,
     RecusarEncaminhamentoRequest,
     EncaminharRequest,
 )
@@ -39,6 +44,13 @@ from ..schemas.processo import (
 
 class AcaoError(Exception):
     pass
+
+
+class ProcessoNaoEncontradoError(AcaoError):
+    """Processo inexistente, excluído ou de outro tenant. Subclasse de
+    `AcaoError` para não mudar as rotas antigas, que devolvem 400 para tudo;
+    as novas (SI-60) devolvem 404, que é a regra do projeto para recurso de
+    outro tenant e não confirma que ele existe."""
 
 
 class ForaDaUnidadeError(AcaoError):
@@ -139,10 +151,56 @@ async def _get_processo(
         )
     ).scalar_one_or_none()
     if p is None:
-        raise AcaoError(f"Processo {processo_id} não encontrado")
+        raise ProcessoNaoEncontradoError(f"Processo {processo_id} não encontrado")
     if not p.ativo:
         raise AcaoError("Processo inativo — não permite movimentação")
     return p
+
+
+def _arquivamento_em_vigor(processo_id: int, tenant_id: int):
+    """A movimentação do arquivamento que está valendo, se houver.
+
+    Mesmo critério de `processos.condicao_arquivado` (ativa, não excluída), lido
+    por processo. Ordenada e limitada porque lixo legado pode ter duas; a
+    regra de `arquivar` garante uma só daqui para a frente.
+    """
+    return (
+        select(Movimentacao)
+        .where(
+            Movimentacao.id_processo == processo_id,
+            Movimentacao.tenant_id == tenant_id,
+            Movimentacao.id_arquivamento.is_not(None),
+            Movimentacao.excluido.is_(False),
+            Movimentacao.ativo.is_(True),
+        )
+        .order_by(Movimentacao.id.desc())
+        .limit(1)
+    )
+
+
+async def _esta_arquivado(db: AsyncSession, processo_id: int, tenant_id: int) -> bool:
+    return (
+        await db.execute(_arquivamento_em_vigor(processo_id, tenant_id))
+    ).scalar_one_or_none() is not None
+
+
+async def _encaminhamento_pendente(
+    db: AsyncSession, processo_id: int, tenant_id: int
+) -> Encaminhamento | None:
+    return (
+        await db.execute(
+            select(Encaminhamento)
+            .where(
+                Encaminhamento.id_processo == processo_id,
+                Encaminhamento.tenant_id == tenant_id,
+                Encaminhamento.excluido.is_(False),
+                Encaminhamento.recebido.is_(False),
+                Encaminhamento.cancelado.is_(False),
+            )
+            .order_by(Encaminhamento.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
 
 
 async def encaminhar(
@@ -155,6 +213,16 @@ async def encaminhar(
     is_super_usuario: bool = False,
 ) -> Encaminhamento:
     processo = await _get_processo(db, processo_id, tenant_id)
+
+    # SI-60 — processo arquivado não tramita. Até aqui `encaminhar` só
+    # conferia `ativo` e pendência, e quem barrava era a tela: pela API (ou
+    # pela ação em lote) dava para mandar adiante um processo encerrado, com o
+    # arquivamento continuando a contar nas métricas como se nada tivesse
+    # acontecido. O caminho é desarquivar antes.
+    if await _esta_arquivado(db, processo_id, tenant_id):
+        raise AcaoError(
+            "Processo arquivado não pode ser encaminhado. Desarquive-o antes."
+        )
 
     # E3 (benchmark SUiTE) — primeira tramitação de um rascunho emite o
     # número (+ NUP, se opt-in) e marca situacao='protocolado'. Workflow só
@@ -761,12 +829,8 @@ async def arquivar(
     listas existentes mostram, apoiado numa suposição sobre o que `ativo`
     significa. É pergunta de negócio, não detalhe de implementação.
 
-    **Não desarquiva.** Não é esquecimento: os leitores filtram por
-    `id_arquivamento IS NOT NULL` **sem** olhar `Movimentacao.excluido`, então
-    "desarquivar" por soft-delete não desfaria nada nas contagens. Fazer
-    direito exige decidir antes se aqueles seis lugares passam a filtrar
-    `excluido` — mudança de comportamento em métrica existente, que não cabe
-    nesta fatia.
+    **Não desarquiva** — isso é `desarquivar` (SI-60), que desativa a
+    movimentação gravada aqui em vez de excluí-la.
     """
     processo = await _get_processo(db, processo_id, tenant_id)
 
@@ -778,21 +842,22 @@ async def arquivar(
             "Rascunho não pode ser arquivado. Abra o processo ou exclua o rascunho."
         )
 
-    ja_arquivado = (
-        await db.execute(
-            select(Movimentacao.id).where(
-                Movimentacao.id_processo == processo_id,
-                Movimentacao.tenant_id == tenant_id,
-                Movimentacao.id_arquivamento.is_not(None),
-                Movimentacao.excluido.is_(False),
-            )
-        )
-    ).scalar_one_or_none()
-    if ja_arquivado is not None:
+    if await _esta_arquivado(db, processo_id, tenant_id):
         # Não é idempotente de propósito: arquivar duas vezes criaria dois
         # eventos de conclusão, e o "tempo médio de conclusão" do dashboard
         # passaria a contar o mesmo processo duas vezes com datas diferentes.
+        # Só o arquivamento EM VIGOR conta: processo desarquivado (SI-60)
+        # pode ser arquivado de novo.
         raise AcaoError("Processo já está arquivado")
+
+    # SI-60 — processo em trânsito não se arquiva. Só a tela barrava; pela API
+    # o processo ficava "arquivado" e com um encaminhamento esperando
+    # recebimento em outra unidade, que ainda poderia recebê-lo.
+    if await _encaminhamento_pendente(db, processo_id, tenant_id) is not None:
+        raise AcaoError(
+            "Processo em trânsito não pode ser arquivado. Cancele o "
+            "encaminhamento ou aguarde o recebimento."
+        )
 
     from .workflow_integration import validar_acao_strict
 
@@ -890,3 +955,136 @@ async def arquivar(
     await db.commit()
     await db.refresh(arquivamento)
     return arquivamento
+
+
+async def desarquivar(
+    db: AsyncSession,
+    processo_id: int,
+    payload: DesarquivarRequest,
+    *,
+    tenant_id: int,
+    usuario_id: int,
+) -> Movimentacao:
+    """Reabre um processo arquivado. SI-60, RF-01 do documento "GEDPub –
+    Requisitos de evolução v1.0".
+
+    O que fica no histórico
+    -----------------------
+    Nada é apagado. A movimentação do arquivamento e a linha de
+    `protocolos.arquivamento` passam a `ativo=false` — "arquivamento
+    desfeito" —, e entra uma movimentação nova, `DESARQUIVAMENTO`, com a
+    justificativa como despacho. A linha do tempo não filtra `ativo`, então
+    mostra as duas. Os leitores que decidem "está arquivado / foi concluído"
+    (caixas, lista, detalhe, dashboard, relatórios, portal do cidadão) filtram
+    `ativo`, e por isso deixam de ver o processo como encerrado.
+
+    Desativar, e não excluir: aqueles leitores nunca olharam `excluido`, e
+    vários já olhavam `ativo`.
+
+    Para onde o processo volta
+    --------------------------
+    Para a unidade onde foi arquivado. `arquivar` não muda `id_local_atual`,
+    então ele já está lá: é só a movimentação nova que precisa dizer onde. O
+    status `recebido` da ação faz `services/permanencia.py` voltar a contar o
+    tempo como análise naquela unidade.
+
+    O prazo reinicia
+    ----------------
+    Decisão do PO em 22/11/2026: o prazo do serviço volta a contar do zero a
+    partir do desarquivamento (`processo.data_reinicio_prazo`, 0139). A data
+    de abertura fica intacta.
+
+    Duplo clique
+    ------------
+    O arquivamento em vigor é lido com `FOR UPDATE`: a segunda requisição
+    espera a primeira, relê a linha já com `ativo=false` e cai em "não está
+    arquivado". Sem a trava, as duas passariam pela checagem e o histórico
+    ganharia dois desarquivamentos.
+
+    Quem pode
+    ---------
+    A transação `processo_desarquivar` (no router). Não há exigência de
+    lotação: processo arquivado não está na mesa de ninguém, e é o arquivo
+    quem costuma reabri-lo.
+    """
+    processo = await _get_processo(db, processo_id, tenant_id)
+
+    mov_arq = (
+        await db.execute(
+            _arquivamento_em_vigor(processo_id, tenant_id).with_for_update()
+        )
+    ).scalar_one_or_none()
+    if mov_arq is None:
+        raise AcaoError("Processo não está arquivado")
+
+    from .workflow_integration import bloqueio_desarquivar
+
+    motivo_bloqueio = await bloqueio_desarquivar(db, processo)
+    if motivo_bloqueio:
+        raise WorkflowStrictBlock(motivo_bloqueio)
+
+    acao = await _get_acao(db, "DESARQUIVAMENTO")
+    now = datetime.now()
+
+    mov_arq.ativo = False
+    arquivamento = (
+        await db.execute(
+            select(Arquivamento).where(
+                Arquivamento.id == mov_arq.id_arquivamento,
+                Arquivamento.tenant_id == tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if arquivamento is not None:
+        arquivamento.ativo = False
+
+    movimentacao = Movimentacao(
+        tenant_id=tenant_id,
+        id_processo=processo_id,
+        id_unidade_responsavel=mov_arq.id_unidade_responsavel
+        or processo.id_local_atual
+        or processo.id_unidade_proprietaria,
+        id_acao=acao.id,
+        id_usuario=usuario_id,
+        data_hora_movimentacao=now,
+        ativo=True,
+        excluido=False,
+    )
+    db.add(movimentacao)
+    await db.flush()
+
+    db.add(
+        Despacho(
+            tenant_id=tenant_id,
+            id_processo=processo_id,
+            despacho=payload.justificativa,
+            id_usuario=usuario_id,
+            id_movimentacao=movimentacao.id,
+            ativo=True,
+            excluido=False,
+        )
+    )
+
+    processo.id_ultima_movimentacao = movimentacao.id
+    processo.data_reinicio_prazo = now
+
+    from .audit import log as audit_log
+
+    await audit_log(
+        db,
+        tenant_id=tenant_id,
+        id_usuario=usuario_id,
+        acao="processo.desarquivado",
+        entidade="processo",
+        id_entidade=processo_id,
+        payload={
+            "id_arquivamento": mov_arq.id_arquivamento,
+            "id_movimentacao_arquivamento": mov_arq.id,
+            "id_movimentacao": movimentacao.id,
+            "justificativa": payload.justificativa,
+        },
+    )
+
+    await db.commit()
+    await db.refresh(movimentacao)
+    return movimentacao

@@ -172,6 +172,50 @@ async def _instance_strict_ativa(
     return inst, wf.dsl
 
 
+async def bloqueio_desarquivar(db: AsyncSession, processo: Processo) -> str | None:
+    """SI-60 (RF-01): o fluxo do processo impede desarquivá-lo? Devolve o
+    motivo, ou `None` se libera.
+
+    Por que não é um ramo de `validar_acao_strict`: aquele só olha instância
+    ATIVA, e processo arquivado sob workflow strict quase nunca tem uma — o
+    strict só deixa arquivar em estado final, e chegar ao estado final
+    encerra a instância (`workflow_engine`, `ativa=False`). Ali a regra nunca
+    dispararia. Aqui vale a instância MAIS RECENTE, ativa ou encerrada.
+
+    A regra: definição strict bloqueia. O RF-01 pede que "workflow sem regra
+    de retomada" barre a operação, e nenhum DSL tem hoje como declarar
+    retomada — reabrir por fora dele deixaria o processo andando com um fluxo
+    rígido já encerrado. Fluxo não-strict é orientação, não trava: libera.
+    """
+    inst = (
+        await db.execute(
+            select(WorkflowInstance)
+            .where(
+                WorkflowInstance.id_processo == processo.id,
+                WorkflowInstance.tenant_id == processo.tenant_id,
+            )
+            .order_by(WorkflowInstance.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if inst is None:
+        return None
+    wf = (
+        await db.execute(
+            select(WorkflowDefinition).where(
+                WorkflowDefinition.id == inst.id_workflow_definition,
+                WorkflowDefinition.tenant_id == processo.tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if wf is None or not (wf.dsl or {}).get("strict", False):
+        return None
+    return (
+        "Este processo segue um fluxo rígido, que não tem regra para retomar "
+        "um processo arquivado. Ele não pode ser desarquivado."
+    )
+
+
 async def destinos_permitidos(
     db: AsyncSession, processo: Processo
 ) -> tuple[list[int] | None, str | None]:

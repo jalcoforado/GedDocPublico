@@ -28,6 +28,7 @@ from ..schemas.complementacao_documental import (
 )
 from ..schemas.processo import (
     ArquivarRequest,
+    DesarquivarRequest,
     AtribuirResponsavelRequest,
     CaixaProcesso,
     CaixasContagem,
@@ -57,8 +58,10 @@ from ..services.acoes_processo import (
     arquivar,
     atribuir_responsavel,
     ForaDaUnidadeError,
+    ProcessoNaoEncontradoError,
     avisar_recusa,
     cancelar_encaminhamento,
+    desarquivar,
     recusar_encaminhamento,
     encaminhar,
     receber,
@@ -730,6 +733,52 @@ async def arquivar_endpoint(
             tenant_id=tenant_id,
             usuario_id=current.id,
             is_super_usuario=is_super,
+        )
+    except AcaoError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
+    if detail is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado"
+        )
+    return detail
+
+
+@router.post(
+    "/{processo_id}/desarquivar",
+    response_model=ProcessoDetail,
+    dependencies=[Depends(require_acesso_processo)],
+)
+async def desarquivar_endpoint(
+    processo_id: int,
+    payload: DesarquivarRequest,
+    current: Usuario = Depends(require_permission("processo_desarquivar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ProcessoDetail:
+    """SI-60 (RF-01) — reabre um processo arquivado, com justificativa.
+
+    Transação própria, `processo_desarquivar`, e não `processo`/`atualizar`:
+    o RF-01 pede permissão específica, e quem tramita não ganha com isso o
+    poder de reabrir o que foi encerrado. Sem `action`, como
+    `pagamento_autorizar`: ter a transação é o que autoriza o ato.
+
+    Processo não arquivado, segundo clique e fluxo rígido sem regra de
+    retomada caem em 400 com o motivo (`AcaoError`). Processo de outro
+    tenant é 404: o guard de sigilo deixa passar o que não acha, e a resposta
+    é desta rota.
+    """
+    try:
+        await desarquivar(
+            db,
+            processo_id,
+            payload,
+            tenant_id=tenant_id,
+            usuario_id=current.id,
+        )
+    except ProcessoNaoEncontradoError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado"
         )
     except AcaoError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

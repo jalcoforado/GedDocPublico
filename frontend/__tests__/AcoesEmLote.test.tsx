@@ -38,6 +38,7 @@ function item(id: number): ProcessoListItem {
   return {
     id, numero_processo: `2026/00${id}`, nup: null, numero_origem: null, situacao: "protocolado",
     data_hora_abertura: "2026-10-01T10:00:00", parado_desde: "2026-10-10T10:00:00",
+    arquivado: false,
     ativo: true, publico: true, nivel_sigilo: "ostensivo", externo: false, assunto: "Licença",
     tipo_processo: "Pessoal", manifestante: "Fulano", manifestante_cpf_cnpj: null,
     unidade_proprietaria: "RH", local_atual: "RH", id_usuario_responsavel: null,
