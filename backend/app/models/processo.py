@@ -130,6 +130,12 @@ class Processo(Base):
     prazo_servico_dias_snapshot: Mapped[int | None] = mapped_column(
         Integer, nullable=True
     )
+    # SI-60 (0139) — desarquivar reinicia a contagem do prazo do serviço a
+    # partir daqui. Nula = nunca desarquivado: o prazo conta da abertura.
+    # Quem lê é `prazos.inicio_do_prazo` (e o espelho SQL dele).
+    data_reinicio_prazo: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
 
 
 class Movimentacao(Base):
@@ -336,7 +342,7 @@ class AnexoProcesso(Base):
     motivo_desentranhamento: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     autoridade_desentranhamento: Mapped[str | None] = mapped_column(String(300), nullable=True)
     # SI-62: documento que este arquivo acompanha (ex.: os anexos do despacho
-    # são filhos do PDF assinado). Nulo no anexo avulso. Migration 0140.
+    # são filhos do PDF assinado). Nulo no anexo avulso. Migration 0142.
     id_anexo_principal: Mapped[int | None] = mapped_column(
         ForeignKey("protocolos.anexo.id"), nullable=True
     )

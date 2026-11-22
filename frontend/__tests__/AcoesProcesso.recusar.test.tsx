@@ -23,6 +23,8 @@ vi.mock("@/lib/api", async () => {
 });
 
 vi.mock("@/components/ArquivarDialog", () => ({ ArquivarDialog: () => null }));
+// A barra de tramitação consulta `can` desde o SI-60 (botão Desarquivar).
+vi.mock("@/lib/auth", () => ({ useAuth: () => ({ can: () => true }) }));
 
 import { AcoesProcesso } from "@/components/AcoesProcesso";
 import type { ProcessoDetail } from "@/lib/api";

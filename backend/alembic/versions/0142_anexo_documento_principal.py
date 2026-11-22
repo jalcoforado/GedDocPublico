@@ -1,7 +1,7 @@
 """Documento principal do anexo (SI-62): os arquivos que acompanham um documento.
 
-Revision ID: 0140
-Revises: 0139
+Revision ID: 0142
+Revises: 0141
 Create Date: 2026-11-22
 
 `protocolos.anexo_processo.id_anexo_principal` aponta para o documento que
@@ -14,7 +14,7 @@ depois do despacho, sem o processo andar, cairia na mesma movimentação e
 pareceria ser do despacho. O vínculo tem de ser explícito.
 
 Nulo para tudo o que já existe e para anexo avulso. `ADD COLUMN` herda RLS e
-grants (CLAUDE.md §Migrations); tabela legada, como a 0139.
+grants (CLAUDE.md §Migrations); tabela legada, como a 0141.
 """
 from __future__ import annotations
 
@@ -22,8 +22,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0140"
-down_revision: str | Sequence[str] | None = "0139"
+revision: str = "0142"
+down_revision: str | Sequence[str] | None = "0141"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -395,3 +395,65 @@ async def test_anexo_enviado_depois_nao_vira_anexo_do_despacho(admin_engine, cen
     assert [x["descricao"] for x in despacho["despacho"]["anexos"]] == ["parecer.txt"]
     depois = next(an for an in det["anexos"] if an["descricao"] == "depois.txt")
     assert depois["id_anexo_principal"] is None
+
+
+@pytest.mark.asyncio
+async def test_desarquivado_volta_a_receber_despacho(admin_engine, cen):
+    """SI-60: desarquivar desativa o arquivamento sem apagá-lo. Arquivado é ter
+    arquivamento EM VIGOR; contar "existe arquivamento" deixaria o processo
+    desarquivado proibido de receber despacho para sempre."""
+    from app.schemas.processo import DesarquivarRequest
+    from app.services.acoes_processo import desarquivar
+
+    a = cen["a"]
+    async with _sm(admin_engine)() as s:
+        await desarquivar(s, a["arquivado"], DesarquivarRequest(justificativa="Reaberto para análise"),
+                          tenant_id=a["tenant"].id, usuario_id=a["chefe"])
+        await s.commit()
+    async with _como(admin_engine, a, "chefe") as cli:
+        mid = await _rascunho(cli, a["arquivado"])
+        r = await _concluir(cli, mid)
+        assert r.status_code == 201, r.text
+
+
+@pytest.mark.asyncio
+async def test_despacho_depois_do_recebimento_impede_cancelar_o_recebimento(admin_engine, cen):
+    """RF-02 (SI-61): o recebimento só se cancela se nada aconteceu depois. O
+    despacho avulso é um ato — e, como movimentação, ele aparece para a regra."""
+    from app.services.acoes_processo import motivo_bloqueio_cancelar_recebimento
+
+    a = cen["a"]
+    async with _sm(admin_engine)() as s:
+        recebimento = (await s.execute(select(Acao.id).where(Acao.flag == "RECEBIMENTO"))).scalar_one()
+        prioridade = (await s.execute(text(
+            "SELECT id FROM protocolos.prioridade WHERE excluido = false ORDER BY id LIMIT 1"
+        ))).scalar_one()
+        enc = Encaminhamento(
+            tenant_id=a["tenant"].id, id_processo=a["na_mesa"], id_unidade_origem=a["unidade"],
+            id_unidade_destino=a["unidade"], id_prioridade=prioridade, id_usuario=a["chefe"],
+            recebido=True, data_hora_recebimento=datetime.now(),
+        )
+        s.add(enc)
+        await s.flush()
+        receb = Movimentacao(
+            tenant_id=a["tenant"].id, id_processo=a["na_mesa"], id_unidade_responsavel=a["unidade"],
+            id_acao=recebimento, id_encaminhamento=enc.id, id_usuario=a["chefe"],
+            data_hora_movimentacao=datetime.now(), ativo=True, excluido=False,
+        )
+        s.add(receb)
+        await s.flush()
+        await s.execute(text("UPDATE protocolos.processo SET id_ultima_movimentacao=:m WHERE id=:p"),
+                        {"m": receb.id, "p": a["na_mesa"]})
+        await s.commit()
+        assert await motivo_bloqueio_cancelar_recebimento(
+            s, a["na_mesa"], a["tenant"].id, receb, enc) is None  # antes: cancelável
+
+    async with _como(admin_engine, a, "chefe") as cli:
+        mid = await _rascunho(cli, a["na_mesa"])
+        assert (await _concluir(cli, mid)).status_code == 201
+
+    async with _sm(admin_engine)() as s:
+        receb = (await s.execute(select(Movimentacao).where(Movimentacao.id == receb.id))).scalar_one()
+        enc = (await s.execute(select(Encaminhamento).where(Encaminhamento.id == enc.id))).scalar_one()
+        motivo = await motivo_bloqueio_cancelar_recebimento(s, a["na_mesa"], a["tenant"].id, receb, enc)
+    assert motivo is not None and "despacho" in motivo.lower()

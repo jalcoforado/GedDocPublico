@@ -40,11 +40,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
-from ..models import Despacho, Encaminhamento, Minuta, Movimentacao, Processo, Usuario
+from ..models import Despacho, Minuta, Movimentacao, Processo, Usuario
 from . import anexos as anexos_svc
 from . import assinaturas as assinaturas_svc
 from . import minutas as minutas_svc
-from .acoes_processo import AcaoError, _get_acao, _lotado_em
+from .acoes_processo import (
+    AcaoError,
+    _encaminhamento_pendente,
+    _esta_arquivado,
+    _get_acao,
+    _lotado_em,
+)
 from .audit import log as audit_log
 
 
@@ -91,31 +97,12 @@ async def _exigir_que_possa_despachar(
     if processo.situacao == "rascunho":
         raise _erro(status.HTTP_409_CONFLICT,
                     "Processo em rascunho não recebe despacho. Abra o processo antes.")
-    arquivado = (
-        await db.execute(
-            select(Movimentacao.id).where(
-                Movimentacao.id_processo == processo.id,
-                Movimentacao.tenant_id == tenant_id,
-                Movimentacao.id_arquivamento.is_not(None),
-                Movimentacao.excluido.is_(False),
-            ).limit(1)
-        )
-    ).scalar_one_or_none()
-    if arquivado is not None:
+    # Mesmas regras do resto da tramitação (`acoes_processo`): arquivado é ter
+    # arquivamento EM VIGOR — desarquivado (SI-60) volta a receber despacho.
+    if await _esta_arquivado(db, processo.id, tenant_id):
         raise _erro(status.HTTP_409_CONFLICT,
                     "Processo arquivado não recebe despacho.")
-    em_transito = (
-        await db.execute(
-            select(Encaminhamento.id).where(
-                Encaminhamento.id_processo == processo.id,
-                Encaminhamento.tenant_id == tenant_id,
-                Encaminhamento.recebido.is_(False),
-                Encaminhamento.cancelado.is_(False),
-                Encaminhamento.excluido.is_(False),
-            ).limit(1)
-        )
-    ).scalar_one_or_none()
-    if em_transito is not None:
+    if await _encaminhamento_pendente(db, processo.id, tenant_id) is not None:
         raise _erro(status.HTTP_409_CONFLICT,
                     "Processo em trânsito não recebe despacho. Aguarde o recebimento "
                     "ou cancele o encaminhamento.")
@@ -251,7 +238,7 @@ async def concluir_despacho(
             usuario_id=usuario.id,
             commit=False,
             # Filhos do PDF do despacho: o vínculo pela movimentação não serve,
-            # porque anexo enviado depois cairia nela também (migration 0140).
+            # porque anexo enviado depois cairia nela também (migration 0142).
             id_anexo_principal=anexo.id,
         )
 

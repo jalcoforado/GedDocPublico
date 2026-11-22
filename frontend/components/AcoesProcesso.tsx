@@ -8,6 +8,8 @@ import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { ArquivarDialog } from "@/components/ArquivarDialog";
+import { CancelarRecebimentoDialog } from "@/components/CancelarRecebimentoDialog";
+import { DesarquivarDialog } from "@/components/DesarquivarDialog";
 import { RegistrarDespachoDialog } from "@/components/protocolo/RegistrarDespachoDialog";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
@@ -27,7 +29,15 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
-type ModalKind = null | "encaminhar" | "receber" | "recusar" | "cancelar" | "arquivar";
+type ModalKind =
+  | null
+  | "encaminhar"
+  | "receber"
+  | "recusar"
+  | "cancelar"
+  | "arquivar"
+  | "desarquivar"
+  | "cancelar-recebimento";
 
 /** Como o processo aparece em título de diálogo: rascunho não tem número. */
 function nomeDoProcesso(p: ProcessoDetail): string {
@@ -49,6 +59,7 @@ export function AcoesProcesso({ processo }: { processo: ProcessoDetail }) {
 
 function AcoesTramitacao({ processo }: { processo: ProcessoDetail }) {
   const qc = useQueryClient();
+  const { can } = useAuth();
   const [modal, setModal] = useState<ModalKind>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -64,17 +75,26 @@ function AcoesTramitacao({ processo }: { processo: ProcessoDetail }) {
     return mov?.encaminhamento ?? null;
   }, [processo.movimentacoes]);
 
-  // F4 — já arquivado não arquiva de novo. A fonte é a linha do tempo e não
-  // `processo.ativo`: arquivar NÃO mexe naquele campo (decisão registrada em
-  // `services/acoes_processo.py::arquivar`), então usá-lo aqui daria sempre
-  // "pode arquivar".
-  const jaArquivado = useMemo(
-    () => processo.movimentacoes.some((m) => m.acao_flag === "ARQUIVAMENTO"),
-    [processo.movimentacoes],
-  );
+  // F4 — já arquivado não arquiva de novo. A fonte é `processo.arquivado`, que
+  // o servidor calcula (arquivamento EM VIGOR). Não é `processo.ativo`, que
+  // arquivar não mexe, nem "há ARQUIVAMENTO na linha do tempo": desde o SI-60
+  // um processo desarquivado continua com o arquivamento antigo no histórico.
+  const jaArquivado = processo.arquivado;
   const podeArquivar = !jaArquivado && !encaminhamentoPendente;
+  // SI-60 — transação própria, não `processo`/`atualizar`. O servidor
+  // confere de novo; isto só esconde o botão de quem não pode.
+  const podeDesarquivar = jaArquivado && can("processo_desarquivar");
 
-  const podeEncaminhar = processo.ativo && !encaminhamentoPendente;
+  // SI-61 — o servidor diz se há recebimento a desfazer e se quem consulta é
+  // da unidade que recebeu (`null` = não há, ou não é). A permissão específica
+  // a tela confere aqui. Bloqueado vem com o motivo, que a tela mostra.
+  const temRecebimentoCancelavel =
+    processo.pode_cancelar_recebimento != null && can("processo_cancelar_recebimento");
+  const podeCancelarRecebimento = processo.pode_cancelar_recebimento === true;
+
+  // SI-60 — processo arquivado não tramita: o servidor recusa, e a tela não
+  // oferece.
+  const podeEncaminhar = processo.ativo && !encaminhamentoPendente && !jaArquivado;
   // SI-62 — despacho sem encaminhar: o servidor recusa em trânsito e arquivado
   // (e confere a lotação); aqui só não oferece o que vai ser recusado.
   const podeDespachar = processo.ativo && !encaminhamentoPendente && !jaArquivado;
@@ -147,20 +167,57 @@ function AcoesTramitacao({ processo }: { processo: ProcessoDetail }) {
         >
           Cancelar encaminhamento
         </Button>
-        <Button
-          variant="secondary"
-          onClick={() => {
-            setErr(null);
-            setModal("arquivar");
-          }}
-          disabled={!podeArquivar}
-        >
-          Arquivar
-        </Button>
+        {temRecebimentoCancelavel && (
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setErr(null);
+              setModal("cancelar-recebimento");
+            }}
+            disabled={!podeCancelarRecebimento}
+            title={processo.motivo_cancelar_recebimento ?? undefined}
+          >
+            Cancelar recebimento
+          </Button>
+        )}
+        {jaArquivado ? (
+          podeDesarquivar && (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setErr(null);
+                setModal("desarquivar");
+              }}
+            >
+              Desarquivar
+            </Button>
+          )
+        ) : (
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setErr(null);
+              setModal("arquivar");
+            }}
+            disabled={!podeArquivar}
+          >
+            Arquivar
+          </Button>
+        )}
+        {jaArquivado && (
+          <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-surface-2 px-2 py-0.5 text-xs font-semibold text-foreground-muted">
+            Arquivado
+          </span>
+        )}
 
         {encaminhamentoPendente && (
           <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-warning-soft px-2 py-0.5 text-xs font-semibold text-warning-soft-foreground">
             Aguardando recebimento
+          </span>
+        )}
+        {temRecebimentoCancelavel && processo.motivo_cancelar_recebimento && (
+          <span className="text-xs text-muted-foreground">
+            {processo.motivo_cancelar_recebimento}
           </span>
         )}
         {encaminhamentoPendente && !doDestino && (
@@ -180,6 +237,18 @@ function AcoesTramitacao({ processo }: { processo: ProcessoDetail }) {
 
       <ArquivarDialog
         open={modal === "arquivar"}
+        onClose={() => setModal(null)}
+        processo={processo}
+      />
+
+      <DesarquivarDialog
+        open={modal === "desarquivar"}
+        onClose={() => setModal(null)}
+        processo={processo}
+      />
+
+      <CancelarRecebimentoDialog
+        open={modal === "cancelar-recebimento"}
         onClose={() => setModal(null)}
         processo={processo}
       />

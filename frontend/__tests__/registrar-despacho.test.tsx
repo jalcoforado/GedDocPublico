@@ -73,6 +73,8 @@ vi.mock("@/components/PreVisualizacaoDocumento", () => ({
 }));
 vi.mock("@/components/GoogleConnectDialog", () => ({ GoogleConnectDialog: () => null }));
 vi.mock("@/components/ArquivarDialog", () => ({ ArquivarDialog: () => null }));
+// A barra de ações confere permissões (desarquivar, cancelar recebimento).
+vi.mock("@/lib/auth", () => ({ useAuth: () => ({ can: () => true, user: { id: 1 } }) }));
 
 import { AcoesProcesso } from "@/components/AcoesProcesso";
 import { MinutasProcesso } from "@/components/MinutasProcesso";
@@ -93,10 +95,10 @@ function envolver(ui: React.ReactNode) {
   );
 }
 
-function processo(movimentacoes: unknown[] = []): ProcessoDetail {
+function processo(movimentacoes: unknown[] = [], arquivado = false): ProcessoDetail {
   return {
     id: 77, numero_processo: "2026/000077", situacao: "protocolado", ativo: true,
-    movimentacoes, anexos: [],
+    movimentacoes, anexos: [], arquivado,
   } as unknown as ProcessoDetail;
 }
 
@@ -124,7 +126,7 @@ describe("botão Registrar despacho", () => {
     envolver(<AcoesProcesso processo={processo([EM_TRANSITO])} />);
     expect(screen.getByRole("button", { name: "Registrar despacho" })).toBeDisabled();
     cleanup();
-    envolver(<AcoesProcesso processo={processo([ARQUIVADO])} />);
+    envolver(<AcoesProcesso processo={processo([ARQUIVADO], true)} />);
     expect(screen.getByRole("button", { name: "Registrar despacho" })).toBeDisabled();
   });
 });

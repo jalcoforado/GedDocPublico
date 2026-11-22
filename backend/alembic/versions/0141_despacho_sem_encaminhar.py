@@ -1,7 +1,7 @@
 """Despacho sem encaminhar (SI-62): finalidade da minuta e PDF do despacho.
 
-Revision ID: 0139
-Revises: 0138
+Revision ID: 0141
+Revises: 0140
 Create Date: 2026-11-22
 
 O despacho avulso nasce como rascunho no editor de minutas e, ao ser
@@ -24,8 +24,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0139"
-down_revision: str | Sequence[str] | None = "0138"
+revision: str = "0141"
+down_revision: str | Sequence[str] | None = "0140"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
