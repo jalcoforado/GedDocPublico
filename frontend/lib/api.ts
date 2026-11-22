@@ -475,6 +475,12 @@ export interface ProcessoDetail extends ProcessoListItem {
    *  restringe e o servidor decide. */
   pode_receber_encaminhamento?: boolean | null;
   pode_cancelar_encaminhamento?: boolean | null;
+  /** SI-61 — o último recebimento pode ser desfeito por quem consulta?
+   *  `null`/ausente = não há recebimento a cancelar (ou você não é da unidade
+   *  que recebeu); `false` vem com `motivo_cancelar_recebimento`. A permissão
+   *  `processo_cancelar_recebimento` confira à parte, com `can`. */
+  pode_cancelar_recebimento?: boolean | null;
+  motivo_cancelar_recebimento?: string | null;
   /** SI-16 — os ids do que o formulário de abertura escolhe, para a edição
    *  do rascunho se pré-preencher. Os nomes vêm de `ProcessoListItem`. */
   id_assunto?: number | null;
@@ -5308,6 +5314,13 @@ export const api = {
      *  `processo_desarquivar`; o prazo do serviço volta a contar de agora. */
     desarquivar: (id: number, justificativa: string) =>
       request<ProcessoDetail>(`/processos/${id}/desarquivar`, {
+        method: "POST",
+        body: JSON.stringify({ justificativa }),
+      }),
+    /** SI-61 — desfaz um recebimento feito por engano: o processo volta a
+     *  aguardar recebimento. Bloqueado (400) se algo aconteceu depois dele. */
+    cancelarRecebimento: (id: number, justificativa: string) =>
+      request<ProcessoDetail>(`/processos/${id}/cancelar-recebimento`, {
         method: "POST",
         body: JSON.stringify({ justificativa }),
       }),

@@ -109,6 +109,24 @@ class DesarquivarRequest(BaseModel):
         return v
 
 
+class CancelarRecebimentoRequest(BaseModel):
+    """SI-61 (RF-02) — desfazer um recebimento feito por engano. Justificativa
+    obrigatória: é o que a unidade de origem lê para entender por que o
+    processo voltou a ficar em trânsito."""
+
+    justificativa: str = Field(min_length=5, max_length=2000)
+
+    @field_validator("justificativa")
+    @classmethod
+    def _justificativa_nao_e_so_espaco(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 5:
+            raise ValueError(
+                "Informe a justificativa do cancelamento (mínimo de 5 caracteres)."
+            )
+        return v
+
+
 class CancelarEncaminhamentoRequest(BaseModel):
     despacho: str | None = Field(default=None, max_length=2000)
     override_motivo: str | None = Field(default=None, max_length=500)
@@ -543,3 +561,10 @@ class ProcessoDetail(ProcessoListItem):
     # tela então não restringe, e o servidor continua sendo a barreira.
     pode_receber_encaminhamento: bool | None = None
     pode_cancelar_encaminhamento: bool | None = None
+    # SI-61 — o último recebimento pode ser desfeito por quem consulta?
+    # `None` = não há recebimento a cancelar (nunca recebido, em trânsito,
+    # arquivado) ou detalhe sem usuário. `False` vem com o motivo, que a tela
+    # mostra em vez de um botão cinza sem explicação. A permissão específica
+    # (`processo_cancelar_recebimento`) a tela confere à parte, por `can`.
+    pode_cancelar_recebimento: bool | None = None
+    motivo_cancelar_recebimento: str | None = None

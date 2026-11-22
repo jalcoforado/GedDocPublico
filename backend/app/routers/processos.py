@@ -28,6 +28,7 @@ from ..schemas.complementacao_documental import (
 )
 from ..schemas.processo import (
     ArquivarRequest,
+    CancelarRecebimentoRequest,
     DesarquivarRequest,
     AtribuirResponsavelRequest,
     CaixaProcesso,
@@ -59,8 +60,10 @@ from ..services.acoes_processo import (
     atribuir_responsavel,
     ForaDaUnidadeError,
     ProcessoNaoEncontradoError,
+    avisar_cancelamento_recebimento,
     avisar_recusa,
     cancelar_encaminhamento,
+    cancelar_recebimento,
     desarquivar,
     recusar_encaminhamento,
     encaminhar,
@@ -992,6 +995,46 @@ async def recusar_encaminhamento_endpoint(
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
     await avisar_recusa(db, tenant_id=tenant_id, enc=enc, numero_processo=detail.numero_processo)
+    return detail
+
+
+@router.post(
+    "/{processo_id}/cancelar-recebimento",
+    response_model=ProcessoDetail,
+    dependencies=[Depends(require_acesso_processo)],
+)
+async def cancelar_recebimento_endpoint(
+    processo_id: int,
+    payload: CancelarRecebimentoRequest,
+    current: Usuario = Depends(require_permission("processo_cancelar_recebimento")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ProcessoDetail:
+    """SI-61 (RF-02) — desfaz um recebimento feito por engano.
+
+    Transação própria, `processo_cancelar_recebimento`, sem `action` (como
+    `pagamento_autorizar`), mais a lotação na unidade que recebeu (403 sem
+    ela). Algo feito depois do recebimento bloqueia com 400 e o motivo.
+    Processo de outro tenant é 404.
+    """
+    try:
+        enc = await cancelar_recebimento(
+            db, processo_id, payload, tenant_id=tenant_id, usuario_id=current.id,
+            is_super_usuario=await _is_super(db, current, tenant_id),
+        )
+    except ProcessoNaoEncontradoError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
+    except ForaDaUnidadeError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except AcaoError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
+    if detail is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
+    await avisar_cancelamento_recebimento(
+        db, tenant_id=tenant_id, enc=enc, numero_processo=detail.numero_processo,
+        usuario_id=current.id, justificativa=payload.justificativa,
+    )
     return detail
 
 

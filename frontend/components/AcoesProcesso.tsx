@@ -8,6 +8,7 @@ import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { ArquivarDialog } from "@/components/ArquivarDialog";
+import { CancelarRecebimentoDialog } from "@/components/CancelarRecebimentoDialog";
 import { DesarquivarDialog } from "@/components/DesarquivarDialog";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
@@ -34,7 +35,8 @@ type ModalKind =
   | "recusar"
   | "cancelar"
   | "arquivar"
-  | "desarquivar";
+  | "desarquivar"
+  | "cancelar-recebimento";
 
 /** Como o processo aparece em título de diálogo: rascunho não tem número. */
 function nomeDoProcesso(p: ProcessoDetail): string {
@@ -81,6 +83,13 @@ function AcoesTramitacao({ processo }: { processo: ProcessoDetail }) {
   // SI-60 — transação própria, não `processo`/`atualizar`. O servidor
   // confere de novo; isto só esconde o botão de quem não pode.
   const podeDesarquivar = jaArquivado && can("processo_desarquivar");
+
+  // SI-61 — o servidor diz se há recebimento a desfazer e se quem consulta é
+  // da unidade que recebeu (`null` = não há, ou não é). A permissão específica
+  // a tela confere aqui. Bloqueado vem com o motivo, que a tela mostra.
+  const temRecebimentoCancelavel =
+    processo.pode_cancelar_recebimento != null && can("processo_cancelar_recebimento");
+  const podeCancelarRecebimento = processo.pode_cancelar_recebimento === true;
 
   // SI-60 — processo arquivado não tramita: o servidor recusa, e a tela não
   // oferece.
@@ -150,6 +159,19 @@ function AcoesTramitacao({ processo }: { processo: ProcessoDetail }) {
         >
           Cancelar encaminhamento
         </Button>
+        {temRecebimentoCancelavel && (
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setErr(null);
+              setModal("cancelar-recebimento");
+            }}
+            disabled={!podeCancelarRecebimento}
+            title={processo.motivo_cancelar_recebimento ?? undefined}
+          >
+            Cancelar recebimento
+          </Button>
+        )}
         {jaArquivado ? (
           podeDesarquivar && (
             <Button
@@ -185,6 +207,11 @@ function AcoesTramitacao({ processo }: { processo: ProcessoDetail }) {
             Aguardando recebimento
           </span>
         )}
+        {temRecebimentoCancelavel && processo.motivo_cancelar_recebimento && (
+          <span className="text-xs text-muted-foreground">
+            {processo.motivo_cancelar_recebimento}
+          </span>
+        )}
         {encaminhamentoPendente && !doDestino && (
           <span className="text-xs text-muted-foreground">
             Receber ou recusar cabe a quem é de {encaminhamentoPendente.unidade_destino}.
@@ -200,6 +227,12 @@ function AcoesTramitacao({ processo }: { processo: ProcessoDetail }) {
 
       <DesarquivarDialog
         open={modal === "desarquivar"}
+        onClose={() => setModal(null)}
+        processo={processo}
+      />
+
+      <CancelarRecebimentoDialog
+        open={modal === "cancelar-recebimento"}
         onClose={() => setModal(null)}
         processo={processo}
       />

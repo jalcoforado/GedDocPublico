@@ -155,6 +155,11 @@ módulo `protocolo`, e **não** vem junto com `processo`: quem tramita não ganh
 reabrir o que foi encerrado. Fica fora do conjunto mínimo acima de propósito — conceda só a quem
 responde pelo arquivo.
 
+**Cancelar recebimento** pede a transação `processo_cancelar_recebimento` (migration `0140`, SI-61),
+também do `protocolo` e também fora do conjunto mínimo. Além dela, o servidor exige ser lotado na
+unidade que recebeu. Sem a transação, quem recebeu por engano ainda tem o caminho antigo: encaminhar
+de volta — só que a linha do tempo registra uma passagem que não houve.
+
 ### Provisionamento que parou no meio (tenant inerte)
 
 Desde `SEC-RLS-00C` o provisionamento são **dois atos**, em papéis de banco
