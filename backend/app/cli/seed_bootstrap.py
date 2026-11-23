@@ -492,6 +492,10 @@ async def seed(db: AsyncSession) -> dict:
         # `services/permanencia.py` conta esse trecho como espera.
         ("CANCELAMENTO_RECEBIMENTO", "Cancelamento de recebimento", "aberto",
          "encaminhado", "Recebimento cancelado"),
+        # SI-62 — despacho sem encaminhar: o processo fica na unidade.
+        # `despacho` não é `encaminhado` nem `final`, então a permanência
+        # (`services/permanencia.py`) conta o trecho como tempo de análise.
+        ("DESPACHO", "Despacho", "aberto", "despacho", "Despacho registrado"),
     ]:
         existe = (
             await db.execute(

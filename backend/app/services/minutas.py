@@ -243,8 +243,81 @@ async def obter_minuta(db: AsyncSession, *, tenant_id: int, minuta_id: int) -> M
     return m
 
 
+async def exigir_acesso_ao_processo(
+    db: AsyncSession, *, tenant_id: int, processo_id: int, usuario: Usuario
+) -> None:
+    """404 se o usuário não alcança o processo (sigilo, ou rascunho de outra
+    pessoa) — o guard único de `services/sigilo.py`. Para as rotas de minuta
+    que recebem o id do PROCESSO (listar, criar)."""
+    from .sigilo import SigiloAcessoError, assert_acesso_processo
+
+    try:
+        await assert_acesso_processo(
+            db, tenant_id=tenant_id, processo_id=processo_id, usuario=usuario
+        )
+    except SigiloAcessoError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado"
+        )
+
+
+async def obter_minuta_autorizada(
+    db: AsyncSession, *, tenant_id: int, minuta_id: int, usuario: Usuario
+) -> Minuta:
+    """Carrega a minuta SÓ para quem alcança o processo dela (SI-62).
+
+    Até aqui as rotas de minuta filtravam a prefeitura e mais nada: qualquer
+    servidor com `processo.atualizar` lia (e editava, finalizava, apagava) a
+    minuta de processo sigiloso acima da credencial dele iterando o id — a
+    mesma classe do download de anexo que ficou aberto sete meses. A
+    minuta é conteúdo do processo, então passa pelo mesmo guard dele.
+
+    O 404 é o MESMO para "não existe", "é de outra prefeitura" e "não pode
+    ver": a resposta não confirma a existência. Toda rota com `minuta_id`
+    chama isto antes do serviço — `tests/test_guarda_minuta_sigilosa.py`
+    reprova a que esquecer, e reprova `obter_minuta` cru em router.
+    """
+    from .sigilo import SigiloAcessoError, assert_acesso_processo
+
+    m = await obter_minuta(db, tenant_id=tenant_id, minuta_id=minuta_id)
+    try:
+        await assert_acesso_processo(
+            db, tenant_id=tenant_id, processo_id=m.id_processo, usuario=usuario
+        )
+    except SigiloAcessoError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Minuta não encontrada"
+        )
+    if eh_rascunho_de_despacho_alheio(m, usuario.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Minuta não encontrada"
+        )
+    return m
+
+
+def eh_rascunho_de_despacho_alheio(m: Minuta, usuario_id: int) -> bool:
+    """SI-62: rascunho de despacho é só de quem escreve — como o rascunho de
+    um e-mail. Vale também para super-usuário: é autoria, não grau de acesso
+    (mesma decisão do rascunho de processo, SI-16). Depois de concluído, o
+    despacho é do processo e todo mundo que vê o processo vê o despacho."""
+    return (
+        m.finalidade == "despacho"
+        and m.status == "rascunho"
+        and m.id_usuario_criacao != usuario_id
+    )
+
+
+def _exigir_que_nao_seja_despacho(m: Minuta, acao: str) -> None:
+    if m.finalidade == "despacho":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Despacho não se {acao} por aqui: use \"Concluir despacho\", "
+                   "que assina e registra o despacho no processo.",
+        )
+
+
 async def listar_minutas(
-    db: AsyncSession, *, tenant_id: int, processo_id: int
+    db: AsyncSession, *, tenant_id: int, processo_id: int, usuario_id: int
 ) -> list[Minuta]:
     stmt = (
         select(Minuta)
@@ -252,6 +325,12 @@ async def listar_minutas(
             Minuta.tenant_id == tenant_id,
             Minuta.id_processo == processo_id,
             Minuta.excluido.is_(False),
+            # SI-62: rascunho de despacho de outra pessoa não aparece.
+            ~(
+                (Minuta.finalidade == "despacho")
+                & (Minuta.status == "rascunho")
+                & (Minuta.id_usuario_criacao != usuario_id)
+            ),
         )
         .order_by(Minuta.criado_em.desc())
     )
@@ -283,6 +362,13 @@ async def criar_minuta(
     payload: MinutaCreate,
 ) -> Minuta:
     processo = await _obter_processo(db, tenant_id=tenant_id, processo_id=processo_id)
+    if payload.finalidade == "despacho" and payload.origem != "interno":
+        # O conteúdo do despacho vira PDF assinado aqui; no Google Docs ele
+        # sairia do sistema antes de ser ato.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Despacho é redigido no editor do sistema, não no Google Docs.",
+        )
 
     corpo_html: str | None
     if payload.origem == "google":
@@ -310,6 +396,7 @@ async def criar_minuta(
         titulo=payload.titulo,
         destinatario=payload.destinatario,
         origem=payload.origem,
+        finalidade=payload.finalidade,
         status="rascunho",
         versao=1,
         corpo_html=corpo_html,
@@ -459,6 +546,7 @@ async def criar_google_doc_para_minuta(
         HTTPException: Se usuário não tem credenciais Google ou API falhar.
     """
     m = await obter_minuta(db, tenant_id=tenant_id, minuta_id=minuta_id)
+    _exigir_que_nao_seja_despacho(m, "leva ao Google Docs")
 
     if m.status != "rascunho":
         raise HTTPException(
@@ -636,6 +724,48 @@ async def finalizar_minuta(
     de um upload manual — carimbo e assinatura v2 funcionam sem alteração.
     """
     m = await obter_minuta(db, tenant_id=tenant_id, minuta_id=minuta_id)
+    _exigir_que_nao_seja_despacho(m, "finaliza")
+    await virar_anexo_sem_commit(
+        db, m, tenant_id=tenant_id, tenant_slug=tenant_slug, usuario_id=usuario_id
+    )
+
+    await db.commit()
+    await db.refresh(m)
+
+    await audit_log(
+        db,
+        tenant_id=tenant_id,
+        id_usuario=usuario_id,
+        acao="minuta.finalizada",
+        entidade="minuta",
+        id_entidade=m.id,
+        payload={"id_processo": m.id_processo},
+    )
+    await db.commit()
+
+    return m
+
+
+async def virar_anexo_sem_commit(
+    db: AsyncSession,
+    m: Minuta,
+    *,
+    tenant_id: int,
+    tenant_slug: str,
+    usuario_id: int,
+    publico: bool = True,
+):
+    """Gera o PDF da minuta, cria o Anexo e marca a minuta como finalizada,
+    SEM commit — quem chama fecha a transação. Usado pela finalização comum e
+    pela conclusão do despacho (SI-62), que precisa do anexo, da assinatura e
+    da movimentação na MESMA transação. Devolve o Anexo.
+
+    O anexo nasce ligado a `processo.id_ultima_movimentacao`
+    (`anexos._criar_anexo_from_bytes`).
+
+    `publico` decide se o cidadão vê o anexo no portal
+    (`cidadao_processos`). A finalização comum mantém o comportamento de
+    sempre (True); o despacho nasce interno (False)."""
     if m.status != "rascunho":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -645,7 +775,7 @@ async def finalizar_minuta(
     if m.origem == "google":
         # Exportar PDF do Google Doc
         pdf_bytes = await _gerar_pdf_minuta_google(
-            db, tenant_id=tenant_id, minuta_id=minuta_id, usuario_id=usuario_id, m=m
+            db, tenant_id=tenant_id, minuta_id=m.id, usuario_id=usuario_id, m=m
         )
     else:
         if not (m.corpo_html or "").strip():
@@ -666,7 +796,7 @@ async def finalizar_minuta(
         tenant_slug=tenant_slug,
         descricao=m.titulo,
         id_tipo_anexo=None,
-        publico=True,
+        publico=publico,
         usuario_id=usuario_id,
         commit=False,
     )
@@ -677,22 +807,7 @@ async def finalizar_minuta(
     m.id_usuario_finalizacao = usuario_id
     m.finalizada_em = _utcnow()
     m.atualizado_em = m.finalizada_em
-
-    await db.commit()
-    await db.refresh(m)
-
-    await audit_log(
-        db,
-        tenant_id=tenant_id,
-        id_usuario=usuario_id,
-        acao="minuta.finalizada",
-        entidade="minuta",
-        id_entidade=m.id,
-        payload={"id_processo": m.id_processo},
-    )
-    await db.commit()
-
-    return m
+    return anexo
 
 
 async def sincronizar_google_doc_para_minuta(

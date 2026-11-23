@@ -154,8 +154,9 @@ def inicio_do_prazo_sql():
 
 def ultima_movimentacao(tenant_id: int):
     """Subconsulta escalar: a movimentação mais recente do processo, ou a
-    abertura se não houver nenhuma. Envio, recebimento, despacho, assinatura —
-    qualquer ato registrado conta."""
+    abertura se não houver nenhuma. Conta toda linha de `movimentacao`:
+    abertura, envio, recebimento, arquivamento e o despacho sem encaminhar
+    (SI-62). Assinatura e anexo não criam movimentação e não contam."""
     return func.coalesce(
         select(func.max(Movimentacao.data_hora_movimentacao))
         .where(

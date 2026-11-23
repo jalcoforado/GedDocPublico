@@ -107,14 +107,14 @@ describe("Adicionar anexo", () => {
     expect(api.processos.uploadAnexo).not.toHaveBeenCalled();
   });
 
-  it("sigiloso sai como publico=false, com a descrição escrita pela pessoa", async () => {
+  it("interno sai como publico=false, com a descrição escrita pela pessoa", async () => {
     const u = userEvent.setup();
     abrir();
     soltar(arquivo("laudo.pdf", MB));
     const desc = screen.getByLabelText(/^descrição/i);
     await u.clear(desc);
     await u.type(desc, "Laudo médico");
-    await u.click(screen.getByRole("radio", { name: "Sigiloso" }));
+    await u.click(screen.getByRole("radio", { name: "Interno" }));
     await u.click(screen.getByRole("button", { name: "Enviar anexo" }));
     expect(api.processos.uploadAnexo).toHaveBeenCalledWith(
       7,

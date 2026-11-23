@@ -131,8 +131,18 @@ export function AnexosProcesso({ processo }: { processo: ProcessoDetail }) {
                   <span className="truncate text-sm font-medium text-foreground">
                     {a.descricao ?? "(sem descrição)"}
                   </span>
-                  {!a.publico && <Badge intent="warning">sigiloso</Badge>}
+                  {/* Não público = fora da consulta pública. Não é o sigilo da LAI
+                      (`nivel_sigilo` do processo), e "sigiloso" confundia os dois. */}
+                  {!a.publico && <Badge intent="neutral">interno</Badge>}
                 </div>
+                {/* SI-62 — arquivo que acompanha outro documento (ex.: despacho). */}
+                {a.id_anexo_principal != null && (
+                  <div className="truncate text-xs text-muted-foreground">
+                    acompanha:{" "}
+                    {processo.anexos.find((p) => p.id === a.id_anexo_principal)?.descricao ??
+                      `Doc. #${a.id_anexo_principal}`}
+                  </div>
+                )}
                 <div className="truncate text-xs text-muted-foreground">
                   {tipoNome(a)} · {a.qtd_paginas ?? "?"} pág
                   {a.e_doc ? ` · ${a.e_doc}` : ""}
@@ -618,7 +628,7 @@ export function UploadDialog({
             },
             {
               valor: "sigiloso",
-              rotulo: "Sigiloso",
+              rotulo: "Interno",
               icon: Lock,
               descricao: "Não aparece na consulta pública do processo.",
             },

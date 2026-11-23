@@ -367,6 +367,8 @@ export const NIVEL_PRAZO_MAX: Partial<Record<NivelSigilo, number>> = {
 
 export interface AnexoNoProcesso {
   id: number;
+  /** SI-62 — documento que este arquivo acompanha (ex.: anexo do despacho). */
+  id_anexo_principal?: number | null;
   /** Fase P6 — id do JOIN (necessário pra desentranhar) */
   id_anexo_processo?: number | null;
   descricao: string | null;
@@ -403,6 +405,11 @@ export interface DespachoOut {
   id: number;
   despacho: string;
   usuario: string | null;
+  /** SI-62 — PDF assinado do despacho avulso; null nos despachos que vêm junto
+   * de encaminhar, recusar, cancelar ou arquivar. */
+  id_anexo?: number | null;
+  /** SI-62 — arquivos enviados junto com o despacho (filhos do PDF). */
+  anexos?: { id: number; descricao: string | null }[];
 }
 
 /**
@@ -1578,6 +1585,15 @@ export interface AnexoUploadInput {
 // Minutas de documento + templates (editor interno / Google Docs)
 export type MinutaOrigem = "interno" | "google";
 export type MinutaStatus = "rascunho" | "finalizada" | "cancelada";
+/** SI-62 — "despacho" = rascunho de despacho avulso. */
+export type MinutaFinalidade = "documento" | "despacho";
+
+/** Resposta de `POST /minutas/{id}/concluir-despacho` (SI-62). */
+export interface DespachoConcluido {
+  id: number;
+  id_movimentacao: number | null;
+  id_anexo: number | null;
+}
 
 export interface PlaceholderInfo {
   chave: string;
@@ -1617,6 +1633,7 @@ export interface Minuta {
   /** F10 — alimenta `{{destinatario.nome}}`; sem fonte automática. */
   destinatario: string | null;
   origem: MinutaOrigem;
+  finalidade: MinutaFinalidade;
   status: MinutaStatus;
   versao: number;
   corpo_html: string | null;
@@ -1635,6 +1652,7 @@ export interface MinutaListItem {
   id_processo: number;
   titulo: string;
   origem: MinutaOrigem;
+  finalidade: MinutaFinalidade;
   status: MinutaStatus;
   versao: number;
   id_anexo_final: number | null;
@@ -2406,6 +2424,8 @@ export interface MinutaCreateInput {
   /** F10 — resolve `{{destinatario.nome}}` no INSTANTE da criação (mail-merge
    * é snapshot; preencher depois não re-resolve o template). */
   destinatario?: string | null;
+  /** SI-62 — "despacho": rascunho de despacho avulso (só o autor vê). */
+  finalidade?: MinutaFinalidade;
 }
 
 export interface MinutaUpdateInput {
@@ -4791,6 +4811,17 @@ export const api = {
       request<Minuta>(`/minutas/${id}/sincronizar-google`, { method: "POST" }),
     arquivarGoogle: (id: number) =>
       request<void>(`/minutas/${id}/arquivar-google`, { method: "DELETE" }),
+    // SI-62 — conclui o rascunho de despacho: assina com a senha e registra no
+    // processo sem mudar a unidade. Anexos vão junto, no mesmo envio.
+    concluirDespacho: (id: number, senha: string, arquivos: File[] = []) => {
+      const fd = new FormData();
+      fd.append("senha", senha);
+      for (const f of arquivos) fd.append("arquivos", f);
+      return request<DespachoConcluido>(`/minutas/${id}/concluir-despacho`, {
+        method: "POST",
+        body: fd,
+      });
+    },
   },
 
   // PAG-1 — cadastros de Pagamentos

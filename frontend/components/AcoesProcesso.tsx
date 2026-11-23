@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { ArquivarDialog } from "@/components/ArquivarDialog";
 import { CancelarRecebimentoDialog } from "@/components/CancelarRecebimentoDialog";
 import { DesarquivarDialog } from "@/components/DesarquivarDialog";
+import { RegistrarDespachoDialog } from "@/components/protocolo/RegistrarDespachoDialog";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { CampoComUnidade } from "@/components/ui/campo-com-unidade";
@@ -94,6 +95,10 @@ function AcoesTramitacao({ processo }: { processo: ProcessoDetail }) {
   // SI-60 — processo arquivado não tramita: o servidor recusa, e a tela não
   // oferece.
   const podeEncaminhar = processo.ativo && !encaminhamentoPendente && !jaArquivado;
+  // SI-62 — despacho sem encaminhar: o servidor recusa em trânsito e arquivado
+  // (e confere a lotação); aqui só não oferece o que vai ser recusado.
+  const podeDespachar = processo.ativo && !encaminhamentoPendente && !jaArquivado;
+  const [despachoAberto, setDespachoAberto] = useState(false);
   // Receber/recusar são da unidade de destino e cancelar, da de origem. O
   // servidor diz se quem consulta pode; `false` explícito desabilita, ausente
   // não restringe (o servidor continua sendo a barreira).
@@ -127,6 +132,9 @@ function AcoesTramitacao({ processo }: { processo: ProcessoDetail }) {
           disabled={!podeEncaminhar}
         >
           Encaminhar
+        </Button>
+        <Button variant="secondary" onClick={() => setDespachoAberto(true)} disabled={!podeDespachar}>
+          Registrar despacho
         </Button>
         <Button
           variant="secondary"
@@ -218,6 +226,14 @@ function AcoesTramitacao({ processo }: { processo: ProcessoDetail }) {
           </span>
         )}
       </div>
+
+      {despachoAberto && (
+        <RegistrarDespachoDialog
+          open
+          onClose={() => setDespachoAberto(false)}
+          processoId={processo.id}
+        />
+      )}
 
       <ArquivarDialog
         open={modal === "arquivar"}
