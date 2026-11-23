@@ -12,12 +12,13 @@
 """
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import require_tenant_id, require_tenant_slug
 from ..auth.perms import require_permission
 from ..database import get_db
-from ..models import Usuario
+from ..models import Tenant, Usuario
 from ..schemas.minuta import (
     DespachoConcluidoOut,
     MinutaCreate,
@@ -40,6 +41,7 @@ from ..services.assinaturas import (
     AssinaturaThrottleError,
 )
 from ..services.html_pdf import CSS_DOCUMENTO, CSS_PRE_VISUALIZACAO
+from ..services.papel_timbrado import papel_timbrado
 from ..services.placeholders import PLACEHOLDERS_DISPONIVEIS
 
 templates_router = APIRouter(prefix="/templates-documento", tags=["minutas"])
@@ -56,7 +58,8 @@ async def list_placeholders(
 @templates_router.get("/estilo-impressao")
 async def estilo_impressao(
     _: Usuario = Depends(require_permission("processo", "atualizar")),
-    __: int = Depends(require_tenant_id),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
     """CSS com que o PDF final da minuta é impresso (SI-30).
 
@@ -66,7 +69,16 @@ async def estilo_impressao(
     que não entra no PDF. Declarada antes de `/{template_id}` para não cair
     na rota de id.
     """
-    return {"css": CSS_DOCUMENTO, "css_tela": CSS_PRE_VISUALIZACAO}
+    timbre = papel_timbrado(
+        (await db.execute(select(Tenant).where(Tenant.id == tenant_id))).scalar_one()
+    )
+    return {
+        "css": CSS_DOCUMENTO,
+        "css_tela": CSS_PRE_VISUALIZACAO,
+        # SI-53 — o mesmo timbre que `html_to_pdf_bytes` imprime.
+        "cabecalho_html": timbre.cabecalho_html(),
+        "rodape_html": timbre.rodape_html(),
+    }
 
 
 @templates_router.get("", response_model=list[TemplateDocumentoOut])

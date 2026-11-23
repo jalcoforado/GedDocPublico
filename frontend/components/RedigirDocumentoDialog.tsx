@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, FileText } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -92,6 +92,9 @@ export function RedigirDocumentoDialog({
   const [showGoogleConnect, setShowGoogleConnect] = useState(false);
   // Abre lado a lado: ver o documento enquanto escreve é o ponto (SI-30).
   const [modo, setModo] = useState<Modo>("lado");
+  // SI-53 — a pré-seleção do modelo padrão acontece UMA vez por abertura: se a
+  // pessoa trocar para "Documento em branco", um refetch da lista não desfaz.
+  const padraoAplicado = useRef(false);
 
   const credentialQ = useQuery({
     queryKey: ["user", "google-credential"],
@@ -112,6 +115,7 @@ export function RedigirDocumentoDialog({
       setTemplateId("");
       setCorpo("");
       setVersao(undefined);
+      padraoAplicado.current = false;
     }
   }, [open, minutaId]);
 
@@ -120,6 +124,14 @@ export function RedigirDocumentoDialog({
     queryFn: () => api.templatesDocumento.list({ apenas_ativos: true }),
     enabled: open && minutaAtualId === undefined,
   });
+
+  // SI-53 — o modelo padrão da prefeitura já vem selecionado.
+  useEffect(() => {
+    if (!open || minutaAtualId !== undefined || padraoAplicado.current || !templatesQ.data) return;
+    padraoAplicado.current = true;
+    const padrao = templatesQ.data.find((t) => t.padrao);
+    if (padrao) setTemplateId(String(padrao.id));
+  }, [open, minutaAtualId, templatesQ.data]);
 
   const minutaQ = useQuery({
     queryKey: ["minuta", minutaAtualId],
@@ -447,6 +459,7 @@ export function RedigirDocumentoDialog({
                 {(templatesQ.data ?? []).map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.nome}
+                    {t.padrao ? " (padrão)" : ""}
                   </option>
                 ))}
               </Select>

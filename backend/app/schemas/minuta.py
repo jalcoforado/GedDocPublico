@@ -26,6 +26,8 @@ class TemplateDocumentoCreate(BaseModel):
     id_unidade_trabalho: int | None = None
     corpo_html: str = Field(min_length=1)
     ativo: bool = True
+    # SI-53 — marcar desmarca o padrão anterior da prefeitura.
+    padrao: bool = False
 
 
 class TemplateDocumentoUpdate(BaseModel):
@@ -35,6 +37,7 @@ class TemplateDocumentoUpdate(BaseModel):
     id_unidade_trabalho: int | None = None
     corpo_html: str | None = Field(default=None, min_length=1)
     ativo: bool | None = None
+    padrao: bool | None = None
 
 
 class TemplateDocumentoOut(BaseModel):
@@ -48,6 +51,7 @@ class TemplateDocumentoOut(BaseModel):
     corpo_html: str
     placeholders_utilizados: list | None
     ativo: bool
+    padrao: bool
     id_usuario_criacao: int | None
     criado_em: datetime
     atualizado_em: datetime | None

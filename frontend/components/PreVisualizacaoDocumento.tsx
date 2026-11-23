@@ -21,7 +21,8 @@ function escapar(s: string): string {
   return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }
 
-/** Conteúdo da folha: o mesmo `<h1 class="doc-titulo">` + corpo que `html_to_pdf_bytes` monta. */
+/** Conteúdo da folha: o mesmo `<h1 class="doc-titulo">` + corpo que `html_to_pdf_bytes` monta.
+ *  O papel timbrado (SI-53) entra em volta, em `PreVisualizacaoDocumento`. */
 export function montarFolha(titulo: string, corpoHtml: string, modelo = false): string {
   const cabecalho = titulo.trim() ? `<h1 class="doc-titulo">${escapar(titulo.trim())}</h1>` : "";
   // No MODELO o campo é esperado (vira dado ao redigir); na minuta, sobrou.
@@ -89,9 +90,15 @@ export function PreVisualizacaoDocumento({
   }, [estiloQ.data]);
 
   // Escreve o conteúdo a cada mudança (sem recarregar: preserva a rolagem).
+  // SI-53 — o papel timbrado vem pronto do servidor, o mesmo HTML que o PDF
+  // imprime: brasão e nome acima do título, rodapé no pé da folha.
   useEffect(() => {
     const folha = iframeRef.current?.contentDocument?.querySelector(".folha");
-    if (folha) folha.innerHTML = montarFolha(titulo_, corpo_, modelo);
+    if (!folha) return;
+    folha.innerHTML =
+      (estiloQ.data?.cabecalho_html ?? "") +
+      `<div class="conteudo">${montarFolha(titulo_, corpo_, modelo)}</div>` +
+      (estiloQ.data?.rodape_html ?? "");
   }, [titulo_, corpo_, modelo, estiloQ.data]);
 
   // Reduz a folha para caber na largura disponível.

@@ -15,6 +15,10 @@ aparece na tela de login.
 | `aprimora-logo.png` | Marca da Aprimora (o produto), recortada na caixa de tinta | `public/img/logo-aprimora.png` do repositório `jalcoforado/aprimora` | Aprimora | Marca própria |
 | `aprimora-logo-escuro.png` | A mesma marca para o tema escuro: o navy do wordmark trocado por claro, laranja intacto | derivada de `aprimora-logo.png` | Aprimora | Marca própria |
 
+O `itaitinga-brasao.png` tem uma **cópia idêntica em `backend/app/static/brand/`**
+(SI-53): é dela que o backend tira o brasão do papel timbrado dos documentos,
+porque o servidor não enxerga esta pasta. Ao trocar o brasão, troque os dois.
+
 As duas da Aprimora têm só 211×30 px (é o que existia no sistema antigo). Servem
 até ~24 px de altura; para uso maior é preciso o vetor original.
 

@@ -59,6 +59,9 @@ class TemplateDocumento(Base):
         JSONB, nullable=True
     )
     ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # SI-53 — o modelo que já vem selecionado ao redigir. No máximo um por
+    # tenant entre não excluídos (índice único parcial, migration 0143).
+    padrao: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     id_usuario_criacao: Mapped[int | None] = mapped_column(
         ForeignKey("utils.usuario.id"), nullable=True

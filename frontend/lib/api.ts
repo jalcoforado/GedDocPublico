@@ -1611,9 +1611,21 @@ export interface TemplateDocumento {
   corpo_html: string;
   placeholders_utilizados: string[] | null;
   ativo: boolean;
+  /** SI-53 — já vem selecionado ao redigir. No máximo um por prefeitura. */
+  padrao: boolean;
   id_usuario_criacao: number | null;
   criado_em: string;
   atualizado_em: string | null;
+}
+
+/** `GET /templates-documento/estilo-impressao` — o mesmo que o PDF imprime. */
+export interface EstiloImpressao {
+  css: string;
+  css_tela: string;
+  /** Brasão e nome da prefeitura, acima do título. */
+  cabecalho_html: string;
+  /** Endereço e contatos; vazio quando a prefeitura não tem nenhum. */
+  rodape_html: string;
 }
 
 export interface TemplateDocumentoInput {
@@ -1623,6 +1635,8 @@ export interface TemplateDocumentoInput {
   id_unidade_trabalho?: number | null;
   corpo_html: string;
   ativo?: boolean;
+  /** Marcar desmarca o padrão anterior da prefeitura. */
+  padrao?: boolean;
 }
 
 export interface Minuta {
@@ -4770,9 +4784,10 @@ export const api = {
       }),
     placeholders: () =>
       request<PlaceholderInfo[]>("/templates-documento/placeholders-disponiveis"),
-    /** SI-30 — CSS com que o PDF final é impresso; a pré-visualização usa o mesmo. */
+    /** SI-30 — CSS com que o PDF final é impresso; a pré-visualização usa o mesmo.
+     *  SI-53 — e o papel timbrado da prefeitura (cabeçalho com brasão, rodapé). */
     estiloImpressao: () =>
-      request<{ css: string; css_tela: string }>("/templates-documento/estilo-impressao"),
+      request<EstiloImpressao>("/templates-documento/estilo-impressao"),
   },
 
   // Imagens embutidas no editor rico (Novo Processo, Templates, Minutas)
