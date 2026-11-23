@@ -1,7 +1,7 @@
 # Relatórios do Protocolo
 
 > **Status:** vivo · **Autoridade sobre:** o que cada número de `/m/protocolo/relatorios` mede, quem vê, e as limitações conhecidas.
-> **Última verificação:** 2026-11-14 (Panorama no Painel; Relatórios como índice).
+> **Última verificação:** 2026-11-22 (SI-49: relatório salvo abre no resultado).
 > Índice: [docs/INDEX.md](INDEX.md) · precedência: código > `CLAUDE.md` > este doc.
 
 Fonte de verdade executável: `backend/app/services/relatorios_comum.py` (as
@@ -208,6 +208,18 @@ consulta), `relatorios_salvos.py` (os salvos), `schemas/relatorio_montado.py`
   — credencial rebaixada hoje tira o processo do relatório hoje. Nome único
   por pessoa (sem diferença de maiúsculas), até 50 por pessoa. Coluna que
   sair do catálogo depois de salva é tirada ao abrir, com aviso.
+- **O salvo abre no resultado (SI-49).** Os parâmetros (período, filtros,
+  colunas, agrupamento) ficam atrás do botão **Editar**: "Gerar relatório"
+  aplica e fecha, "Cancelar" descarta o que mudou e fecha. O que está
+  filtrado continua à vista na descrição do recorte, acima dos totais. O
+  relatório novo, ainda sem salvar, mostra os parâmetros sempre; o salvo que
+  não consegue gerar (por exemplo, ficou sem coluna válida) também abre com
+  eles. "Salvar alterações" só aparece quando há diferença para o salvo.
+- **"Alterações não salvas".** Gerar com outra definição sem salvar deixa na
+  tela um resultado que não é o salvo, sob o nome do salvo — e o PDF sai com
+  esse nome. O cabeçalho mostra o selo enquanto o resultado na tela diferir
+  do salvo. A comparação ignora a ordem das chaves dos filtros (a do servidor
+  e a da URL podem vir em ordens diferentes), mas não a ordem das colunas.
 - **Exportação:** CSV (lista completa, com o mesmo teto de 50 mil) e PDF
   (lista limitada), com a definição aplicada no parâmetro `d`. No CSV do
   montador as datas saem em `dd/mm/aaaa hh:mm`, para abrir direto na planilha.
