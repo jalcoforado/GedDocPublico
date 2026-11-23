@@ -172,7 +172,7 @@ overlay `docker-compose.dev.yml`, que usa base absoluta.
 
 ### Seeds
 
-São **quatro**, com papéis distintos:
+São **cinco**, com papéis distintos:
 
 ```bash
 # 1. Pré-requisitos globais — roda a cada deploy, idempotente. Garante
@@ -208,6 +208,12 @@ docker exec aprimora-py-backend python -m app.cli.seed_demo_operacional apply --
 #    secretarias reais. O mapa da frota mostra 24h, então repita
 #    `--parte demo` no dia da apresentação.
 docker exec aprimora-py-backend python -m app.cli.seed_itaitinga apply --tenant sobral --allow-non-demo
+
+# 5. Catálogo do protocolo (SI-54): 19 tipos de processo e 112 assuntos
+#    SUGERIDOS por IA para prefeitura de pequeno/médio porte, até a prefeitura
+#    trazer os dela. Só cria o que falta; não reativa, não renomeia, não move.
+#    Ver `docs/catalogo-protocolo.md`.
+docker exec aprimora-py-backend python -m app.cli.seed_catalogo_protocolo apply --tenant sobral --allow-non-demo
 ```
 
 `--allow-non-demo` é obrigatório fora de um tenant `demo*`. Na VPS o alvo tem de ser **`sobral`**: o acesso é por IP e o `TenantMiddleware` resolve tudo para o tenant padrão, então dados em outro tenant ficariam invisíveis.

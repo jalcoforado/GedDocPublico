@@ -45,6 +45,7 @@ import {
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { useAssuntosAll } from "@/lib/assuntos";
+import { ativosOuEscolhido } from "@/lib/catalogo-ativo";
 import { useManifestantesBusca } from "@/lib/manifestantes";
 
 type FormState = {
@@ -209,12 +210,13 @@ export default function ProtocoloBalcaoPage() {
   // backend corta em page_size ≤ 200 (pedir 500 dava 422 e combo vazio).
   const manifestanteBusca = useManifestantesBusca(form.id_manifestante || null);
 
+  // Inativo não é oferecido na abertura (ver `lib/catalogo-ativo.ts`).
   const assuntoOptions = useMemo<ComboboxOption[]>(() => {
-    return (assuntosQ.data ?? []).map((a) => ({
+    return ativosOuEscolhido(assuntosQ.data ?? [], form.id_assunto).map((a) => ({
       value: a.id,
       label: a.assunto,
     }));
-  }, [assuntosQ.data]);
+  }, [assuntosQ.data, form.id_assunto]);
 
   const ccdOptions = useMemo<ComboboxOption[]>(
     () => (ccdTreeQ.data ? flatTreeForCombobox(ccdTreeQ.data) : []),

@@ -48,6 +48,7 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useAssuntosAll } from "@/lib/assuntos";
+import { ativosOuEscolhido } from "@/lib/catalogo-ativo";
 import { useManifestantesBusca } from "@/lib/manifestantes";
 import { telefoneParaExibir } from "@/lib/mascaras";
 
@@ -202,15 +203,17 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
     queryFn: () => organogramaApi.tree(),
   });
 
+  // Inativos não são oferecidos na abertura; o já escolhido (rascunho) fica.
+  // Ver `lib/catalogo-ativo.ts`.
   const tipoOptions = useMemo<ComboboxOption<{ id: number }>[]>(() => {
-    return (tiposProcessoQ.data ?? []).map((t) => ({
+    return ativosOuEscolhido(tiposProcessoQ.data ?? [], form.id_tipo_processo).map((t) => ({
       value: t.id,
       label: t.tipo_processo,
     }));
-  }, [tiposProcessoQ.data]);
+  }, [tiposProcessoQ.data, form.id_tipo_processo]);
 
   const assuntoOptions = useMemo<ComboboxOption<{ id_tipo_processo: number }>[]>(() => {
-    const all = assuntosQ.data ?? [];
+    const all = ativosOuEscolhido(assuntosQ.data ?? [], form.id_assunto);
     const filtered = form.id_tipo_processo
       ? all.filter((a) => a.id_tipo_processo === form.id_tipo_processo)
       : all;
@@ -219,7 +222,7 @@ export function FormularioProcesso({ rascunhoId }: { rascunhoId?: number }) {
       label: a.assunto,
       data: { id_tipo_processo: a.id_tipo_processo },
     }));
-  }, [assuntosQ.data, form.id_tipo_processo]);
+  }, [assuntosQ.data, form.id_tipo_processo, form.id_assunto]);
 
   function handleTipoChange(v: number | string | null) {
     const id = typeof v === "number" ? v : "";

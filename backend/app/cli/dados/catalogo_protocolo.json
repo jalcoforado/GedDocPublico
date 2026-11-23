@@ -1,0 +1,216 @@
+{
+  "fonte": "Sugestão gerada por IA (Claude) em 2026-11-21 para o card SI-54, a pedido da reunião de 2026-11-17: tipos de processo e assuntos comuns em prefeituras brasileiras de pequeno e médio porte, organizados no modelo do SEI (grupo do SEI = tipo; especificação do SEI = assunto). NÃO é levantamento da prefeitura nem cópia de órgão algum; vale até a prefeitura trazer o dela.",
+  "revisao_po": "pendente",
+  "acesso_restrito_sugerido": "Informativo, NÃO aplicado pelo seed: tipo e assunto não carregam sigilo no sistema (card próprio aberto a partir do SI-54). Marca o que o SEI costuma tratar como acesso restrito: dado pessoal, de saúde, disciplinar ou de vulnerabilidade social (LAI art. 31).",
+  "tipos": [
+    {
+      "nome": "Atendimento ao Cidadão e Ouvidoria",
+      "assuntos": [
+        {"nome": "Pedido de acesso à informação (LAI)"},
+        {"nome": "Reclamação"},
+        {"nome": "Denúncia", "acesso_restrito_sugerido": true},
+        {"nome": "Sugestão"},
+        {"nome": "Elogio"},
+        {"nome": "Solicitação de certidão ou declaração"}
+      ]
+    },
+    {
+      "nome": "Tributação",
+      "assuntos": [
+        {"nome": "Revisão de lançamento de IPTU"},
+        {"nome": "Isenção ou imunidade de IPTU"},
+        {"nome": "Avaliação e guia de ITBI"},
+        {"nome": "Inscrição ou alteração no cadastro mobiliário (ISS)"},
+        {"nome": "Baixa de inscrição municipal"},
+        {"nome": "Parcelamento de débitos"},
+        {"nome": "Restituição ou compensação de tributo"},
+        {"nome": "Certidão negativa de débitos"},
+        {"nome": "Impugnação de lançamento ou auto de infração"}
+      ]
+    },
+    {
+      "nome": "Obras e Urbanismo",
+      "assuntos": [
+        {"nome": "Alvará de construção"},
+        {"nome": "Alvará de demolição"},
+        {"nome": "Habite-se"},
+        {"nome": "Regularização de edificação"},
+        {"nome": "Desmembramento ou remembramento de lote"},
+        {"nome": "Aprovação de loteamento"},
+        {"nome": "Certidão de uso e ocupação do solo"},
+        {"nome": "Numeração predial"},
+        {"nome": "Licença para obra ou material em via pública"}
+      ]
+    },
+    {
+      "nome": "Licenciamento de Atividades e Posturas",
+      "assuntos": [
+        {"nome": "Alvará de funcionamento"},
+        {"nome": "Renovação de alvará de funcionamento"},
+        {"nome": "Licença para ambulante ou feirante"},
+        {"nome": "Licença para evento"},
+        {"nome": "Licença de publicidade (placas e letreiros)"},
+        {"nome": "Denúncia de irregularidade de posturas", "acesso_restrito_sugerido": true}
+      ]
+    },
+    {
+      "nome": "Meio Ambiente",
+      "assuntos": [
+        {"nome": "Licença ambiental"},
+        {"nome": "Dispensa de licenciamento ambiental"},
+        {"nome": "Autorização de supressão de árvore"},
+        {"nome": "Denúncia ambiental", "acesso_restrito_sugerido": true}
+      ]
+    },
+    {
+      "nome": "Serviços Urbanos",
+      "assuntos": [
+        {"nome": "Iluminação pública"},
+        {"nome": "Poda de árvore"},
+        {"nome": "Pavimentação e tapa-buraco"},
+        {"nome": "Limpeza de terreno ou retirada de entulho"},
+        {"nome": "Coleta de lixo"},
+        {"nome": "Drenagem e bueiros"},
+        {"nome": "Concessão de jazigo ou sepultamento"}
+      ]
+    },
+    {
+      "nome": "Mobilidade e Trânsito",
+      "assuntos": [
+        {"nome": "Sinalização viária"},
+        {"nome": "Credencial de estacionamento para idoso ou PcD", "acesso_restrito_sugerido": true},
+        {"nome": "Recurso de multa de trânsito"},
+        {"nome": "Transporte escolar"}
+      ]
+    },
+    {
+      "nome": "Saúde",
+      "assuntos": [
+        {"nome": "Licença sanitária"},
+        {"nome": "Denúncia sanitária", "acesso_restrito_sugerido": true},
+        {"nome": "Tratamento fora do domicílio (TFD)", "acesso_restrito_sugerido": true},
+        {"nome": "Fornecimento de medicamento ou insumo", "acesso_restrito_sugerido": true}
+      ]
+    },
+    {
+      "nome": "Educação",
+      "assuntos": [
+        {"nome": "Matrícula ou transferência escolar"},
+        {"nome": "Declaração ou histórico escolar"},
+        {"nome": "Vaga em creche"}
+      ]
+    },
+    {
+      "nome": "Assistência Social",
+      "acesso_restrito_sugerido": true,
+      "assuntos": [
+        {"nome": "Benefício eventual (natalidade, funeral, cesta básica)"},
+        {"nome": "Inclusão ou atualização no CadÚnico"},
+        {"nome": "Acolhimento institucional"},
+        {"nome": "Inscrição em programa habitacional"}
+      ]
+    },
+    {
+      "nome": "Gestão de Pessoas",
+      "assuntos": [
+        {"nome": "Férias"},
+        {"nome": "Licença para tratamento de saúde", "acesso_restrito_sugerido": true},
+        {"nome": "Licença-maternidade ou paternidade", "acesso_restrito_sugerido": true},
+        {"nome": "Licença para capacitação"},
+        {"nome": "Licença sem vencimentos"},
+        {"nome": "Progressão ou promoção funcional"},
+        {"nome": "Adicional ou gratificação"},
+        {"nome": "Abono de faltas"},
+        {"nome": "Averbação de tempo de serviço"},
+        {"nome": "Aposentadoria", "acesso_restrito_sugerido": true},
+        {"nome": "Exoneração a pedido"},
+        {"nome": "Cessão de servidor"},
+        {"nome": "Remoção ou mudança de lotação"},
+        {"nome": "Certidão de tempo de serviço"}
+      ]
+    },
+    {
+      "nome": "Correição e Disciplina",
+      "acesso_restrito_sugerido": true,
+      "assuntos": [
+        {"nome": "Sindicância"},
+        {"nome": "Processo administrativo disciplinar (PAD)"},
+        {"nome": "Apuração de denúncia contra servidor"}
+      ]
+    },
+    {
+      "nome": "Licitações e Contratações",
+      "assuntos": [
+        {"nome": "Planejamento da contratação (DFD e ETP)"},
+        {"nome": "Pregão"},
+        {"nome": "Concorrência"},
+        {"nome": "Dispensa de licitação"},
+        {"nome": "Inexigibilidade de licitação"},
+        {"nome": "Adesão a ata de registro de preços"},
+        {"nome": "Credenciamento"}
+      ]
+    },
+    {
+      "nome": "Contratos, Convênios e Parcerias",
+      "assuntos": [
+        {"nome": "Aditivo de prazo"},
+        {"nome": "Aditivo de valor ou quantitativo"},
+        {"nome": "Reajuste ou repactuação"},
+        {"nome": "Reequilíbrio econômico-financeiro"},
+        {"nome": "Rescisão contratual"},
+        {"nome": "Penalidade a fornecedor"},
+        {"nome": "Termo de colaboração ou fomento (MROSC)"},
+        {"nome": "Convênio"},
+        {"nome": "Prestação de contas de convênio ou parceria"}
+      ]
+    },
+    {
+      "nome": "Orçamento e Finanças",
+      "assuntos": [
+        {"nome": "Pagamento a fornecedor"},
+        {"nome": "Diárias e passagens"},
+        {"nome": "Suprimento de fundos"},
+        {"nome": "Crédito adicional"},
+        {"nome": "Reconhecimento de dívida de exercício anterior"},
+        {"nome": "Restituição de valores"}
+      ]
+    },
+    {
+      "nome": "Patrimônio",
+      "assuntos": [
+        {"nome": "Doação de bens"},
+        {"nome": "Baixa de bem patrimonial"},
+        {"nome": "Cessão ou permissão de uso de imóvel público"},
+        {"nome": "Concessão de espaço público (box, quiosque)"},
+        {"nome": "Desapropriação"}
+      ]
+    },
+    {
+      "nome": "Jurídico",
+      "assuntos": [
+        {"nome": "Parecer jurídico"},
+        {"nome": "Inscrição em dívida ativa"},
+        {"nome": "Cumprimento de decisão judicial"},
+        {"nome": "Acompanhamento de ação judicial"}
+      ]
+    },
+    {
+      "nome": "Atos Oficiais e Câmara Municipal",
+      "assuntos": [
+        {"nome": "Projeto de lei do Executivo"},
+        {"nome": "Decreto"},
+        {"nome": "Portaria"},
+        {"nome": "Resposta a requerimento da Câmara"},
+        {"nome": "Sanção ou veto"}
+      ]
+    },
+    {
+      "nome": "Controle Interno e Tribunal de Contas",
+      "assuntos": [
+        {"nome": "Prestação de contas ao TCE"},
+        {"nome": "Atendimento a diligência do TCE"},
+        {"nome": "Auditoria interna"}
+      ]
+    }
+  ]
+}
