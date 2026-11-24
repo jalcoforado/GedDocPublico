@@ -19,6 +19,17 @@ dependencies = [
   "weasyprint==63.1",
   "celery==5.4.0",
   "redis==5.2.1",
+  # kombu é dependência TRANSITIVA do celery e precisa de teto próprio: a
+  # 5.7.0 passou a exigir redis-py >= 6.1.0 no transporte redis, e com a
+  # `redis==5.2.1` acima o worker morre no start com
+  # `kombu.exceptions.VersionMismatch` — em loop, 93 restarts observados.
+  # Nada no código muda; quem muda é o resolvedor do pip, então uma imagem
+  # buildada antes da 5.7.0 funciona e a buildada depois não. `celery==5.4.0`
+  # aceita kombu >= 5.3.4, < 6.0, e a faixa abaixo fica dentro disso (5.6.2
+  # verificada contra o broker).
+  # Subir para redis-py >= 6.1.0 é a outra saída, maior: exige validar o
+  # celery 5.4.0 com a 6.x.
+  "kombu>=5.3.4,<5.7.0",
   "bcrypt==4.2.1",
   "alembic==1.14.0",
   "simpleeval==1.0.3",
