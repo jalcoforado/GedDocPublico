@@ -8,7 +8,16 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 const CSS = "h1.doc-titulo { color: rgb(30, 58, 95); }";
-const estiloImpressao = vi.fn(() => Promise.resolve({ css: CSS, css_tela: ".folha { padding: 1px; }" }));
+const CABECALHO = '<header class="timbre"><p class="timbre-nome">Prefeitura de Itaitinga</p></header>';
+const RODAPE = '<footer class="timbre-rodape">Av. Cel. Virgílio Távora, 1710</footer>';
+const estiloImpressao = vi.fn(() =>
+  Promise.resolve({
+    css: CSS,
+    css_tela: ".folha { padding: 1px; }",
+    cabecalho_html: CABECALHO,
+    rodape_html: RODAPE,
+  }),
+);
 vi.mock("@/lib/api", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/api")>();
   return { ...real, api: { ...real.api, templatesDocumento: { estiloImpressao: () => estiloImpressao() } } };
@@ -58,6 +67,15 @@ describe("PreVisualizacaoDocumento", () => {
       "2 campos não foram preenchidos e vão sair assim no PDF",
     );
     await waitFor(() => expect(folha().querySelectorAll("mark.campo-pendente")).toHaveLength(2));
+  });
+
+  it("SI-53: papel timbrado do servidor — brasão e nome ACIMA do título, rodapé no fim", async () => {
+    montar("Despacho", "<p>Encaminhe-se.</p>");
+    await waitFor(() => expect(folha().querySelector("header.timbre")).not.toBeNull());
+    const filhos = Array.from(folha().querySelector(".folha")!.children).map((e) => e.className);
+    expect(filhos).toEqual(["timbre", "conteudo", "timbre-rodape"]);
+    expect(folha().querySelector(".conteudo h1.doc-titulo")?.textContent).toBe("Despacho");
+    expect(folha().querySelector("footer.timbre-rodape")?.textContent).toContain("Virgílio Távora");
   });
 
   it("título com marcação é texto, não HTML", () => {

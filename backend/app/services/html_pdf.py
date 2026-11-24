@@ -18,6 +18,10 @@ from __future__ import annotations
 import base64
 import html as _html
 import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .papel_timbrado import PapelTimbrado
 
 # Cor institucional (mesma do carimbo — services/pdf_carimbo.py).
 _BRAND = "#1e3a5f"
@@ -54,6 +58,25 @@ img {{ max-width: 100%; }}
 table {{ width: 100%; border-collapse: collapse; margin: 0 0 10px; }}
 th, td {{ border: 1px solid #ccc; padding: 4px 8px; text-align: left; }}
 th {{ background: #f2f2f2; }}
+
+/* SI-53 — papel timbrado (`services/papel_timbrado.py`). Só aparece quando o
+   chamador passa `timbre`; os PDFs de pagamentos não passam. */
+@page {{
+    @bottom-center {{ content: element(rodape); vertical-align: top; }}
+}}
+header.timbre {{ text-align: center; margin: 0 0 16px; }}
+header.timbre img.timbre-brasao {{
+    display: block; height: 2.4cm; width: auto; margin: 0 auto 6px;
+}}
+header.timbre p.timbre-nome {{
+    margin: 0; text-align: center; font-size: 12pt; font-weight: bold;
+    letter-spacing: 0.5px; text-transform: uppercase; color: #1a1a1a;
+}}
+footer.timbre-rodape {{
+    position: running(rodape);
+    border-top: 1px solid #ccc; padding-top: 4px;
+    font-size: 8pt; color: #555; text-align: center;
+}}
 """
 
 # Público: a pré-visualização do editor (SI-30) recebe ESTE texto por
@@ -77,6 +100,11 @@ mark.campo-pendente {
     background: #fde68a; color: #78350f; border-radius: 3px; padding: 0 2px;
     outline: 1px dashed #d97706;
 }
+/* O rodapé do timbre é `position: running()` no PDF; o navegador ignora isso e
+   o deixa no fluxo — a folha empurra ele para o pé. */
+.folha { display: flex; flex-direction: column; }
+.folha > .conteudo { flex: 1 0 auto; }
+.folha > footer.timbre-rodape { margin-top: 24px; }
 mark.campo-modelo {
     background: #dbeafe; color: #1e3a8a; border-radius: 3px; padding: 0 3px;
     font-family: ui-monospace, monospace; font-size: 0.85em;
@@ -130,13 +158,21 @@ def _raise_no_remote(url: str, *args, **kwargs):
 
 
 def html_to_pdf_bytes(
-    corpo_html: str, *, titulo: str | None = None, tenant_slug: str | None = None
+    corpo_html: str,
+    *,
+    titulo: str | None = None,
+    tenant_slug: str | None = None,
+    timbre: PapelTimbrado | None = None,
 ) -> bytes:
     """Renderiza o HTML da minuta como PDF (bytes). `titulo` vira o cabeçalho.
 
     `tenant_slug` habilita `_inline_imagens` — omitido pelos chamadores que
     nunca produzem `<img>` (ex.: ordem de pagamento), sem mudança de
     comportamento pra eles.
+
+    `timbre` (SI-53) põe o brasão e o nome da prefeitura acima do título e o
+    rodapé fixo em todas as páginas. O rodapé vai ANTES do corpo: elemento
+    `running()` só vale a partir da página em que aparece.
     """
     # Import tardio: WeasyPrint puxa libs nativas (pango/cairo) — só carrega quando usado.
     from weasyprint import HTML
@@ -147,6 +183,8 @@ def html_to_pdf_bytes(
     cabecalho = (
         f'<h1 class="doc-titulo">{_html.escape(titulo)}</h1>' if titulo else ""
     )
+    if timbre is not None:
+        cabecalho = timbre.rodape_html() + timbre.cabecalho_html() + cabecalho
     documento = (
         "<!DOCTYPE html><html><head><meta charset='utf-8'>"
         f"<style>{_CSS}</style></head><body>{cabecalho}{corpo_html}</body></html>"

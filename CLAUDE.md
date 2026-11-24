@@ -206,7 +206,10 @@ docker exec aprimora-py-backend python -m app.cli.seed_demo_operacional apply --
 #    táxi com coordenadas e trajetos de GPS, que são ilustrativos. Roda DEPOIS
 #    dos dois acima: renomeia as unidades fictícias do `seed_demo` para as
 #    secretarias reais. O mapa da frota mostra 24h, então repita
-#    `--parte demo` no dia da apresentação.
+#    `--parte demo` no dia da apresentação. A `--parte documento` (SI-53)
+#    cria o modelo de documento padrão; o brasão e o rodapé do documento NÃO
+#    vêm dele, e sim do papel timbrado (`services/papel_timbrado.py`), que lê
+#    a cópia do brasão em `backend/app/static/brand/`.
 docker exec aprimora-py-backend python -m app.cli.seed_itaitinga apply --tenant sobral --allow-non-demo
 
 # 5. Catálogo do protocolo (SI-54): 19 tipos de processo e 112 assuntos

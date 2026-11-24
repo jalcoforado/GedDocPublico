@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import (
@@ -24,6 +24,7 @@ from ..models import (
     MinutaHistorico,
     Processo,
     TemplateDocumento,
+    Tenant,
     Usuario,
 )
 from ..schemas.minuta import (
@@ -38,6 +39,7 @@ from .audit import log as audit_log
 from .google_docs_service import GoogleDocsError, GoogleDocsService
 from .html_pdf import html_to_pdf_bytes
 from .html_sanitizer import sanitizar_html
+from .papel_timbrado import papel_timbrado
 
 
 def _utcnow() -> datetime:
@@ -107,6 +109,35 @@ def _detectar_placeholders(corpo_html: str) -> list[str]:
     return sorted({m.group(1) for m in ph._TOKEN_RE.finditer(corpo_html)})
 
 
+def _validar_padrao_ativo(*, padrao: bool, ativo: bool) -> None:
+    """SI-53 — o padrão vem selecionado ao redigir, e a tela de redigir só lista
+    modelo ativo: um padrão inativo seria uma pré-seleção que não aparece."""
+    if padrao and not ativo:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Um modelo inativo não pode ser o padrão. Ative-o antes.",
+        )
+
+
+async def _desmarcar_padrao(
+    db: AsyncSession, *, tenant_id: int, exceto_id: int | None = None
+) -> None:
+    """Tira a marca de padrão do modelo que a tiver, ANTES de marcar outro —
+    o índice único parcial (0143) recusaria dois padrões ao mesmo tempo."""
+    stmt = (
+        update(TemplateDocumento)
+        .where(
+            TemplateDocumento.tenant_id == tenant_id,
+            TemplateDocumento.padrao.is_(True),
+        )
+        .values(padrao=False)
+    )
+    if exceto_id is not None:
+        stmt = stmt.where(TemplateDocumento.id != exceto_id)
+    await db.execute(stmt)
+    await db.flush()
+
+
 async def criar_template(
     db: AsyncSession,
     *,
@@ -115,6 +146,9 @@ async def criar_template(
     payload: TemplateDocumentoCreate,
 ) -> TemplateDocumento:
     await _validar_nome_template_unico(db, tenant_id=tenant_id, nome=payload.nome)
+    _validar_padrao_ativo(padrao=payload.padrao, ativo=payload.ativo)
+    if payload.padrao:
+        await _desmarcar_padrao(db, tenant_id=tenant_id)
     t = TemplateDocumento(
         tenant_id=tenant_id,
         nome=payload.nome,
@@ -124,6 +158,7 @@ async def criar_template(
         corpo_html=payload.corpo_html,
         placeholders_utilizados=_detectar_placeholders(payload.corpo_html),
         ativo=payload.ativo,
+        padrao=payload.padrao,
         id_usuario_criacao=usuario_id,
         criado_em=_utcnow(),
     )
@@ -187,6 +222,14 @@ async def atualizar_template(
         await _validar_nome_template_unico(
             db, tenant_id=tenant_id, nome=dados["nome"], excluir_id=template_id
         )
+    ativo_final = dados.get("ativo", t.ativo)
+    if dados.get("padrao"):
+        _validar_padrao_ativo(padrao=True, ativo=ativo_final)
+        await _desmarcar_padrao(db, tenant_id=tenant_id, exceto_id=template_id)
+    elif not ativo_final:
+        # Desativar o padrão tira a marca: a prefeitura volta ao
+        # "Documento em branco" em vez de ficar com um padrão invisível.
+        dados["padrao"] = False
     for campo, valor in dados.items():
         setattr(t, campo, valor)
     if "corpo_html" in dados:
@@ -202,6 +245,7 @@ async def excluir_template(
 ) -> None:
     t = await obter_template(db, tenant_id=tenant_id, template_id=template_id)
     t.excluido = True
+    t.padrao = False
     t.atualizado_em = _utcnow()
     await db.commit()
 
@@ -785,7 +829,15 @@ async def virar_anexo_sem_commit(
             )
 
         corpo_sanitizado = sanitizar_html(m.corpo_html or "")
-        pdf_bytes = html_to_pdf_bytes(corpo_sanitizado, titulo=m.titulo, tenant_slug=tenant_slug)
+        tenant = (
+            await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+        ).scalar_one()
+        pdf_bytes = html_to_pdf_bytes(
+            corpo_sanitizado,
+            titulo=m.titulo,
+            tenant_slug=tenant_slug,
+            timbre=papel_timbrado(tenant),
+        )
 
     anexo = await anexos_svc._criar_anexo_from_bytes(
         db,

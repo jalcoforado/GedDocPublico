@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, FileText, Pause, Pencil, Plus, Trash2 } from "lucide-react";
+import { Copy, FileText, Pause, Pencil, Plus, Star, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { EditorDeModelo, type ModoEdicao } from "@/components/protocolo/EditorDeModelo";
@@ -33,6 +33,7 @@ interface FormState {
   descricao: string;
   corpo_html: string;
   ativo: boolean;
+  padrao: boolean;
 }
 
 const EMPTY: FormState = {
@@ -42,6 +43,7 @@ const EMPTY: FormState = {
   descricao: "",
   corpo_html: "",
   ativo: true,
+  padrao: false,
 };
 
 export default function TemplatesDocumentoPage() {
@@ -129,6 +131,7 @@ export default function TemplatesDocumentoPage() {
       descricao: t.descricao ?? "",
       corpo_html: t.corpo_html,
       ativo: t.ativo,
+      padrao: t.padrao,
     });
     // Modelo antigo (sem marca de bloco) abre como um bloco de Texto: nada se perde.
     setBlocos(htmlParaBlocos(t.corpo_html));
@@ -145,6 +148,8 @@ export default function TemplatesDocumentoPage() {
         descricao: form.descricao.trim() || null,
         corpo_html: form.corpo_html,
         ativo: form.ativo,
+        // Inativo não pode ser padrão (o backend recusa): desativar desmarca.
+        padrao: form.ativo && form.padrao,
       };
       return editId === null
         ? api.templatesDocumento.create(payload)
@@ -233,6 +238,11 @@ export default function TemplatesDocumentoPage() {
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium text-foreground">
                   {t.nome}
+                  {t.padrao && (
+                    <Badge intent="brand" icon={Star} className="ml-2">
+                      Padrão
+                    </Badge>
+                  )}
                   {!t.ativo && (
                     <Badge intent="neutral" icon={Pause} className="ml-2">
                       Inativo
@@ -392,6 +402,26 @@ export default function TemplatesDocumentoPage() {
               <span className="block font-medium text-foreground">Ativo</span>
               <span className="block text-xs text-foreground-muted">
                 Aparece na lista de modelos ao redigir um documento.
+              </span>
+            </span>
+          </label>
+
+          <label
+            className={`flex items-start gap-2.5 rounded-md border border-border bg-surface-1 px-3 py-2.5 transition-colors duration-fast ${
+              form.ativo ? "cursor-pointer hover:bg-surface-2" : "cursor-not-allowed opacity-60"
+            }`}
+          >
+            <Checkbox
+              checked={form.ativo && form.padrao}
+              disabled={!form.ativo}
+              onChange={(e) => setForm({ ...form, padrao: e.target.checked })}
+              className="mt-0.5 h-4 w-4"
+            />
+            <span className="text-sm">
+              <span className="block font-medium text-foreground">Usar como padrão</span>
+              <span className="block text-xs text-foreground-muted">
+                Já vem selecionado ao redigir um documento, para todos da prefeitura. Só um
+                modelo pode ser o padrão: marcar este desmarca o anterior.
               </span>
             </span>
           </label>
