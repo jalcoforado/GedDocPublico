@@ -25,8 +25,8 @@ const SECOES: SecaoDaFila[] = [
 export default function AutoridadePage() {
   return (
     <FilaPorEtapa
-      titulo="Fila da Autoridade"
-      descricao="Solicitações aguardando aprovação final"
+      titulo="Fila da autoridade"
+      descricao="Solicitações que esperam a decisão final da autoridade competente."
       icon={Gavel}
       secoes={SECOES}
       vazio={{

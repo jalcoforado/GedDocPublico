@@ -10,7 +10,10 @@ identidade e geografia pelo município real:
      de saúde, escolares, socioassistenciais e culturais, com endereço e
      telefone. Fonte: site oficial da prefeitura; ver `dados/itaitinga.json`,
      que registra as páginas e a data da coleta.
-  3. **Demo localizada** — destinos das solicitações de veículo, pontos de
+  3. **Modelo de documento padrão** (SI-53) — o modelo que já vem selecionado
+     ao redigir no processo. O brasão e o rodapé NÃO estão no texto dele: vêm
+     do papel timbrado (`services/papel_timbrado.py`), em todo documento.
+  4. **Demo localizada** — destinos das solicitações de veículo, pontos de
      táxi/mototáxi com coordenadas e trajetos de GPS dos veículos demo.
 
 Uso:
@@ -19,7 +22,8 @@ Uso:
     docker exec aprimora-py-backend python -m app.cli.seed_demo_operacional \\
         apply --tenant sobral --allow-non-demo
     docker exec aprimora-py-backend python -m app.cli.seed_itaitinga \\
-        apply --tenant sobral --allow-non-demo [--parte identidade|unidades|demo|todas]
+        apply --tenant sobral --allow-non-demo \\
+        [--parte identidade|unidades|documento|demo|todas]
 
 Decisões de projeto:
     - **Idempotente.** Unidade e ponto são get-or-create por nome/código;
@@ -46,6 +50,7 @@ import argparse
 import asyncio
 import json
 import random
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -61,6 +66,7 @@ from ..database_admin import AdminSessionLocal as SessionLocal
 from ..models import (
     Permissionario,
     Ponto,
+    TemplateDocumento,
     Tenant,
     TipoUnidadeTrabalho,
     UnidadeTrabalho,
@@ -72,7 +78,7 @@ from ..services import frota_telemetria
 from ..services import transporte_regulado as tr
 
 DADOS = Path(__file__).parent / "dados" / "itaitinga.json"
-PARTES = ("identidade", "unidades", "demo")
+PARTES = ("identidade", "unidades", "documento", "demo")
 
 IDENTIDADE = {
     "nome": "Prefeitura de Itaitinga",
@@ -412,7 +418,82 @@ async def _aplicar_unidades(db: AsyncSession, tenant_id: int) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# 3. Demo localizada
+# 3. Modelo de documento padrão (SI-53)
+# ---------------------------------------------------------------------------
+
+MODELO_PADRAO_NOME = "Documento padrão — Prefeitura de Itaitinga"
+
+# No formato do montador de blocos (`frontend/lib/template-blocos.ts`): cada
+# bloco num `<div class="bloco bloco-<tipo>">`, para o modelo abrir na tela de
+# Modelos como blocos editáveis, não como um Texto só.
+MODELO_PADRAO_HTML = (
+    '<div class="bloco bloco-data_local">'
+    '<p style="text-align: right">Itaitinga/CE, {{data_hoje}}.</p></div>'
+    '<div class="bloco bloco-campo">'
+    "<p><strong>Processo:</strong> {{processo.numero}}</p></div>"
+    '<div class="bloco bloco-campo">'
+    "<p><strong>Interessado:</strong> {{requerente.nome}}</p></div>"
+    '<div class="bloco bloco-campo">'
+    "<p><strong>Assunto:</strong> {{processo.assunto}}</p></div>"
+    '<div class="bloco bloco-campo">'
+    "<p><strong>Destinatário:</strong> {{destinatario.nome}}</p></div>"
+    '<div class="bloco bloco-texto">'
+    "<p>Escreva aqui o conteúdo do documento.</p></div>"
+    '<div class="bloco bloco-assinatura">'
+    '<p style="text-align: center">________________________________________</p>'
+    '<p style="text-align: center"><strong>{{usuario.nome}}</strong></p>'
+    '<p style="text-align: center">{{unidade.nome}}</p></div>'
+)
+
+
+async def _aplicar_documento(db: AsyncSession, tenant_id: int) -> dict[str, Any]:
+    """Get-or-create por nome. Só marca como padrão se a prefeitura ainda não
+    tiver um — re-rodar não toma o lugar de um padrão escolhido na tela, nem
+    reescreve o texto que alguém já editou."""
+    modelo = (await db.execute(
+        select(TemplateDocumento).where(
+            TemplateDocumento.tenant_id == tenant_id,
+            TemplateDocumento.nome == MODELO_PADRAO_NOME,
+            TemplateDocumento.excluido.is_(False),
+        )
+    )).scalar_one_or_none()
+    criado = modelo is None
+    if criado:
+        modelo = TemplateDocumento(
+            tenant_id=tenant_id,
+            nome=MODELO_PADRAO_NOME,
+            descricao="Modelo geral da prefeitura. Brasão e rodapé vêm do papel timbrado.",
+            corpo_html=MODELO_PADRAO_HTML,
+            placeholders_utilizados=sorted(set(re.findall(r"\{\{\s*([\w.]+)\s*\}\}", MODELO_PADRAO_HTML))),
+            ativo=True,
+            padrao=False,
+            criado_em=datetime.utcnow(),
+        )
+        db.add(modelo)
+        await db.flush()
+
+    ja_tem_padrao = (await db.execute(
+        select(TemplateDocumento.id).where(
+            TemplateDocumento.tenant_id == tenant_id,
+            TemplateDocumento.padrao.is_(True),
+            TemplateDocumento.excluido.is_(False),
+        )
+    )).first() is not None
+    marcado = False
+    if not ja_tem_padrao:
+        modelo.ativo = True
+        modelo.padrao = True
+        marcado = True
+    await db.commit()
+    return {
+        "modelo_padrao": MODELO_PADRAO_NOME,
+        "modelo_criado": criado,
+        "modelo_marcado_como_padrao": marcado,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 4. Demo localizada
 # ---------------------------------------------------------------------------
 
 
@@ -554,6 +635,7 @@ async def _apply(args: argparse.Namespace) -> int:
     executores = {
         "identidade": _aplicar_identidade,
         "unidades": _aplicar_unidades,
+        "documento": _aplicar_documento,
         "demo": _aplicar_demo,
     }
     contagens: dict[str, Any] = {}

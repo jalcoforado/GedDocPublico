@@ -1,9 +1,11 @@
 "use client";
 
+import { Landmark } from "lucide-react";
 import { useState } from "react";
 
 import { TenantEditForm } from "@/components/admin/TenantEditForm";
 import { TenantModulosTab } from "@/components/admin/TenantModulosTab";
+import { PageHeader } from "@/components/ui/page-header";
 import { TabList, TabPanel, Tabs, type TabDef } from "@/components/ui/tabs";
 
 const ABAS: TabDef[] = [
@@ -37,15 +39,28 @@ export function TenantEditTabs({ tenantId }: { tenantId: number }) {
   const [aba, setAba] = useState("dados");
 
   return (
-    <Tabs value={aba} onChange={setAba} className="max-w-2xl space-y-4">
-      <TabList tabs={ABAS} aria-label="Seções do tenant" />
+    <div className="space-y-4">
+      {/* O título sai do formulário e sobe para cá: valia só na aba "Dados",
+          e a tela é das duas abas. */}
+      <PageHeader
+        icon={Landmark}
+        title="Editar prefeitura"
+        description="Dados cadastrais do município e os módulos que ele contratou."
+        breadcrumbs={[
+          { label: "Prefeituras", href: "/admin/tenants" },
+          { label: "Editar" },
+        ]}
+      />
+      <Tabs value={aba} onChange={setAba} className="max-w-2xl space-y-4">
+        <TabList tabs={ABAS} aria-label="Seções do tenant" />
 
-      <TabPanel value="dados" keepMounted>
-        <TenantEditForm tenantId={tenantId} />
-      </TabPanel>
-      <TabPanel value="modulos" keepMounted>
-        <TenantModulosTab tenantId={tenantId} />
-      </TabPanel>
-    </Tabs>
+        <TabPanel value="dados" keepMounted>
+          <TenantEditForm tenantId={tenantId} />
+        </TabPanel>
+        <TabPanel value="modulos" keepMounted>
+          <TenantModulosTab tenantId={tenantId} />
+        </TabPanel>
+      </Tabs>
+    </div>
   );
 }

@@ -185,7 +185,7 @@ function NodeCard({
 
       <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px]">
         <span className="inline-flex items-center gap-1 text-foreground-muted">
-          <FileText className="h-3 w-3 text-blue-600" aria-hidden="true" />
+          <FileText className="h-3 w-3 text-info" aria-hidden="true" />
           <span className="font-mono tabular-nums font-medium text-foreground">
             {no.processos_ativos}
           </span>

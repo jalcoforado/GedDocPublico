@@ -20,3 +20,6 @@ class BrandingResponse(BaseModel):
     logo_login_url: str | None = None
     imagem_login_url: str | None = None
     imagem_login_credito: str | None = None
+    # Conta por e-mail ligada? A tela esconde "Não lembro a senha", o convite
+    # e a confirmação de e-mail quando não (`conta_email.conta_por_email_ativa`).
+    conta_por_email: bool = False

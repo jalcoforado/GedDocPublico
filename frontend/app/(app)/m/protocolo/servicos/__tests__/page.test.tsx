@@ -5,7 +5,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import ServicosPage from "@/app/(app)/m/protocolo/servicos/page";
 import { api, protocoloApi, servicosApi } from "@/lib/api";
 
-vi.mock("@/lib/api", () => ({
+vi.mock("@/lib/api", async () => ({
+  // Rótulos dos níveis de sigilo: constante, vem do módulo real.
+  NIVEL_SIGILO_LABEL: (await vi.importActual<typeof import("@/lib/api")>("@/lib/api"))
+    .NIVEL_SIGILO_LABEL,
   servicosApi: {
     list: vi.fn(),
     get: vi.fn(),
@@ -85,7 +88,7 @@ describe("ServicosPage — PR 4a", () => {
     await screen.findByText("Certidão de IPTU");
     fireEvent.click(screen.getByRole("button", { name: /Novo serviço/i }));
     fireEvent.change(await screen.findByLabelText(/^Nome/i), { target: { value: "Poda de Árvore" } });
-    fireEvent.click(screen.getByRole("button", { name: /^Salvar$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Criar serviço$/i }));
     await waitFor(() => expect(createMock).toHaveBeenCalled());
     const payload = createMock.mock.calls[0][0];
     expect(payload.nome).toBe("Poda de Árvore");
@@ -99,7 +102,7 @@ describe("ServicosPage — PR 4a", () => {
     fireEvent.click(screen.getByRole("button", { name: /Editar/i }));
     const nome = (await screen.findByLabelText(/^Nome/i)) as HTMLInputElement;
     fireEvent.change(nome, { target: { value: "IPTU editado" } });
-    fireEvent.click(screen.getByRole("button", { name: /^Salvar$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Salvar alterações$/i }));
     await waitFor(() => expect(updateMock).toHaveBeenCalled());
     expect(updateMock.mock.calls[0][0]).toBe(1);
     expect(updateMock.mock.calls[0][1].nome).toBe("IPTU editado");
@@ -175,7 +178,7 @@ describe("ServicosPage — Fase F (UX-1 catálogo)", () => {
     await screen.findByText("Certidão de IPTU");
     fireEvent.click(screen.getByRole("button", { name: /Novo serviço/i }));
     fireEvent.change(await screen.findByLabelText(/^Nome\*?$/i), { target: { value: "Teste F" } });
-    fireEvent.click(screen.getByRole("button", { name: /^Salvar$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Criar serviço$/i }));
     await waitFor(() => expect(createMock).toHaveBeenCalled());
     const payload = createMock.mock.calls[0][0];
     // Defaults preservados.
@@ -211,7 +214,7 @@ describe("ServicosPage — Fase F (UX-1 catálogo)", () => {
     fireEvent.click(screen.getByRole("button", { name: /Novo serviço/i }));
     fireEvent.change(await screen.findByLabelText(/^Nome\*?$/i), { target: { value: "Com doc" } });
 
-    fireEvent.click(screen.getByRole("button", { name: /^Adicionar$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Adicionar documento$/i }));
     const docNome = await screen.findByLabelText(/Documento 1 — nome/i);
     fireEvent.change(docNome, { target: { value: "RG" } });
     const docDesc = screen.getByLabelText(/Documento 1 — descrição/i);
@@ -219,7 +222,7 @@ describe("ServicosPage — Fase F (UX-1 catálogo)", () => {
     const obrigCheckbox = screen.getByLabelText(/^Obrigatório$/i) as HTMLInputElement;
     fireEvent.click(obrigCheckbox);
 
-    fireEvent.click(screen.getByRole("button", { name: /^Salvar$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Criar serviço$/i }));
     await waitFor(() => expect(createMock).toHaveBeenCalled());
     const payload = createMock.mock.calls[0][0];
     expect(payload.documentos_exigidos).toEqual([

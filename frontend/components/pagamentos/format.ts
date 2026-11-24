@@ -50,3 +50,10 @@ export function fmtTamanho(bytes: number | null | undefined): string {
   if (kb < 1024) return `${kb.toFixed(1)} KB`;
   return `${(kb / 1024).toFixed(1)} MB`;
 }
+
+/** Competência "aaaa-mm" como "mm/aaaa" — o formato que o servidor público lê. */
+export function fmtCompetencia(v: string | null | undefined): string {
+  if (!v) return "—";
+  const m = /^(\d{4})-(\d{2})/.exec(v);
+  return m ? `${m[2]}/${m[1]}` : v;
+}

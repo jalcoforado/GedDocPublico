@@ -17,6 +17,13 @@ interface SectionCardProps {
    * (ex: /processos/novo). Em uso genérico, omitir.
    */
   step?: number;
+  /**
+   * Âncora da seção (o roteiro do formulário rola até ela). Ganha
+   * `scroll-margin` para não parar escondida sob o cabeçalho fixo.
+   */
+  id?: string;
+  /** Botões no canto direito do cabeçalho (ex.: "Adicionar parada"). */
+  actions?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
 }
@@ -35,13 +42,17 @@ export function SectionCard({
   description,
   icon: Icon,
   step,
+  id,
+  actions,
   children,
   className,
 }: SectionCardProps) {
   return (
     <section
+      id={id}
       className={cn(
         "rounded-card border border-border bg-card shadow-card",
+        id && "scroll-mt-24",
         className,
       )}
     >
@@ -69,6 +80,7 @@ export function SectionCard({
             <p className="mt-0.5 text-xs text-foreground-muted">{description}</p>
           )}
         </div>
+        {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
       </header>
       <div className="space-y-4 p-5">{children}</div>
     </section>

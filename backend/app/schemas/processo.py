@@ -32,6 +32,27 @@ class ProcessoCreate(BaseModel):
     rascunho: bool = False
 
 
+class RascunhoUpdate(BaseModel):
+    """Edição do rascunho (SI-16): os mesmos campos do formulário de abertura.
+
+    Edição completa, não parcial — a tela manda o formulário inteiro, como na
+    abertura. Situação, número, autor e tenant ficam de fora: são do servidor.
+    Rascunho só nasce pela tela de abertura (o balcão e o portal não usam), por
+    isso o canal fica no mesmo domínio de `ProcessoCreate`.
+    """
+
+    id_assunto: int
+    id_manifestante: int
+    id_unidade_proprietaria: int
+    observacao: str | None = Field(default=None, max_length=10000)
+    corpo: str | None = Field(default=None, max_length=50000)
+    numero_origem: str | None = None
+    publico: bool = True
+    nivel_sigilo: str = "ostensivo"
+    externo: bool = False
+    canal_entrada: Literal["interno", "email"] = "interno"
+
+
 class ClassificarSigiloRequest(BaseModel):
     """Classifica/reclassifica o sigilo de um processo (LAI).
 
@@ -68,6 +89,41 @@ class RecusarEncaminhamentoRequest(BaseModel):
         v = v.strip()
         if len(v) < 5:
             raise ValueError("Informe o motivo da recusa (mínimo de 5 caracteres).")
+        return v
+
+
+class DesarquivarRequest(BaseModel):
+    """SI-60 (RF-01) — reabrir processo arquivado. Justificativa obrigatória:
+    é ela que o histórico mostra ao lado do arquivamento que foi desfeito."""
+
+    justificativa: str = Field(min_length=5, max_length=2000)
+
+    @field_validator("justificativa")
+    @classmethod
+    def _justificativa_nao_e_so_espaco(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 5:
+            raise ValueError(
+                "Informe a justificativa do desarquivamento (mínimo de 5 caracteres)."
+            )
+        return v
+
+
+class CancelarRecebimentoRequest(BaseModel):
+    """SI-61 (RF-02) — desfazer um recebimento feito por engano. Justificativa
+    obrigatória: é o que a unidade de origem lê para entender por que o
+    processo voltou a ficar em trânsito."""
+
+    justificativa: str = Field(min_length=5, max_length=2000)
+
+    @field_validator("justificativa")
+    @classmethod
+    def _justificativa_nao_e_so_espaco(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 5:
+            raise ValueError(
+                "Informe a justificativa do cancelamento (mínimo de 5 caracteres)."
+            )
         return v
 
 
@@ -109,6 +165,11 @@ class ProcessoListItem(BaseModel):
     )
     prazo_caixa_vence_em: datetime | None = None
     prazo_caixa_origem: Literal["encaminhamento", "servico"] | None = None
+    # SI-60 — há arquivamento EM VIGOR (`processos.condicao_arquivado`). A tela
+    # decidia isso procurando "ARQUIVAMENTO" na linha do tempo, o que deixou de
+    # servir quando o processo passou a poder ser desarquivado: o arquivamento
+    # antigo continua no histórico.
+    arquivado: bool = False
     ativo: bool
     publico: bool
     nivel_sigilo: str = "ostensivo"
@@ -159,6 +220,21 @@ class OrdemProcesso(str, Enum):
 
     recentes = "recentes"
     parados = "parados"
+
+
+class OrdenarProcesso(str, Enum):
+    """SI-19 — coluna pela qual a listagem ordena (clique no título da
+    coluna). Lista fechada de propósito: o valor vira ORDER BY, e campo livre
+    vindo da URL não pode chegar ao SQL. Com `ordenar`, `ordem` é ignorada.
+    """
+
+    numero = "numero"
+    abertura = "abertura"
+    manifestante = "manifestante"
+    assunto = "assunto"
+    local_atual = "local_atual"
+    responsavel = "responsavel"
+    parado = "parado"
 
 
 class CaixaProcesso(str, Enum):
@@ -354,6 +430,8 @@ class AnexoNoProcesso(BaseModel):
     # cache, não uma releitura do arquivo a cada listagem.
     documento_numero: int | None = None
     pagina_processo: int | None = None
+    # SI-62: documento que este arquivo acompanha (anexos do despacho).
+    id_anexo_principal: int | None = None
 
 
 class EncaminhamentoOut(BaseModel):
@@ -371,10 +449,21 @@ class EncaminhamentoOut(BaseModel):
     motivo_recusa: str | None = None
 
 
+class AnexoDoDespacho(BaseModel):
+    """Arquivo que acompanha o despacho (filho do PDF assinado, SI-62)."""
+    id: int
+    descricao: str | None
+
+
 class DespachoOut(BaseModel):
     id: int
     despacho: str
     usuario: str | None
+    # SI-62: PDF assinado do despacho avulso; nulo nos despachos que vêm
+    # junto de encaminhar, recusar, cancelar ou arquivar.
+    id_anexo: int | None = None
+    # Os arquivos enviados junto (filhos do PDF), não assinados.
+    anexos: list[AnexoDoDespacho] = []
 
 
 class PermanenciaNo(BaseModel):
@@ -446,6 +535,12 @@ class PrazoInfo(BaseModel):
 
 
 class ProcessoDetail(ProcessoListItem):
+    # SI-16 — os ids do que o formulário de abertura escolhe, para a edição do
+    # rascunho se pré-preencher. Os nomes já vêm de `ProcessoListItem`.
+    id_assunto: int | None = None
+    id_tipo_processo: int | None = None
+    id_manifestante: int | None = None
+    id_unidade_proprietaria: int | None = None
     observacao: str | None
     corpo: str | None
     virtual: bool
@@ -479,3 +574,10 @@ class ProcessoDetail(ProcessoListItem):
     # tela então não restringe, e o servidor continua sendo a barreira.
     pode_receber_encaminhamento: bool | None = None
     pode_cancelar_encaminhamento: bool | None = None
+    # SI-61 — o último recebimento pode ser desfeito por quem consulta?
+    # `None` = não há recebimento a cancelar (nunca recebido, em trânsito,
+    # arquivado) ou detalhe sem usuário. `False` vem com o motivo, que a tela
+    # mostra em vez de um botão cinza sem explicação. A permissão específica
+    # (`processo_cancelar_recebimento`) a tela confere à parte, por `can`.
+    pode_cancelar_recebimento: bool | None = None
+    motivo_cancelar_recebimento: str | None = None

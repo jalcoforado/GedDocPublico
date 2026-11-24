@@ -10,7 +10,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
-import { fmtData, fmtMoeda } from "@/components/pagamentos/format";
+import { fmtCompetencia, fmtData, fmtMoeda } from "@/components/pagamentos/format";
 import { TRAMITACAO_ROTULO } from "@/components/pagamentos/situacoes";
 import { api, type RegraExcecao, type SituacaoTramitacao } from "@/lib/api";
 
@@ -47,7 +47,24 @@ function Celula({ campo, valor }: { campo: string; valor: unknown }) {
   if (CAMPOS_DATA.has(campo)) return <>{fmtData(String(valor))}</>;
   if (campo === "situacao_tramitacao")
     return <>{TRAMITACAO_ROTULO[valor as SituacaoTramitacao]?.label ?? String(valor)}</>;
+  if (campo === "competencia") return <>{fmtCompetencia(String(valor))}</>;
+  // Situação e tipo chegam como código ("PENDENTE", "DEBITO"); cada regra
+  // devolve um enum diferente, então vira rótulo pela forma, não por tabela.
+  if ((campo === "situacao" || campo === "tipo") && /^[A-Z_]+$/.test(String(valor)))
+    return <>{rotuloDeCodigo(String(valor))}</>;
   return <>{String(valor)}</>;
+}
+
+/** Códigos cujo rótulo leva acento — o resto sai da forma do código. */
+const ROTULO_CODIGO: Record<string, string> = {
+  DEBITO: "Débito", CREDITO: "Crédito", VALIDACAO: "Validação", PROVAVEL: "Provável",
+};
+
+/** "AGUARDANDO_GESTOR" → "Aguardando gestor". */
+function rotuloDeCodigo(codigo: string): string {
+  if (ROTULO_CODIGO[codigo]) return ROTULO_CODIGO[codigo];
+  const texto = codigo.toLowerCase().replace(/_/g, " ");
+  return texto.charAt(0).toUpperCase() + texto.slice(1);
 }
 
 function Regra({ regra }: { regra: RegraExcecao }) {

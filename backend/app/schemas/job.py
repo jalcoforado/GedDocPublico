@@ -1,5 +1,5 @@
-from datetime import datetime
-from typing import Any
+from datetime import date, datetime
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -31,12 +31,17 @@ class DispararCarimbarAnexosRequest(BaseModel):
 
 
 class DispararRelatorioTramitacaoRequest(BaseModel):
+    # Mesmos filtros de `GET /relatorios/tramitacao.*` (SI-34): dias locais,
+    # modo de unidade e data base.
     id_unidade: int | None = None
+    modo_unidade: Literal["envolvida", "dona", "atual"] = "envolvida"
     id_assunto: int | None = None
     id_tipo_processo: int | None = None
-    desde: datetime | None = None
-    ate: datetime | None = None
-    apenas_ativos: bool = False
+    id_servico: int | None = None
+    desde: date | None = None
+    ate: date | None = None
+    data_base: Literal["abertura", "chegada"] = "abertura"
+    com_atraso: bool = False
     max_processos: int = 200
 
 

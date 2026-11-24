@@ -1,41 +1,34 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { BarChart3 } from "lucide-react";
+import {
+  AlertOctagon,
+  AlertTriangle,
+  BarChart3,
+  Calculator,
+  Car,
+  CheckCircle2,
+  ClipboardList,
+  Droplets,
+  FileClock,
+  FileX,
+  Fuel,
+  KeyRound,
+  Send,
+  ThumbsUp,
+  Wallet,
+  Wrench,
+} from "lucide-react";
 import { useMemo } from "react";
 
+import { fmtLitros } from "@/components/frota/rotulos";
+import { fmtMoeda } from "@/components/pagamentos/format";
+import { KpiCard } from "@/components/ui/kpi-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { api } from "@/lib/api";
 
-function fmtMoeda(v: number): string {
-  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
-
-function Stat({
-  label,
-  value,
-  intent,
-}: {
-  label: string;
-  value: string | number;
-  intent?: "danger" | "warning" | "success";
-}) {
-  const cls =
-    intent === "danger"
-      ? "text-danger-soft-foreground"
-      : intent === "warning"
-        ? "text-warning-soft-foreground"
-        : intent === "success"
-          ? "text-success-soft-foreground"
-          : "text-foreground";
-  return (
-    <div className="rounded-lg border border-border bg-surface-1 p-4">
-      <p className="text-sm text-foreground-muted">{label}</p>
-      <p className={`mt-1 text-2xl font-semibold tabular-nums ${cls}`}>{value}</p>
-    </div>
-  );
-}
+const GRADE = "grid grid-cols-2 gap-3 lg:grid-cols-4";
 
 export default function RelatoriosFrotaPage() {
   // Visão gerencial: agrega dados das APIs já existentes (sem backend novo).
@@ -90,49 +83,81 @@ export default function RelatoriosFrotaPage() {
         breadcrumbs={[{ label: "Frota Pública", href: "/m/frota" }, { label: "Visão gerencial" }]}
       />
 
-      <SectionCard icon={BarChart3} title="Veículos" description="Situação atual da frota.">
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Stat label="Total de veículos" value={veiculos.total} />
-          <Stat label="Disponíveis" value={veiculos.disponiveis} intent="success" />
-          <Stat label="Em uso" value={veiculos.em_uso} />
-          <Stat label="Em manutenção" value={veiculos.manutencao} intent="warning" />
+      <SectionCard icon={Car} title="Veículos" description="Situação atual da frota.">
+        <div className={GRADE}>
+          <KpiCard label="Total de veículos" value={veiculos.total} icon={Car} />
+          <KpiCard label="Disponíveis" value={veiculos.disponiveis} icon={CheckCircle2} intent="success" />
+          <KpiCard label="Em uso" value={veiculos.em_uso} icon={KeyRound} intent="info" />
+          <KpiCard
+            label="Em manutenção"
+            value={veiculos.manutencao}
+            icon={Wrench}
+            intent={veiculos.manutencao > 0 ? "warning" : "default"}
+          />
         </div>
       </SectionCard>
 
-      <SectionCard icon={BarChart3} title="Solicitações" description="Pedidos de uso por status.">
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Stat label="Solicitadas" value={solicitacoes.solicitada} />
-          <Stat label="Aprovadas" value={solicitacoes.aprovada} />
-          <Stat label="Em uso" value={solicitacoes.em_uso} />
-          <Stat label="Concluídas" value={solicitacoes.concluida} intent="success" />
+      <SectionCard icon={ClipboardList} title="Solicitações" description="Pedidos de uso por status.">
+        <div className={GRADE}>
+          <KpiCard
+            label="Aguardando aprovação"
+            value={solicitacoes.solicitada}
+            icon={Send}
+            intent={solicitacoes.solicitada > 0 ? "warning" : "default"}
+          />
+          <KpiCard label="Aprovadas" value={solicitacoes.aprovada} icon={ThumbsUp} intent="info" />
+          <KpiCard label="Em uso" value={solicitacoes.em_uso} icon={KeyRound} intent="info" />
+          <KpiCard label="Concluídas" value={solicitacoes.concluida} icon={CheckCircle2} intent="success" />
         </div>
       </SectionCard>
 
       <SectionCard
-        icon={BarChart3}
+        icon={AlertTriangle}
         title="Pendências operacionais"
         description="Itens que exigem atenção."
       >
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Stat label="Documentos vencidos" value={vencidos} intent={vencidos > 0 ? "danger" : undefined} />
-          <Stat label="Documentos a vencer (30d)" value={aVencer} intent={aVencer > 0 ? "warning" : undefined} />
-          <Stat label="Manutenções abertas" value={manutencoesAbertas} intent={manutencoesAbertas > 0 ? "warning" : undefined} />
-          <Stat label="Ocorrências abertas" value={ocorrenciasAbertas} intent={ocorrenciasAbertas > 0 ? "warning" : undefined} />
+        <div className={GRADE}>
+          <KpiCard
+            label="Documentos vencidos"
+            value={vencidos}
+            icon={FileX}
+            intent={vencidos > 0 ? "danger" : "default"}
+          />
+          <KpiCard
+            label="Documentos a vencer"
+            value={aVencer}
+            hint="nos próximos 30 dias"
+            icon={FileClock}
+            intent={aVencer > 0 ? "warning" : "default"}
+          />
+          <KpiCard
+            label="Manutenções abertas"
+            value={manutencoesAbertas}
+            icon={Wrench}
+            intent={manutencoesAbertas > 0 ? "warning" : "default"}
+          />
+          <KpiCard
+            label="Ocorrências abertas"
+            value={ocorrenciasAbertas}
+            icon={AlertOctagon}
+            intent={ocorrenciasAbertas > 0 ? "warning" : "default"}
+          />
         </div>
       </SectionCard>
 
       <SectionCard
-        icon={BarChart3}
+        icon={Fuel}
         title="Abastecimentos"
         description="Consolidado de abastecimentos registrados."
       >
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Stat label="Abastecimentos" value={abast?.total_abastecimentos ?? 0} />
-          <Stat label="Litros (total)" value={(abast?.total_litros ?? 0).toLocaleString("pt-BR")} />
-          <Stat label="Custo total" value={fmtMoeda(abast?.total_valor ?? 0)} />
-          <Stat
-            label="Média R$/litro"
+        <div className={GRADE}>
+          <KpiCard label="Abastecimentos" value={abast?.total_abastecimentos ?? 0} icon={Fuel} />
+          <KpiCard label="Litros (total)" value={fmtLitros(abast?.total_litros ?? 0)} icon={Droplets} />
+          <KpiCard label="Custo total" value={fmtMoeda(abast?.total_valor ?? 0)} icon={Wallet} />
+          <KpiCard
+            label="Média por litro"
             value={abast?.media_valor_litro != null ? fmtMoeda(abast.media_valor_litro) : "—"}
+            icon={Calculator}
           />
         </div>
         <p className="mt-3 text-xs text-foreground-muted">

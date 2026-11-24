@@ -41,8 +41,8 @@ const SECOES: SecaoDaFila[] = [
 export default function ConcluidasPage() {
   return (
     <FilaPorEtapa
-      titulo="Solicitações Concluídas"
-      descricao="Histórico de solicitações já finalizadas"
+      titulo="Solicitações concluídas"
+      descricao="Histórico das solicitações que já saíram do fluxo de aprovação."
       icon={History}
       secoes={SECOES}
       gradeKpi="grid grid-cols-2 gap-3 md:grid-cols-4"

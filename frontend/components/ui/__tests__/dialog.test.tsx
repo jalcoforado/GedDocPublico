@@ -354,3 +354,24 @@ describe("Dialog — aria-describedby (UX-02 fatia 2.1)", () => {
     expect(screen.getByRole("dialog")).not.toHaveAttribute("aria-describedby");
   });
 });
+
+/**
+ * Regressão: um ancestral com transform (a animação de entrada das seções da
+ * página) virava o bloco de contenção do `fixed inset-0`, e o fundo escuro
+ * cobria só a seção — cabeçalho e menu lateral ficavam acesos. O diálogo vai
+ * por portal para o <body>, fora de qualquer ancestral.
+ */
+describe("Dialog — cobre a tela inteira", () => {
+  it("renderiza no body, não dentro do ancestral transformado", () => {
+    const { container } = render(
+      <section style={{ transform: "translateY(0)" }}>
+        <Dialog open onClose={() => {}} title="Adicionar anexo">
+          conteúdo
+        </Dialog>
+      </section>,
+    );
+    const dialog = screen.getByRole("dialog");
+    expect(container.contains(dialog)).toBe(false);
+    expect(dialog.parentElement?.parentElement).toBe(document.body);
+  });
+});

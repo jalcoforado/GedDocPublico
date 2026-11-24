@@ -1,20 +1,51 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Car, Inbox, Plus } from "lucide-react";
+import {
+  Ban,
+  Building2,
+  Car,
+  Eye,
+  Inbox,
+  PauseCircle,
+  Pencil,
+  Plus,
+  RotateCcw,
+  SearchX,
+  Trash2,
+  User,
+} from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
+import {
+  CampoVinculo,
+  errosDoVinculo,
+  idsDoVinculo,
+  modoDoVinculo,
+  type ModoVinculo,
+} from "@/components/transporte/campo-vinculo";
+import {
+  dicaVigencia,
+  erroValidade,
+  GrupoCampos,
+  useValidacao,
+} from "@/components/transporte/formulario";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
+import { SkeletonRow } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
-import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { Table, TBody, TD, TH, THead, TR, TRLink } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import {
@@ -146,6 +177,7 @@ export default function VeiculosReguladosPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<VeiculoRegulado | null>(null);
   const [form, setForm] = useState<VeiculoForm>(EMPTY);
+  const [modoVinculo, setModoVinculo] = useState<ModoVinculo>("permissionario");
   const [err, setErr] = useState<string | null>(null);
 
   const listaQ = useQuery({
@@ -160,6 +192,14 @@ export default function VeiculosReguladosPage() {
       }),
   });
   const totalPages = Math.max(1, Math.ceil((listaQ.data?.total ?? 0) / PAGE_SIZE));
+  const filtrando = situacaoFiltro !== "" || tipoFiltro !== "" || busca.trim() !== "";
+
+  function limparFiltros() {
+    setSituacaoFiltro("");
+    setTipoFiltro("");
+    setBusca("");
+    setPage(1);
+  }
 
   // Vínculos para os selects (permissionário / empresa).
   const permsQ = useQuery({
@@ -214,13 +254,42 @@ export default function VeiculosReguladosPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // Regras do backend (`VeiculoReguladoCreate`) ditas no campo, com o conserto.
+  const placaNorm = form.placa.replace(/[\s-]/g, "");
+  const renavamDigitos = form.renavam.replace(/\D/g, "");
+  const errosVinculo = errosDoVinculo(modoVinculo, form.id_permissionario, form.id_empresa);
+  const val = useValidacao<
+    "id_permissionario" | "id_empresa" | "placa" | "renavam" | "marca" | "modelo" | "ano_modelo" | "data_validade_autorizacao"
+  >({
+    ...errosVinculo,
+    placa:
+      placaNorm === ""
+        ? "Informe a placa."
+        : !/^[A-Za-z0-9]{7}$/.test(placaNorm)
+          ? "A placa tem 7 caracteres: ABC1D23 (Mercosul) ou ABC-1234."
+          : undefined,
+    renavam:
+      renavamDigitos !== "" && (renavamDigitos.length < 9 || renavamDigitos.length > 11)
+        ? "O RENAVAM tem de 9 a 11 dígitos: confira no documento do veículo."
+        : undefined,
+    marca: form.marca.trim() === "" ? "Informe a marca." : undefined,
+    modelo: form.modelo.trim() === "" ? "Informe o modelo." : undefined,
+    ano_modelo:
+      form.ano_fabricacao && form.ano_modelo && Number(form.ano_modelo) < Number(form.ano_fabricacao)
+        ? "O ano do modelo não pode ser antes do ano de fabricação."
+        : undefined,
+    data_validade_autorizacao: erroValidade(form.data_inicio_autorizacao, form.data_validade_autorizacao),
+  });
+
   function set<K extends keyof VeiculoForm>(key: K, value: VeiculoForm[K]) {
     setForm((f) => ({ ...f, [key]: value }));
   }
   function openNew() {
     setEditing(null);
     setForm(EMPTY);
+    setModoVinculo("permissionario");
     setErr(null);
+    val.reiniciar();
     setDialogOpen(true);
   }
   function openEdit(v: VeiculoRegulado) {
@@ -247,7 +316,14 @@ export default function VeiculosReguladosPage() {
       situacao: v.situacao,
       observacoes: v.observacoes ?? "",
     });
+    setModoVinculo(
+      modoDoVinculo(
+        v.id_permissionario != null ? String(v.id_permissionario) : "",
+        v.id_empresa != null ? String(v.id_empresa) : "",
+      ),
+    );
     setErr(null);
+    val.reiniciar();
     setDialogOpen(true);
   }
   function closeDialog() {
@@ -257,21 +333,9 @@ export default function VeiculosReguladosPage() {
   }
   function salvar() {
     setErr(null);
-    if (form.placa.trim() === "") {
-      setErr("Placa é obrigatória.");
-      return;
-    }
-    if (form.marca.trim() === "" || form.modelo.trim() === "") {
-      setErr("Marca e modelo são obrigatórios.");
-      return;
-    }
-    if (form.id_permissionario === "" && form.id_empresa === "") {
-      setErr("Informe ao menos um vínculo: permissionário ou empresa.");
-      return;
-    }
+    if (!val.conferir()) return;
     const payload = {
-      id_permissionario: form.id_permissionario === "" ? null : Number(form.id_permissionario),
-      id_empresa: form.id_empresa === "" ? null : Number(form.id_empresa),
+      ...idsDoVinculo(modoVinculo, form.id_permissionario, form.id_empresa),
       placa: form.placa.trim(),
       renavam: nullify(form.renavam),
       chassi: nullify(form.chassi),
@@ -315,17 +379,17 @@ export default function VeiculosReguladosPage() {
       />
 
       {semVinculos && (
-        <div role="alert" className="rounded-md bg-warning-soft px-3 py-2 text-sm text-warning-soft-foreground">
+        <Alert intent="warning">
           Cadastre ao menos um permissionário ou empresa antes de registrar veículos — todo veículo
           regulado precisa de um vínculo.
-        </div>
+        </Alert>
       )}
 
-      <div className="flex flex-wrap gap-3">
-        <div>
-          <Label htmlFor="f_sit">Situação</Label>
+      <FilterBar ariaLabel="Filtros dos veículos">
+        <FilterBar.Group label="Situação" className="w-full sm:w-48">
           <Select
             id="f_sit"
+            aria-label="Situação"
             value={situacaoFiltro}
             onChange={(e) => {
               setSituacaoFiltro(e.target.value);
@@ -339,11 +403,11 @@ export default function VeiculosReguladosPage() {
               </option>
             ))}
           </Select>
-        </div>
-        <div>
-          <Label htmlFor="f_tipo">Tipo de serviço</Label>
+        </FilterBar.Group>
+        <FilterBar.Group label="Tipo de serviço" className="w-full sm:w-56">
           <Select
             id="f_tipo"
+            aria-label="Tipo de serviço"
             value={tipoFiltro}
             onChange={(e) => {
               setTipoFiltro(e.target.value);
@@ -357,11 +421,11 @@ export default function VeiculosReguladosPage() {
               </option>
             ))}
           </Select>
-        </div>
-        <div className="flex-1 min-w-[200px]">
-          <Label htmlFor="f_q">Busca</Label>
+        </FilterBar.Group>
+        <FilterBar.Group label="Busca" className="min-w-[200px] flex-1">
           <Input
             id="f_q"
+            aria-label="Busca"
             value={busca}
             onChange={(e) => {
               setBusca(e.target.value);
@@ -369,16 +433,31 @@ export default function VeiculosReguladosPage() {
             }}
             placeholder="Placa, marca, modelo, RENAVAM ou chassi"
           />
-        </div>
-      </div>
+        </FilterBar.Group>
+        {filtrando && (
+          <FilterBar.Actions>
+            <Button variant="ghost" onClick={limparFiltros}>
+              Limpar
+            </Button>
+          </FilterBar.Actions>
+        )}
+      </FilterBar>
 
       {!listaQ.isLoading && (listaQ.data?.items.length ?? 0) === 0 ? (
         <EmptyState
-          icon={Inbox}
-          title="Nenhum veículo regulado"
-          description="Cadastre o primeiro veículo vinculado a um permissionário ou empresa."
+          icon={filtrando ? SearchX : Inbox}
+          title={filtrando ? "Nenhum veículo encontrado" : "Nenhum veículo regulado"}
+          description={
+            filtrando
+              ? "Nenhum veículo corresponde à busca ou aos filtros aplicados."
+              : "Cadastre o primeiro veículo vinculado a um permissionário ou empresa."
+          }
           action={
-            canCreate && !semVinculos ? (
+            filtrando ? (
+              <Button variant="secondary" onClick={limparFiltros}>
+                Limpar filtros
+              </Button>
+            ) : canCreate && !semVinculos ? (
               <Button onClick={openNew}>
                 <Plus className="mr-1 h-4 w-4" />
                 Cadastrar veículo
@@ -400,17 +479,15 @@ export default function VeiculosReguladosPage() {
             </TR>
           </THead>
           <TBody>
-            {listaQ.isLoading && (
-              <TR>
-                <TD colSpan={7} className="text-center text-muted-foreground">
-                  Carregando...
-                </TD>
-              </TR>
-            )}
+            {listaQ.isLoading &&
+              Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} cols={7} />)}
             {listaQ.data?.items.map((v) => (
-              <TR key={v.id}>
-                <TD className="font-mono">
-                  <Link href={`/m/transporte/veiculos/${v.id}`} className="text-blue-600 hover:underline">
+              <TRLink key={v.id} href={`/m/transporte/veiculos/${v.id}`}>
+                <TD className="whitespace-nowrap font-mono font-medium">
+                  <Link
+                    href={`/m/transporte/veiculos/${v.id}`}
+                    className="text-primary hover:underline"
+                  >
                     {v.placa}
                   </Link>
                 </TD>
@@ -418,9 +495,21 @@ export default function VeiculosReguladosPage() {
                   <div className="font-medium">{v.marca}</div>
                   <div className="text-xs text-muted-foreground">{v.modelo}</div>
                 </TD>
+                {/* Era 👤/🏢 em emoji, que em parte das fontes do sistema
+                    virava um "▌" antes do nome. Ícone da própria UI no lugar. */}
                 <TD className="text-sm text-muted-foreground">
-                  {permLabel(v.id_permissionario) && <div>👤 {permLabel(v.id_permissionario)}</div>}
-                  {empLabel(v.id_empresa) && <div>🏢 {empLabel(v.id_empresa)}</div>}
+                  {permLabel(v.id_permissionario) && (
+                    <div className="flex items-center gap-1.5">
+                      <User className="h-3.5 w-3.5 shrink-0" aria-label="Permissionário" />
+                      {permLabel(v.id_permissionario)}
+                    </div>
+                  )}
+                  {empLabel(v.id_empresa) && (
+                    <div className="flex items-center gap-1.5">
+                      <Building2 className="h-3.5 w-3.5 shrink-0" aria-label="Empresa" />
+                      {empLabel(v.id_empresa)}
+                    </div>
+                  )}
                   {v.id_permissionario == null && v.id_empresa == null && "—"}
                 </TD>
                 <TD>{TIPO_LABEL[v.tipo_servico] ?? v.tipo_servico}</TD>
@@ -431,50 +520,38 @@ export default function VeiculosReguladosPage() {
                   </Badge>
                 </TD>
                 <TD className="text-right">
-                  <div className="inline-flex flex-wrap justify-end gap-2">
-                    <Link href={`/m/transporte/veiculos/${v.id}`}>
-                      <Button variant="secondary" size="sm">
-                        Detalhes
-                      </Button>
-                    </Link>
-                    {canEdit && (
-                      <Button variant="secondary" size="sm" onClick={() => openEdit(v)}>
-                        Editar
-                      </Button>
-                    )}
-                    {canEdit && v.situacao !== "ativo" && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => actionM.mutate({ id: v.id, acao: "reativar" })}
-                      >
-                        Reativar
-                      </Button>
-                    )}
-                    {canEdit && v.situacao !== "suspenso" && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => actionM.mutate({ id: v.id, acao: "suspender" })}
-                      >
-                        Suspender
-                      </Button>
-                    )}
-                    {canEdit && v.situacao !== "inativo" && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => actionM.mutate({ id: v.id, acao: "inativar" })}
-                      >
-                        Inativar
-                      </Button>
-                    )}
-                    {canDelete && (
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        disabled={deleteM.isPending}
-                        onClick={async () => {
+                  {/* Mesma ordem dos permissionários: o que muda com a
+                      situação vem à vista; Inativar e Excluir ficam no ⋯. */}
+                  <AcoesDaLinha
+                    acoes={[
+                      { label: "Detalhes", icon: Eye, href: `/m/transporte/veiculos/${v.id}` },
+                      { label: "Editar", icon: Pencil, onClick: () => openEdit(v), oculta: !canEdit },
+                      {
+                        label: "Reativar",
+                        icon: RotateCcw,
+                        onClick: () => actionM.mutate({ id: v.id, acao: "reativar" }),
+                        oculta: !canEdit || v.situacao === "ativo",
+                      },
+                      {
+                        label: "Suspender",
+                        icon: PauseCircle,
+                        onClick: () => actionM.mutate({ id: v.id, acao: "suspender" }),
+                        oculta: !canEdit || v.situacao === "suspenso",
+                      },
+                      {
+                        label: "Inativar",
+                        icon: Ban,
+                        perigo: true,
+                        onClick: () => actionM.mutate({ id: v.id, acao: "inativar" }),
+                        oculta: !canEdit || v.situacao === "inativo",
+                      },
+                      {
+                        label: "Excluir",
+                        icon: Trash2,
+                        perigo: true,
+                        disabled: deleteM.isPending,
+                        oculta: !canDelete,
+                        onClick: async () => {
                           const ok = await confirm({
                             title: "Excluir veículo",
                             message: `Excluir o veículo de placa "${v.placa}"? Esta ação não pode ser desfeita.`,
@@ -482,14 +559,12 @@ export default function VeiculosReguladosPage() {
                             intent: "danger",
                           });
                           if (ok) deleteM.mutate(v.id);
-                        }}
-                      >
-                        Excluir
-                      </Button>
-                    )}
-                  </div>
+                        },
+                      },
+                    ]}
+                  />
                 </TD>
-              </TR>
+              </TRLink>
             ))}
           </TBody>
         </Table>
@@ -524,166 +599,266 @@ export default function VeiculosReguladosPage() {
       <Dialog
         open={dialogOpen}
         onClose={closeDialog}
-        title={editing ? `Editar — ${editing.placa}` : "Novo veículo regulado"}
+        title={editing ? `Editar veículo — ${editing.placa}` : "Novo veículo regulado"}
+        description={
+          editing ? undefined : "De quem é, qual veículo e com que autorização roda. Placa, marca e modelo são obrigatórios."
+        }
         size="lg"
         footer={
           <>
-            <Button variant="secondary" onClick={closeDialog}>
+            <Button variant="ghost" onClick={closeDialog}>
               Cancelar
             </Button>
-            <Button onClick={salvar} disabled={saveM.isPending}>
-              {saveM.isPending ? "Salvando..." : "Salvar"}
+            <Button onClick={salvar} loading={saveM.isPending}>
+              {editing ? "Salvar alterações" : "Cadastrar veículo"}
             </Button>
           </>
         }
       >
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div>
-            <Label htmlFor="perm">Permissionário (vínculo)</Label>
-            <Select
-              id="perm"
-              value={form.id_permissionario}
-              onChange={(e) => set("id_permissionario", e.target.value)}
-            >
-              <option value="">— Nenhum —</option>
-              {permsQ.data?.items.map((p) => (
-                <option key={p.id} value={String(p.id)}>
-                  {p.nome} ({p.cpf})
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="emp">Empresa (vínculo)</Label>
-            <Select id="emp" value={form.id_empresa} onChange={(e) => set("id_empresa", e.target.value)}>
-              <option value="">— Nenhuma —</option>
-              {empresasQ.data?.items.map((e) => (
-                <option key={e.id} value={String(e.id)}>
-                  {e.razao_social}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div className="sm:col-span-2 text-xs text-muted-foreground -mt-2">
-            Informe ao menos um vínculo (permissionário ou empresa).
-          </div>
-          <div>
-            <Label htmlFor="placa" required>
-              Placa
-            </Label>
-            <Input id="placa" value={form.placa} onChange={(e) => set("placa", e.target.value)} placeholder="ABC1D23" />
-          </div>
-          <div>
-            <Label htmlFor="renavam">RENAVAM</Label>
-            <Input id="renavam" value={form.renavam} onChange={(e) => set("renavam", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="chassi">Chassi</Label>
-            <Input id="chassi" value={form.chassi} onChange={(e) => set("chassi", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="marca" required>
-              Marca
-            </Label>
-            <Input id="marca" value={form.marca} onChange={(e) => set("marca", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="modelo" required>
-              Modelo
-            </Label>
-            <Input id="modelo" value={form.modelo} onChange={(e) => set("modelo", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="anofab">Ano de fabricação</Label>
-            <Input id="anofab" type="number" value={form.ano_fabricacao} onChange={(e) => set("ano_fabricacao", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="anomod">Ano do modelo</Label>
-            <Input id="anomod" type="number" value={form.ano_modelo} onChange={(e) => set("ano_modelo", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="cor">Cor</Label>
-            <Input id="cor" value={form.cor} onChange={(e) => set("cor", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="cat">Categoria</Label>
-            <Select id="cat" value={form.categoria} onChange={(e) => set("categoria", e.target.value)}>
-              <option value="">—</option>
-              {CATEGORIAS.map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="tipo" required>
-              Tipo de serviço
-            </Label>
-            <Select id="tipo" value={form.tipo_servico} onChange={(e) => set("tipo_servico", e.target.value as TipoServico)}>
-              {TIPOS.map((t) => (
-                <option key={t.value} value={t.value}>
-                  {t.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="comb">Combustível</Label>
-            <Select id="comb" value={form.tipo_combustivel} onChange={(e) => set("tipo_combustivel", e.target.value)}>
-              <option value="">—</option>
-              {COMBUSTIVEIS.map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="cap">Capacidade (passageiros)</Label>
-            <Input id="cap" type="number" min={1} value={form.capacidade_passageiros} onChange={(e) => set("capacidade_passageiros", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="sit">Situação</Label>
-            <Select id="sit" value={form.situacao} onChange={(e) => set("situacao", e.target.value as VeiculoReguladoSituacao)}>
-              {SITUACOES.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div className="flex items-end gap-2">
-            <input
-              id="adaptado"
-              type="checkbox"
-              className="h-4 w-4"
-              checked={form.adaptado}
-              onChange={(e) => set("adaptado", e.target.checked)}
+        <div ref={val.ref} className="space-y-5">
+          <GrupoCampos titulo="Vínculo">
+            <CampoVinculo
+              nome="veiculo-vinculo"
+              titulo="O veículo está em nome de"
+              modo={modoVinculo}
+              onModo={setModoVinculo}
+              descricoes={{
+                permissionario: "Veículo de um permissionário que opera por conta própria.",
+                empresa: "Veículo da frota de uma empresa autorizada.",
+                ambos: "Veículo de uma empresa, conduzido por um permissionário.",
+              }}
+              idPermissionario={form.id_permissionario}
+              idEmpresa={form.id_empresa}
+              onPermissionario={(id) => set("id_permissionario", id)}
+              onEmpresa={(id) => set("id_empresa", id)}
+              permissionarios={permsQ.data?.items ?? []}
+              empresas={empresasQ.data?.items ?? []}
+              carregando={permsQ.isLoading || empresasQ.isLoading}
+              erroPermissionario={val.erro("id_permissionario")}
+              erroEmpresa={val.erro("id_empresa")}
             />
-            <Label htmlFor="adaptado">Adaptado (acessibilidade)</Label>
+          </GrupoCampos>
+
+          <GrupoCampos titulo="Identificação" descricao="Como está no documento do veículo (CRLV).">
+            <GradeCampos>
+              <FormField label="Placa" required error={val.erro("placa")} hint="Mercosul (ABC1D23) ou antiga (ABC-1234).">
+                <Input
+                  id="placa"
+                  value={form.placa}
+                  onChange={(e) => set("placa", e.target.value.toUpperCase())}
+                  onBlur={val.sair("placa")}
+                  maxLength={8}
+                  autoComplete="off"
+                  className="font-mono uppercase tracking-wide"
+                  placeholder="Ex.: ABC1D23"
+                />
+              </FormField>
+              <FormField label="RENAVAM" opcional error={val.erro("renavam")} hint="De 9 a 11 dígitos.">
+                <Input
+                  id="renavam"
+                  inputMode="numeric"
+                  maxLength={11}
+                  className="font-mono tabular-nums"
+                  value={form.renavam}
+                  onChange={(e) => set("renavam", e.target.value.replace(/\D/g, ""))}
+                  onBlur={val.sair("renavam")}
+                  placeholder="Ex.: 01234567890"
+                />
+              </FormField>
+            </GradeCampos>
+            <FormField label="Chassi" opcional hint="Até 17 caracteres, sem espaços.">
+              <Input
+                id="chassi"
+                maxLength={17}
+                className="font-mono uppercase tracking-wide"
+                value={form.chassi}
+                onChange={(e) => set("chassi", e.target.value.toUpperCase().replace(/\s/g, ""))}
+                placeholder="Ex.: 9BWZZZ377VT004251"
+              />
+            </FormField>
+            <GradeCampos>
+              <FormField label="Marca" required error={val.erro("marca")}>
+                <Input
+                  id="marca"
+                  value={form.marca}
+                  onChange={(e) => set("marca", e.target.value)}
+                  onBlur={val.sair("marca")}
+                  placeholder="Ex.: Chevrolet"
+                />
+              </FormField>
+              <FormField label="Modelo" required error={val.erro("modelo")}>
+                <Input
+                  id="modelo"
+                  value={form.modelo}
+                  onChange={(e) => set("modelo", e.target.value)}
+                  onBlur={val.sair("modelo")}
+                  placeholder="Ex.: Spin LTZ 1.8"
+                />
+              </FormField>
+            </GradeCampos>
+            <GradeCampos>
+              <FormField label="Ano de fabricação" opcional>
+                <Input
+                  id="anofab"
+                  type="number"
+                  inputMode="numeric"
+                  value={form.ano_fabricacao}
+                  onChange={(e) => set("ano_fabricacao", e.target.value)}
+                  placeholder="Ex.: 2022"
+                />
+              </FormField>
+              <FormField label="Ano do modelo" opcional error={val.erro("ano_modelo")}>
+                <Input
+                  id="anomod"
+                  type="number"
+                  inputMode="numeric"
+                  value={form.ano_modelo}
+                  onChange={(e) => set("ano_modelo", e.target.value)}
+                  onBlur={val.sair("ano_modelo")}
+                  placeholder="Ex.: 2023"
+                />
+              </FormField>
+            </GradeCampos>
+            <GradeCampos>
+              <FormField label="Categoria" opcional>
+                <Select id="cat" value={form.categoria} onChange={(e) => set("categoria", e.target.value)}>
+                  <option value="">Selecione…</option>
+                  {CATEGORIAS.map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {c.label}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Cor" opcional>
+                <Input id="cor" value={form.cor} onChange={(e) => set("cor", e.target.value)} placeholder="Ex.: Prata" />
+              </FormField>
+            </GradeCampos>
+          </GrupoCampos>
+
+          <GrupoCampos titulo="Uso">
+            <GradeCampos>
+              <FormField label="Tipo de serviço" required>
+                <Select
+                  id="tipo"
+                  value={form.tipo_servico}
+                  onChange={(e) => set("tipo_servico", e.target.value as TipoServico)}
+                >
+                  {TIPOS.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Combustível" opcional>
+                <Select id="comb" value={form.tipo_combustivel} onChange={(e) => set("tipo_combustivel", e.target.value)}>
+                  <option value="">Selecione…</option>
+                  {COMBUSTIVEIS.map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {c.label}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+            </GradeCampos>
+            <GradeCampos>
+              <FormField label="Capacidade de passageiros" opcional hint="Lugares para passageiros, como no CRLV.">
+                <Input
+                  id="cap"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  value={form.capacidade_passageiros}
+                  onChange={(e) => set("capacidade_passageiros", e.target.value)}
+                  placeholder="Ex.: 4"
+                />
+              </FormField>
+              <div className="flex items-center gap-2 sm:pt-7">
+                <Checkbox
+                  id="adaptado"
+                  checked={form.adaptado}
+                  onChange={(e) => set("adaptado", e.target.checked)}
+                />
+                <label htmlFor="adaptado" className="cursor-pointer text-sm text-foreground">
+                  Adaptado para acessibilidade
+                </label>
+              </div>
+            </GradeCampos>
+          </GrupoCampos>
+
+          <GrupoCampos titulo="Autorização" descricao="A autorização municipal para o veículo rodar no serviço.">
+            <FormField label="Número da autorização" opcional>
+              <Input
+                id="numaut"
+                value={form.numero_autorizacao}
+                onChange={(e) => set("numero_autorizacao", e.target.value)}
+                placeholder="Ex.: AUT-0456/2026"
+              />
+            </FormField>
+            <GradeCampos>
+              <FormField label="Início da autorização" opcional>
+                <Input
+                  id="ini"
+                  type="date"
+                  value={form.data_inicio_autorizacao}
+                  onChange={(e) => set("data_inicio_autorizacao", e.target.value)}
+                />
+              </FormField>
+              <FormField
+                label="Validade da autorização"
+                opcional
+                error={val.erro("data_validade_autorizacao")}
+                hint={dicaVigencia(
+                  form.data_inicio_autorizacao,
+                  form.data_validade_autorizacao,
+                  "Último dia em que a autorização vale.",
+                )}
+              >
+                <Input
+                  id="val"
+                  type="date"
+                  value={form.data_validade_autorizacao}
+                  onChange={(e) => set("data_validade_autorizacao", e.target.value)}
+                  onBlur={val.sair("data_validade_autorizacao")}
+                />
+              </FormField>
+            </GradeCampos>
+            <FormField
+              label="Situação"
+              hint={
+                editing
+                  ? "Suspender e reativar também ficam nas ações da linha."
+                  : "Cadastro novo entra como Pendente, salvo se mudar aqui."
+              }
+            >
+              <Select
+                id="sit"
+                value={form.situacao}
+                onChange={(e) => set("situacao", e.target.value as VeiculoReguladoSituacao)}
+              >
+                {SITUACOES.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          </GrupoCampos>
+
+          <div className="border-t border-border pt-5">
+            <FormField label="Observações" opcional>
+              <Textarea
+                id="obs"
+                rows={2}
+                value={form.observacoes}
+                onChange={(e) => set("observacoes", e.target.value)}
+                placeholder="Ex.: veículo reserva, troca de placa em andamento"
+              />
+            </FormField>
           </div>
-          <div>
-            <Label htmlFor="numaut">Número da autorização</Label>
-            <Input id="numaut" value={form.numero_autorizacao} onChange={(e) => set("numero_autorizacao", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="ini">Início da autorização</Label>
-            <Input id="ini" type="date" value={form.data_inicio_autorizacao} onChange={(e) => set("data_inicio_autorizacao", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="val">Validade da autorização</Label>
-            <Input id="val" type="date" value={form.data_validade_autorizacao} onChange={(e) => set("data_validade_autorizacao", e.target.value)} />
-          </div>
-          <div className="sm:col-span-2">
-            <Label htmlFor="obs">Observações</Label>
-            <Textarea id="obs" rows={2} value={form.observacoes} onChange={(e) => set("observacoes", e.target.value)} />
-          </div>
-          {err && (
-            <div role="alert" className="sm:col-span-2 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground">
-              {err}
-            </div>
-          )}
+
+          {err && <Alert intent="danger">{err}</Alert>}
         </div>
       </Dialog>
     </div>

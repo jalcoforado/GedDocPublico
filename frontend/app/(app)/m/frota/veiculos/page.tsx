@@ -1,16 +1,23 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Car, FileText, Inbox, Plus, SearchX, Settings2 } from "lucide-react";
+import { Car, FileText, Inbox, Pencil, Plus, SearchX, Settings2, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { numeroOuNulo, useErrosDoFormulario } from "@/components/frota/formulario";
+import { COMBUSTIVEIS, SITUACOES_VEICULO } from "@/components/frota/rotulos";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CampoComUnidade } from "@/components/ui/campo-com-unidade";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { EscolhaSegmentada, type OpcaoEscolha } from "@/components/ui/escolha-segmentada";
+import { FilterBar } from "@/components/ui/filter-bar";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { Select } from "@/components/ui/select";
@@ -27,24 +34,40 @@ import { useAuth } from "@/lib/auth";
 
 import { DocumentosDialog } from "./documentos-dialog";
 
-const SITUACOES: { value: VeiculoSituacao; label: string }[] = [
-  { value: "disponivel", label: "Disponível" },
-  { value: "em_uso", label: "Em uso" },
-  { value: "manutencao", label: "Manutenção" },
-  { value: "inativo", label: "Inativo" },
-  { value: "baixado", label: "Baixado" },
+const SITUACOES = SITUACOES_VEICULO;
+// Quatro opções: à vista, com o que cada uma quer dizer (EscolhaSegmentada).
+const FORMA_POSSE: OpcaoEscolha<VeiculoFormaPosse>[] = [
+  { valor: "proprio", rotulo: "Próprio", descricao: "Patrimônio do município." },
+  { valor: "locado", rotulo: "Locado", descricao: "Alugado de uma empresa, por contrato." },
+  { valor: "cedido", rotulo: "Cedido", descricao: "Emprestado por outro órgão ou entidade." },
+  { valor: "convenio", rotulo: "Convênio", descricao: "Recebido por convênio com outro ente público." },
 ];
-const FORMA_POSSE: { value: VeiculoFormaPosse; label: string }[] = [
-  { value: "proprio", label: "Próprio" },
-  { value: "locado", label: "Locado" },
-  { value: "cedido", label: "Cedido" },
-  { value: "convenio", label: "Convênio" },
-];
-const COMBUSTIVEIS = ["gasolina", "etanol", "flex", "diesel", "gnv", "eletrico", "hibrido"];
 
-const SITUACAO_LABEL: Record<string, string> = Object.fromEntries(
-  SITUACOES.map((s) => [s.value, s.label]),
-);
+// Mesma regra do backend (schemas/frota.py::PLACA_PATTERN), depois de tirar
+// hífen e espaço: avisar aqui poupa a ida ao servidor só para ouvir "não".
+const PLACA = /^[A-Z]{3}[0-9][0-9A-Z][0-9]{2}$/;
+
+function anoInvalido(ano: number | null): boolean {
+  return ano != null && (!Number.isInteger(ano) || ano < 1900 || ano > 2100);
+}
+
+function validar(form: VeiculoForm): Record<string, string | undefined> {
+  const placa = form.placa.replace(/[-\s]/g, "").toUpperCase();
+  return {
+    placa: !placa
+      ? "Informe a placa."
+      : !PLACA.test(placa)
+        ? "Use o formato ABC1234 ou ABC1D23 (Mercosul)."
+        : undefined,
+    ano_fab: anoInvalido(form.ano_fabricacao) ? "Informe um ano entre 1900 e 2100." : undefined,
+    ano_mod: anoInvalido(form.ano_modelo) ? "Informe um ano entre 1900 e 2100." : undefined,
+    km:
+      !Number.isInteger(form.quilometragem_atual) || form.quilometragem_atual < 0
+        ? "Informe a quilometragem em km inteiros, sem pontos."
+        : undefined,
+  };
+}
+const SITUACAO_POR_VALOR = Object.fromEntries(SITUACOES.map((s) => [s.value, s]));
 
 interface VeiculoForm {
   placa: string;
@@ -107,6 +130,7 @@ export default function VeiculosPage() {
   const [form, setForm] = useState<VeiculoForm>(EMPTY);
   const [err, setErr] = useState<string | null>(null);
   const [docsVeiculo, setDocsVeiculo] = useState<Veiculo | null>(null);
+  const campos = useErrosDoFormulario(validar(form));
 
   const veiculosQ = useQuery({ queryKey: ["frota-veiculos"], queryFn: () => api.frota.listAll() });
   const unidadesQ = useQuery({
@@ -128,6 +152,10 @@ export default function VeiculosPage() {
     });
   }, [veiculos, busca, situacaoFiltro]);
   const temFiltroAtivo = busca.trim() !== "" || situacaoFiltro !== "";
+  function limparFiltros() {
+    setBusca("");
+    setSituacaoFiltro("");
+  }
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["frota-veiculos"] });
 
@@ -159,6 +187,7 @@ export default function VeiculosPage() {
     setEditing(null);
     setForm(EMPTY);
     setErr(null);
+    campos.limpar();
     setDialogOpen(true);
   }
 
@@ -184,6 +213,7 @@ export default function VeiculosPage() {
       observacoes: v.observacoes ?? "",
     });
     setErr(null);
+    campos.limpar();
     setDialogOpen(true);
   }
 
@@ -195,6 +225,7 @@ export default function VeiculosPage() {
 
   function salvar() {
     setErr(null);
+    if (!campos.podeEnviar()) return;
     const payload = {
       placa: form.placa.trim(),
       numero_tombo: nullify(form.numero_tombo),
@@ -235,11 +266,10 @@ export default function VeiculosPage() {
       />
 
       {(veiculosQ.isLoading || veiculos.length > 0) && (
-        <div className="flex flex-wrap gap-3">
-          <div>
-            <Label htmlFor="f_situacao">Situação</Label>
+        <FilterBar>
+          <FilterBar.Group label="Situação">
             <Select
-              id="f_situacao"
+              aria-label="Situação"
               value={situacaoFiltro}
               onChange={(e) => setSituacaoFiltro(e.target.value)}
             >
@@ -250,17 +280,23 @@ export default function VeiculosPage() {
                 </option>
               ))}
             </Select>
-          </div>
-          <div className="min-w-[200px] flex-1">
-            <Label htmlFor="f_busca">Busca</Label>
+          </FilterBar.Group>
+          <FilterBar.Group label="Busca" className="min-w-[200px] flex-1">
             <Input
-              id="f_busca"
+              aria-label="Busca"
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
               placeholder="Placa, tombo, marca, modelo, RENAVAM ou chassi"
             />
-          </div>
-        </div>
+          </FilterBar.Group>
+          {temFiltroAtivo && (
+            <FilterBar.Actions>
+              <Button variant="ghost" onClick={limparFiltros}>
+                Limpar
+              </Button>
+            </FilterBar.Actions>
+          )}
+        </FilterBar>
       )}
 
       {!veiculosQ.isLoading && veiculos.length === 0 ? (
@@ -272,7 +308,7 @@ export default function VeiculosPage() {
             canCreate ? (
               <Button onClick={openNew}>
                 <Plus className="mr-1 h-4 w-4" />
-                Cadastrar veículo
+                Novo veículo
               </Button>
             ) : undefined
           }
@@ -283,13 +319,7 @@ export default function VeiculosPage() {
           title="Nenhum veículo encontrado"
           description="Nenhum veículo corresponde à busca ou ao filtro aplicado."
           action={
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setBusca("");
-                setSituacaoFiltro("");
-              }}
-            >
+            <Button variant="secondary" onClick={limparFiltros}>
               Limpar filtros
             </Button>
           }
@@ -321,8 +351,8 @@ export default function VeiculosPage() {
                 <TD className="tabular-nums text-muted-foreground">{v.numero_tombo ?? "—"}</TD>
                 <TD>{[v.marca, v.modelo].filter(Boolean).join(" ") || "—"}</TD>
                 <TD>
-                  <Badge intent={v.situacao === "disponivel" ? "success" : "neutral"}>
-                    {SITUACAO_LABEL[v.situacao] ?? v.situacao}
+                  <Badge intent={SITUACAO_POR_VALOR[v.situacao]?.intent ?? "neutral"}>
+                    {SITUACAO_POR_VALOR[v.situacao]?.label ?? v.situacao}
                   </Badge>
                 </TD>
                 <TD className="text-muted-foreground">{unidadeNome(v.id_unidade_responsavel)}</TD>
@@ -330,22 +360,22 @@ export default function VeiculosPage() {
                   {v.quilometragem_atual.toLocaleString("pt-BR")}
                 </TD>
                 <TD className="text-right">
-                  <div className="inline-flex gap-2">
-                    <Button variant="secondary" size="sm" onClick={() => setDocsVeiculo(v)}>
-                      <FileText className="mr-1 h-4 w-4" />
-                      Documentos
-                    </Button>
-                    {canEdit && (
-                      <Button variant="secondary" size="sm" onClick={() => openEdit(v)}>
-                        Editar
-                      </Button>
-                    )}
-                    {canDelete && (
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        disabled={deleteM.isPending}
-                        onClick={async () => {
+                  <AcoesDaLinha
+                    acoes={[
+                      { label: "Documentos", icon: FileText, onClick: () => setDocsVeiculo(v) },
+                      {
+                        label: "Editar",
+                        icon: Pencil,
+                        oculta: !canEdit,
+                        onClick: () => openEdit(v),
+                      },
+                      {
+                        label: "Excluir",
+                        icon: Trash2,
+                        perigo: true,
+                        oculta: !canDelete,
+                        disabled: deleteM.isPending,
+                        onClick: async () => {
                           const ok = await confirm({
                             title: "Excluir veículo",
                             message: `Excluir o veículo de placa "${v.placa}"? Esta ação não pode ser desfeita.`,
@@ -353,12 +383,10 @@ export default function VeiculosPage() {
                             intent: "danger",
                           });
                           if (ok) deleteM.mutate(v.id);
-                        }}
-                      >
-                        Excluir
-                      </Button>
-                    )}
-                  </div>
+                        },
+                      },
+                    ]}
+                  />
                 </TD>
               </TR>
             ))}
@@ -369,201 +397,266 @@ export default function VeiculosPage() {
       <Dialog
         open={dialogOpen}
         onClose={closeDialog}
-        title={editing ? `Editar — ${editing.placa}` : "Novo veículo"}
+        title={editing ? "Editar veículo" : "Novo veículo"}
+        description={editing ? `Placa ${editing.placa}` : "Só a placa é obrigatória; o resto pode ser completado depois."}
         size="lg"
         footer={
           <>
-            <Button variant="secondary" onClick={closeDialog}>
+            <Button variant="ghost" onClick={closeDialog}>
               Cancelar
             </Button>
-            <Button onClick={salvar} disabled={saveM.isPending}>
-              {saveM.isPending ? "Salvando..." : "Salvar"}
+            <Button type="submit" form="form-veiculo" loading={saveM.isPending}>
+              {editing ? "Salvar alterações" : "Cadastrar veículo"}
             </Button>
           </>
         }
       >
-        <div className="space-y-4">
-          <SectionCard
-            icon={FileText}
-            title="Identificação"
-            description="Dados do veículo e documentação."
-          >
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <Label htmlFor="placa" required>
-                  Placa
-                </Label>
-                <Input
-                  id="placa"
-                  value={form.placa}
-                  onChange={(e) => set("placa", e.target.value)}
-                  className="font-mono uppercase"
-                  placeholder="ABC1D23"
-                />
-              </div>
-              <div>
-                <Label htmlFor="numero_tombo">Número de tombo</Label>
-                <Input
-                  id="numero_tombo"
-                  value={form.numero_tombo}
-                  onChange={(e) => set("numero_tombo", e.target.value)}
-                  maxLength={30}
-                  placeholder="Tombo patrimonial do bem"
-                />
-              </div>
-              <div>
-                <Label htmlFor="renavam">RENAVAM</Label>
-                <Input id="renavam" value={form.renavam} onChange={(e) => set("renavam", e.target.value)} />
-              </div>
-              <div>
-                <Label htmlFor="marca">Marca</Label>
-                <Input id="marca" value={form.marca} onChange={(e) => set("marca", e.target.value)} />
-              </div>
-              <div>
-                <Label htmlFor="modelo">Modelo</Label>
-                <Input id="modelo" value={form.modelo} onChange={(e) => set("modelo", e.target.value)} />
-              </div>
-              <div>
-                <Label htmlFor="ano_fab">Ano fabricação</Label>
-                <Input
-                  id="ano_fab"
-                  type="number"
-                  value={form.ano_fabricacao ?? ""}
-                  onChange={(e) => set("ano_fabricacao", e.target.value ? Number(e.target.value) : null)}
-                />
-              </div>
-              <div>
-                <Label htmlFor="ano_mod">Ano modelo</Label>
-                <Input
-                  id="ano_mod"
-                  type="number"
-                  value={form.ano_modelo ?? ""}
-                  onChange={(e) => set("ano_modelo", e.target.value ? Number(e.target.value) : null)}
-                />
-              </div>
-              <div>
-                <Label htmlFor="cor">Cor</Label>
-                <Input id="cor" value={form.cor} onChange={(e) => set("cor", e.target.value)} />
-              </div>
-              <div>
-                <Label htmlFor="chassi">Chassi</Label>
-                <Input id="chassi" value={form.chassi} onChange={(e) => set("chassi", e.target.value)} />
-              </div>
-              <div>
-                <Label htmlFor="tipo_veiculo">Tipo de veículo</Label>
-                <Input
-                  id="tipo_veiculo"
-                  value={form.tipo_veiculo}
-                  onChange={(e) => set("tipo_veiculo", e.target.value)}
-                  placeholder="ex.: automóvel, caminhonete, ônibus"
-                />
-              </div>
-              <div>
-                <Label htmlFor="combustivel">Combustível</Label>
-                <Select
-                  id="combustivel"
-                  value={form.tipo_combustivel}
-                  onChange={(e) => set("tipo_combustivel", e.target.value)}
+        <form
+          id="form-veiculo"
+          noValidate
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            salvar();
+          }}
+        >
+          <SectionCard icon={FileText} title="Identificação" description="Como o veículo é reconhecido nos documentos.">
+            <div className="space-y-4">
+              <GradeCampos>
+                <FormField
+                  label="Placa"
+                  required
+                  hint="Antiga (ABC1234) ou Mercosul (ABC1D23)."
+                  error={campos.erro("placa")}
                 >
-                  <option value="">—</option>
-                  {COMBUSTIVEIS.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </Select>
-              </div>
+                  <Input
+                    id="placa"
+                    value={form.placa}
+                    onChange={(e) => set("placa", e.target.value.toUpperCase())}
+                    onBlur={campos.tocar("placa")}
+                    className="font-mono uppercase"
+                    placeholder="Ex.: ABC1D23"
+                    maxLength={8}
+                    autoComplete="off"
+                  />
+                </FormField>
+                <FormField
+                  label="Número de tombo"
+                  hint="Liga o veículo ao bem no Patrimônio."
+                >
+                  <Input
+                    id="numero_tombo"
+                    value={form.numero_tombo}
+                    onChange={(e) => set("numero_tombo", e.target.value)}
+                    maxLength={30}
+                    placeholder="Ex.: 004512"
+                  />
+                </FormField>
+              </GradeCampos>
+              <GradeCampos>
+                <FormField label="RENAVAM">
+                  <Input
+                    id="renavam"
+                    value={form.renavam}
+                    onChange={(e) => set("renavam", e.target.value)}
+                    inputMode="numeric"
+                    className="font-mono"
+                    placeholder="Ex.: 01234567890"
+                    maxLength={20}
+                  />
+                </FormField>
+                <FormField label="Chassi">
+                  <Input
+                    id="chassi"
+                    value={form.chassi}
+                    onChange={(e) => set("chassi", e.target.value.toUpperCase())}
+                    className="font-mono uppercase"
+                    placeholder="Ex.: 9BD000000A0000000"
+                    maxLength={30}
+                  />
+                </FormField>
+              </GradeCampos>
+            </div>
+          </SectionCard>
+
+          <SectionCard icon={Car} title="Modelo" description="O que é o veículo — aparece nas listas junto da placa.">
+            <div className="space-y-4">
+              <GradeCampos>
+                <FormField label="Marca">
+                  <Input
+                    id="marca"
+                    value={form.marca}
+                    onChange={(e) => set("marca", e.target.value)}
+                    placeholder="Ex.: Fiat"
+                    maxLength={60}
+                  />
+                </FormField>
+                <FormField label="Modelo">
+                  <Input
+                    id="modelo"
+                    value={form.modelo}
+                    onChange={(e) => set("modelo", e.target.value)}
+                    placeholder="Ex.: Strada Freedom"
+                    maxLength={80}
+                  />
+                </FormField>
+              </GradeCampos>
+              <GradeCampos>
+                <FormField label="Ano de fabricação" error={campos.erro("ano_fab")}>
+                  <Input
+                    id="ano_fab"
+                    type="number"
+                    inputMode="numeric"
+                    min={1900}
+                    max={2100}
+                    value={form.ano_fabricacao ?? ""}
+                    onChange={(e) => set("ano_fabricacao", numeroOuNulo(e.target.value))}
+                    onBlur={campos.tocar("ano_fab")}
+                    placeholder="Ex.: 2022"
+                  />
+                </FormField>
+                <FormField label="Ano do modelo" error={campos.erro("ano_mod")}>
+                  <Input
+                    id="ano_mod"
+                    type="number"
+                    inputMode="numeric"
+                    min={1900}
+                    max={2100}
+                    value={form.ano_modelo ?? ""}
+                    onChange={(e) => set("ano_modelo", numeroOuNulo(e.target.value))}
+                    onBlur={campos.tocar("ano_mod")}
+                    placeholder="Ex.: 2023"
+                  />
+                </FormField>
+              </GradeCampos>
+              <GradeCampos colunas={3}>
+                <FormField label="Tipo de veículo">
+                  <Input
+                    id="tipo_veiculo"
+                    value={form.tipo_veiculo}
+                    onChange={(e) => set("tipo_veiculo", e.target.value)}
+                    placeholder="Ex.: caminhonete"
+                    maxLength={40}
+                  />
+                </FormField>
+                <FormField label="Combustível">
+                  <Select
+                    id="combustivel"
+                    value={form.tipo_combustivel}
+                    onChange={(e) => set("tipo_combustivel", e.target.value)}
+                  >
+                    <option value="">Não informado</option>
+                    {COMBUSTIVEIS.map((c) => (
+                      <option key={c.value} value={c.value}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+                <FormField label="Cor">
+                  <Input
+                    id="cor"
+                    value={form.cor}
+                    onChange={(e) => set("cor", e.target.value)}
+                    placeholder="Ex.: branca"
+                    maxLength={30}
+                  />
+                </FormField>
+              </GradeCampos>
             </div>
           </SectionCard>
 
           <SectionCard
             icon={Settings2}
             title="Situação e posse"
-            description="Estado operacional, forma de posse, unidade responsável e quilometragem."
+            description="De quem é, quem responde por ele e como está agora."
           >
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <Label htmlFor="situacao">Situação</Label>
-                <Select
-                  id="situacao"
-                  value={form.situacao}
-                  onChange={(e) => set("situacao", e.target.value as VeiculoSituacao)}
+            <div className="space-y-4">
+              <EscolhaSegmentada
+                nome="forma_posse"
+                titulo="Forma de posse"
+                moldura={false}
+                valor={form.forma_posse}
+                opcoes={FORMA_POSSE}
+                onChange={(p) => set("forma_posse", p)}
+              />
+              <GradeCampos>
+                <FormField label="Unidade responsável" hint="Quem responde pelo veículo.">
+                  <Select
+                    id="unidade"
+                    value={form.id_unidade_responsavel ?? ""}
+                    onChange={(e) =>
+                      set("id_unidade_responsavel", e.target.value ? Number(e.target.value) : null)
+                    }
+                  >
+                    <option value="">Nenhuma</option>
+                    {unidades.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.unidade_trabalho}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+                <FormField
+                  label="Situação"
+                  hint="Muda sozinha na saída e no retorno de viagens e nas manutenções."
                 >
-                  {SITUACOES.map((s) => (
-                    <option key={s.value} value={s.value}>
-                      {s.label}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="forma_posse">Forma de posse</Label>
-                <Select
-                  id="forma_posse"
-                  value={form.forma_posse}
-                  onChange={(e) => set("forma_posse", e.target.value as VeiculoFormaPosse)}
+                  <Select
+                    id="situacao"
+                    value={form.situacao}
+                    onChange={(e) => set("situacao", e.target.value as VeiculoSituacao)}
+                  >
+                    {SITUACOES.map((s) => (
+                      <option key={s.value} value={s.value}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+              </GradeCampos>
+              <GradeCampos>
+                <FormField
+                  label="Quilometragem atual"
+                  hint="O que marca o painel hoje. Depois, as viagens atualizam."
+                  error={campos.erro("km")}
                 >
-                  {FORMA_POSSE.map((p) => (
-                    <option key={p.value} value={p.value}>
-                      {p.label}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="unidade">Unidade responsável</Label>
-                <Select
-                  id="unidade"
-                  value={form.id_unidade_responsavel ?? ""}
-                  onChange={(e) =>
-                    set("id_unidade_responsavel", e.target.value ? Number(e.target.value) : null)
-                  }
-                >
-                  <option value="">—</option>
-                  {unidades.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.unidade_trabalho}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="km">Quilometragem atual</Label>
-                <Input
-                  id="km"
-                  type="number"
-                  min={0}
-                  value={form.quilometragem_atual}
-                  onChange={(e) => set("quilometragem_atual", e.target.value ? Number(e.target.value) : 0)}
-                />
-              </div>
-              <div>
-                <Label htmlFor="data_aquisicao">Data de aquisição</Label>
-                <Input
-                  id="data_aquisicao"
-                  type="date"
-                  value={form.data_aquisicao}
-                  onChange={(e) => set("data_aquisicao", e.target.value)}
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <Label htmlFor="obs">Observações</Label>
+                  <CampoComUnidade
+                    id="km"
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    sufixo="km"
+                    value={form.quilometragem_atual}
+                    onChange={(e) => set("quilometragem_atual", e.target.value ? Number(e.target.value) : 0)}
+                    onBlur={campos.tocar("km")}
+                  />
+                </FormField>
+                <FormField label="Data de aquisição">
+                  <Input
+                    id="data_aquisicao"
+                    type="date"
+                    value={form.data_aquisicao}
+                    onChange={(e) => set("data_aquisicao", e.target.value)}
+                  />
+                </FormField>
+              </GradeCampos>
+              <FormField label="Observações">
                 <Textarea
                   id="obs"
                   rows={3}
                   value={form.observacoes}
                   onChange={(e) => set("observacoes", e.target.value)}
+                  placeholder="Ex.: adesivado com o brasão; tem engate"
                 />
-              </div>
+              </FormField>
             </div>
           </SectionCard>
-
           {err && (
-            <div role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground">
+            <Alert intent="danger" title="Não foi possível salvar">
               {err}
-            </div>
+            </Alert>
           )}
-        </div>
+        </form>
       </Dialog>
 
       <DocumentosDialog

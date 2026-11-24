@@ -15,6 +15,8 @@ import { useMemo } from "react";
 
 import { api, type WorkflowDSL } from "@/lib/api";
 
+import { COR_WF, ROTULO_TRANSICAO, TEMA_XYFLOW, estiloDoNo } from "./cores";
+
 interface WorkflowDiagramProps {
   dsl: WorkflowDSL;
   estadoAtual?: string;
@@ -103,18 +105,12 @@ export function WorkflowDiagram({
       const isInicial = est.slug === dsl.estado_inicial;
       const isFinal = est.final;
 
-      // Estilos por papel + estado atual
-      let border = "1px solid var(--border, #d4d4d8)";
-      let background = "var(--card, #fff)";
-      if (isAtual) {
-        border = "2px solid var(--primary, #2563eb)";
-        background = "var(--primary-soft, #dbeafe)";
-      } else if (isFinal) {
-        border = "2px solid #16a34a";
-        background = "#dcfce7";
-      } else if (isInicial) {
-        border = "2px dashed #2563eb";
-      }
+      // Estilos por papel + estado atual (cores em `./cores`).
+      const { border, background } = estiloDoNo({
+        atual: isAtual,
+        final: isFinal,
+        inicial: isInicial,
+      });
 
       return {
         id: est.slug,
@@ -127,12 +123,12 @@ export function WorkflowDiagram({
                 {est.slug}
               </div>
               {est.sla_dias != null && (
-                <div className="mt-1 text-[10px] text-amber-700">
+                <div className="mt-1 text-[10px] text-warning-soft-foreground">
                   SLA: {est.sla_dias}d
                 </div>
               )}
               {est.id_unidade_responsavel != null && (
-                <div className="mt-1 text-[10px] text-slate-700">
+                <div className="mt-1 text-[10px] text-foreground-muted">
                   🏢{" "}
                   {effNomes[est.id_unidade_responsavel] ??
                     `#${est.id_unidade_responsavel}`}
@@ -149,6 +145,7 @@ export function WorkflowDiagram({
         style: {
           border,
           background,
+          color: COR_WF.texto,
           borderRadius: 8,
           padding: 8,
           width: 170,
@@ -164,14 +161,16 @@ export function WorkflowDiagram({
       source: t.de,
       target: t.para,
       label: t.label,
-      labelStyle: { fontSize: 11 },
-      labelBgStyle: { fill: "#fff", fillOpacity: 0.9 },
+      ...ROTULO_TRANSICAO,
       labelBgPadding: [4, 2],
       style: {
-        stroke: t.condicao ? "#9333ea" : "#64748b",
+        stroke: t.condicao ? COR_WF.condicao : COR_WF.transicao,
         strokeDasharray: t.evento !== "manual" ? "4 2" : undefined,
       },
-      markerEnd: { type: MarkerType.ArrowClosed },
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: t.condicao ? COR_WF.condicao : COR_WF.transicao,
+      },
       data: { condicao: t.condicao, evento: t.evento },
     }));
 
@@ -179,8 +178,9 @@ export function WorkflowDiagram({
   }, [dsl, estadoAtual, effNomes]);
 
   return (
-    <div style={{ height, width: "100%" }} className="rounded-md border bg-muted/30">
+    <div style={{ height, width: "100%" }} className="rounded-md border border-border bg-muted/30">
       <ReactFlow
+        style={TEMA_XYFLOW}
         nodes={nodes}
         edges={edges}
         fitView

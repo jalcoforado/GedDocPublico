@@ -156,6 +156,7 @@ async def _criar_anexo_from_bytes(
     usuario_id: int | None,
     documento_exigido_key: str | None = None,
     commit: bool = True,
+    id_anexo_principal: int | None = None,
 ) -> Anexo:
     """Núcleo compartilhado da criação de anexo a partir de bytes em memória.
 
@@ -254,6 +255,7 @@ async def _criar_anexo_from_bytes(
             ativo=True,
             excluido=False,
             anexo_herdado=False,
+            id_anexo_principal=id_anexo_principal,
         )
     )
 

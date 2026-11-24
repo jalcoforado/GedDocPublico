@@ -1,5 +1,7 @@
 "use client";
 
+import { Paperclip } from "lucide-react";
+
 import { CrudPage } from "@/components/CrudPage";
 import { api, type TipoAnexo } from "@/lib/api";
 
@@ -7,6 +9,9 @@ export default function TiposAnexoPage() {
   return (
     <CrudPage<TipoAnexo>
       title="Tipos de Anexo"
+      icon={Paperclip}
+      description="Classificação dos arquivos anexados aos processos."
+      novoLabel="Novo tipo de anexo"
       queryKey={["tipos-anexo"]}
       fetchList={() => api.tiposAnexo.list()}
       createFn={api.tiposAnexo.create}
@@ -15,7 +20,7 @@ export default function TiposAnexoPage() {
       emptyForm={{ tipo_anexo: "" }}
       columns={[{ header: "Nome", render: (r) => r.tipo_anexo }]}
       fields={[
-        { name: "tipo_anexo", label: "Nome", type: "text", required: true, colSpan: 2 },
+        { name: "tipo_anexo", label: "Nome", type: "text", required: true, colSpan: 2, placeholder: "Ex.: Documento de identidade" },
       ]}
     />
   );

@@ -41,6 +41,8 @@ from ..schemas.processo import (
     CaixasContagem,
     CotaAnexacaoOut,
     OrdemProcesso,
+    OrdenarProcesso,
+    AnexoDoDespacho,
     DespachoOut,
     EscopoProcesso,
     EncaminhamentoOut,
@@ -56,7 +58,7 @@ from ..schemas.processo import (
 from . import cota_anexacao
 from .permanencia import No as NoDaLinha
 from .permanencia import calcular as calcular_permanencia
-from .prazos import calcular_prazo, prazo_da_caixa
+from .prazos import calcular_prazo, inicio_do_prazo, prazo_da_caixa
 
 
 # "Tempo na caixa": desde a última movimentação, ou desde a abertura quando o
@@ -112,6 +114,7 @@ def _base_select(tenant_id: int, *, usuario_id: int | None = None):
             Processo,
             Assunto.assunto.label("assunto_nome"),
             TipoProcesso.tipo_processo.label("tipo_processo_nome"),
+            Assunto.id_tipo_processo.label("id_tipo_processo"),
             Manifestante.nome.label("manifestante_nome"),
             Manifestante.cpf_cnpj.label("manifestante_cpf"),
             UnidadeTrabalho.unidade_trabalho.label("unidade_propr"),
@@ -120,9 +123,11 @@ def _base_select(tenant_id: int, *, usuario_id: int | None = None):
             favorito_expr,
             _PARADO_DESDE.label("parado_desde"),
             _PRAZO_ENCAMINHAMENTO.label("prazo_encaminhamento"),
-            # Arquivado = a última movimentação é um arquivamento. É o mesmo
-            # critério de `_predicado_caixa`, lido do JOIN que já existe.
-            func.coalesce(_UltimaMov.id_arquivamento.is_not(None), False).label("arquivado"),
+            # Arquivado = há arquivamento EM VIGOR, o mesmo critério de
+            # `_predicado_caixa`. Até o SI-60 isto lia "a última movimentação é
+            # um arquivamento", que discordava das caixas assim que qualquer
+            # ato entrasse depois do arquivamento.
+            condicao_arquivado(tenant_id).label("arquivado"),
         )
         .join(Assunto, Assunto.id == Processo.id_assunto)
         .join(TipoProcesso, TipoProcesso.id == Assunto.id_tipo_processo, isouter=True)
@@ -209,6 +214,55 @@ def _ids_unidade_e_subordinadas(tenant_id: int, raiz: int):
     return select(raiz_cte.c.id)
 
 
+def condicao_encaminhamento_pendente(tenant_id: int):
+    """Encaminhamento do processo ainda não recebido nem desfeito.
+
+    `id_local_atual` só muda no recebimento (`acoes_processo.receber`), então
+    é o encaminhamento, e não o local, que diz que o processo está em trânsito.
+    Para usar dentro de `select(Encaminhamento...)`; correlaciona com
+    `Processo`.
+    """
+    return and_(
+        Encaminhamento.id_processo == Processo.id,
+        Encaminhamento.tenant_id == tenant_id,
+        Encaminhamento.excluido.is_(False),
+        Encaminhamento.recebido.is_(False),
+        Encaminhamento.cancelado.is_(False),
+    )
+
+
+def condicao_em_transito(tenant_id: int):
+    """Condição sobre `Processo`: há encaminhamento pendente."""
+    return select(Encaminhamento.id).where(condicao_encaminhamento_pendente(tenant_id)).exists()
+
+
+def condicao_arquivado(tenant_id: int):
+    """Condição sobre `Processo`: está arquivado AGORA.
+
+    Há uma `Movimentacao` de arquivamento ATIVA — o critério de
+    `acoes_processo.arquivar` e do dashboard. `Processo.ativo` não serve:
+    nenhum caminho o escreve. Caixas de trabalho, lista e relatórios leem
+    daqui — duas cópias divergiriam, e o relatório contaria arquivados que a
+    caixa não mostra.
+
+    Por que `ativo`: desde o SI-60 o processo pode ser desarquivado, e o
+    desarquivamento DESATIVA a movimentação do arquivamento em vez de
+    excluí-la. Ela continua na linha do tempo (que não filtra `ativo`), e
+    deixa de contar como encerramento em todo leitor que filtra.
+    """
+    return (
+        select(Movimentacao.id)
+        .where(
+            Movimentacao.id_processo == Processo.id,
+            Movimentacao.tenant_id == tenant_id,
+            Movimentacao.id_arquivamento.is_not(None),
+            Movimentacao.excluido.is_(False),
+            Movimentacao.ativo.is_(True),
+        )
+        .exists()
+    )
+
+
 def _predicado_caixa(
     caixa: CaixaProcesso,
     *,
@@ -232,28 +286,13 @@ def _predicado_caixa(
       `id_local_atual` só muda no recebimento (`acoes_processo.receber`), então
       é o encaminhamento, e não o local, que diz que o processo está em
       trânsito.
-    - ARQUIVADO é `Movimentacao.id_arquivamento IS NOT NULL`, o critério de
-      `acoes_processo.arquivar` e do dashboard. `Processo.ativo` não serve:
+    - ARQUIVADO é `condicao_arquivado`: movimentação de arquivamento ATIVA
+      (o desarquivamento do SI-60 a desativa). `Processo.ativo` não serve:
       nenhum caminho o escreve.
     """
-    pendente = and_(
-        Encaminhamento.id_processo == Processo.id,
-        Encaminhamento.tenant_id == tenant_id,
-        Encaminhamento.excluido.is_(False),
-        Encaminhamento.recebido.is_(False),
-        Encaminhamento.cancelado.is_(False),
-    )
-    em_transito = select(Encaminhamento.id).where(pendente).exists()
-    arquivado = (
-        select(Movimentacao.id)
-        .where(
-            Movimentacao.id_processo == Processo.id,
-            Movimentacao.tenant_id == tenant_id,
-            Movimentacao.id_arquivamento.is_not(None),
-            Movimentacao.excluido.is_(False),
-        )
-        .exists()
-    )
+    pendente = condicao_encaminhamento_pendente(tenant_id)
+    em_transito = condicao_em_transito(tenant_id)
+    arquivado = condicao_arquivado(tenant_id)
 
     if caixa in (
         CaixaProcesso.aguardando_assinatura,
@@ -407,6 +446,7 @@ async def painel_unidade(
             select(
                 Processo.id,
                 Processo.data_hora_abertura,
+                Processo.data_reinicio_prazo,
                 Processo.prazo_servico_dias_snapshot,
                 Processo.id_usuario_responsavel,
                 _PRAZO_ENCAMINHAMENTO.label("prazo_encaminhamento"),
@@ -432,7 +472,7 @@ async def painel_unidade(
             atribuidos += 1
         # Na Análise nada está arquivado: o predicado já exclui.
         status = prazo_da_caixa(
-            data_abertura=r.data_hora_abertura,
+            data_abertura=inicio_do_prazo(r.data_hora_abertura, r.data_reinicio_prazo),
             prazo_snapshot_dias=r.prazo_servico_dias_snapshot,
             prazo_encaminhamento=r.prazo_encaminhamento,
             arquivado=False,
@@ -451,7 +491,7 @@ async def painel_unidade(
     for r in (await db.execute(_base(CaixaProcesso.saida))).all():
         retorno.total += 1
         if prazo_da_caixa(
-            data_abertura=r.data_hora_abertura,
+            data_abertura=inicio_do_prazo(r.data_hora_abertura, r.data_reinicio_prazo),
             prazo_snapshot_dias=r.prazo_servico_dias_snapshot,
             prazo_encaminhamento=r.prazo_encaminhamento,
             arquivado=False,
@@ -492,6 +532,8 @@ async def list_processos(
     situacao: str | None = None,
     caixa: CaixaProcesso | None = None,
     ordem: OrdemProcesso = OrdemProcesso.recentes,
+    ordenar: OrdenarProcesso | None = None,
+    direcao: str = "asc",
 ) -> tuple[list[ProcessoListItem], int]:
     base = _base_select(tenant_id, usuario_id=id_usuario_contexto)
 
@@ -600,8 +642,19 @@ async def list_processos(
         )
     if situacao is None:
         base = base.where(Processo.situacao != "rascunho")
-    elif situacao != "todos":
-        base = base.where(Processo.situacao == situacao)
+    else:
+        if situacao != "todos":
+            base = base.where(Processo.situacao == situacao)
+        # Rascunho é de quem o criou (SI-16): os dos outros não aparecem nem
+        # em "Rascunhos" nem em "Todos". Sem usuário de contexto, nenhum.
+        base = base.where(
+            or_(
+                Processo.situacao != "rascunho",
+                Processo.id_usuario == id_usuario_contexto
+                if id_usuario_contexto is not None
+                else false(),
+            )
+        )
     if apenas_ativos:
         base = base.where(Processo.ativo.is_(True))
     if desde:
@@ -616,13 +669,7 @@ async def list_processos(
         await db.execute(
             # `Processo.id` desempata: sem ele, linhas com a mesma data
             # trocariam de página entre uma consulta e outra.
-            base.order_by(
-                *(
-                    (_PARADO_DESDE.asc(), Processo.id.asc())
-                    if ordem is OrdemProcesso.parados
-                    else (Processo.data_hora_abertura.desc(), Processo.id.desc())
-                )
-            )
+            base.order_by(*_ordenacao(base, ordem, ordenar, direcao))
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
@@ -637,11 +684,39 @@ async def list_processos(
     return items, total
 
 
+def _ordenacao(base, ordem: OrdemProcesso, ordenar: OrdenarProcesso | None, direcao: str):
+    """ORDER BY da listagem. `Processo.id` desempata: sem ele, linhas com o
+    mesmo valor trocariam de página entre uma consulta e outra.
+
+    SI-19 — com `ordenar`, a coluna escolhida na tela. Vazio (rascunho sem
+    número, processo sem responsável) vai para o fim nos dois sentidos: quem
+    ordena por responsável quer ver nomes primeiro.
+    """
+    if ordenar is None:
+        if ordem is OrdemProcesso.parados:
+            return (_PARADO_DESDE.asc(), Processo.id.asc())
+        return (Processo.data_hora_abertura.desc(), Processo.id.desc())
+    # Colunas que só existem como rótulo do SELECT (aliases de `_base_select`).
+    rotulo = base.selected_columns
+    coluna = {
+        OrdenarProcesso.numero: Processo.numero_processo,
+        OrdenarProcesso.abertura: Processo.data_hora_abertura,
+        OrdenarProcesso.manifestante: rotulo.manifestante_nome,
+        OrdenarProcesso.assunto: rotulo.assunto_nome,
+        OrdenarProcesso.local_atual: rotulo.local_atual_nome,
+        OrdenarProcesso.responsavel: rotulo.responsavel_nome,
+        OrdenarProcesso.parado: rotulo.parado_desde,
+    }[ordenar]
+    if direcao == "desc":
+        return (coluna.desc().nulls_last(), Processo.id.desc())
+    return (coluna.asc().nulls_last(), Processo.id.asc())
+
+
 def _row_to_list(r) -> ProcessoListItem:
     p: Processo = r[0]
     # `datetime.now()` ingênuo, como o resto deste arquivo (ver `calcular_prazo`).
     prazo = prazo_da_caixa(
-        data_abertura=p.data_hora_abertura,
+        data_abertura=inicio_do_prazo(p.data_hora_abertura, p.data_reinicio_prazo),
         prazo_snapshot_dias=p.prazo_servico_dias_snapshot,
         prazo_encaminhamento=r.prazo_encaminhamento,
         arquivado=bool(r.arquivado),
@@ -658,6 +733,7 @@ def _row_to_list(r) -> ProcessoListItem:
         prazo_caixa_status=prazo.status,
         prazo_caixa_vence_em=prazo.vence_em,
         prazo_caixa_origem=prazo.origem,
+        arquivado=bool(r.arquivado),
         ativo=p.ativo,
         publico=p.publico,
         nivel_sigilo=p.nivel_sigilo,
@@ -721,6 +797,14 @@ async def get_processo_detail(
     # vazar a existência do processo sigiloso.
     if niveis_permitidos is not None:
         stmt = stmt.where(Processo.nivel_sigilo.in_(niveis_permitidos))
+    # Rascunho de outra pessoa também é 404 (SI-16), inclusive para
+    # super-usuário — mesma regra de `sigilo.assert_acesso_processo`.
+    stmt = stmt.where(
+        or_(
+            Processo.situacao != "rascunho",
+            Processo.id_usuario == usuario_id if usuario_id is not None else false(),
+        )
+    )
     row = (await db.execute(stmt)).first()
     if row is None:
         return None
@@ -754,7 +838,7 @@ async def get_processo_detail(
         )
     ).scalar_one_or_none()
     calc = calcular_prazo(
-        data_abertura=p.data_hora_abertura,
+        data_abertura=inicio_do_prazo(p.data_hora_abertura, p.data_reinicio_prazo),
         prazo_snapshot_dias=p.prazo_servico_dias_snapshot,
         data_conclusao=data_conclusao,
         now=datetime.now(),
@@ -772,10 +856,29 @@ async def get_processo_detail(
     pode_receber, pode_cancelar = await _competencia_no_pendente(
         db, processo_id, tenant_id=tenant_id, usuario_id=usuario_id)
 
+    # SI-61 — o último recebimento pode ser desfeito por quem consulta?
+    pode_cancelar_receb: bool | None = None
+    motivo_cancelar_receb: str | None = None
+    if usuario_id is not None:
+        from .acoes_processo import situacao_cancelar_recebimento
+        from .permissoes import load_permissions
+
+        perms = await load_permissions(db, usuario_id, tenant_id=tenant_id)
+        pode_cancelar_receb, motivo_cancelar_receb = await situacao_cancelar_recebimento(
+            db, processo_id, tenant_id=tenant_id, usuario_id=usuario_id,
+            is_super_usuario=perms.is_super_usuario,
+        )
+
     return ProcessoDetail(
         **base_item.model_dump(),
         pode_receber_encaminhamento=pode_receber,
         pode_cancelar_encaminhamento=pode_cancelar,
+        pode_cancelar_recebimento=pode_cancelar_receb,
+        motivo_cancelar_recebimento=motivo_cancelar_receb,
+        id_assunto=p.id_assunto,
+        id_tipo_processo=row.id_tipo_processo,
+        id_manifestante=p.id_manifestante,
+        id_unidade_proprietaria=p.id_unidade_proprietaria,
         observacao=p.observacao,
         corpo=p.corpo,
         virtual=p.virtual,
@@ -854,6 +957,33 @@ async def _load_movimentacoes(
         for e, uo, ud, prio in enc_rows:
             encs[e.id_movimentacao] = (e, uo, ud, prio)
 
+    # SI-62 — arquivos que acompanham o despacho: filhos do PDF dele
+    # (`anexo_processo.id_anexo_principal`), não "anexos da movimentação" —
+    # anexo enviado depois do despacho também cairia na movimentação dele.
+    anexos_do_despacho: dict[int, list[AnexoDoDespacho]] = {}
+    pdfs_de_despacho = {d.id_anexo for d in despachos.values() if d.id_anexo}
+    if pdfs_de_despacho:
+        filhos = (
+            await db.execute(
+                select(AnexoProcesso.id_anexo_principal, Anexo.id, Anexo.descricao)
+                .join(Anexo, Anexo.id == AnexoProcesso.id_anexo)
+                .where(
+                    AnexoProcesso.id_processo == processo_id,
+                    AnexoProcesso.tenant_id == tenant_id,
+                    AnexoProcesso.id_anexo_principal.in_(pdfs_de_despacho),
+                    AnexoProcesso.excluido.is_(False),
+                    AnexoProcesso.desentranhado_em.is_(None),
+                    Anexo.excluido.is_(False),
+                    Anexo.ativo.is_(True),
+                )
+                .order_by(AnexoProcesso.ordem.nulls_last(), Anexo.id)
+            )
+        ).all()
+        for principal, id_anexo, descricao in filhos:
+            anexos_do_despacho.setdefault(principal, []).append(
+                AnexoDoDespacho(id=id_anexo, descricao=descricao)
+            )
+
     desp_user_ids = {d.id_usuario for d in despachos.values()}
     users_by_id: dict[int, str] = {}
     if desp_user_ids:
@@ -892,6 +1022,8 @@ async def _load_movimentacoes(
                 id=d.id,
                 despacho=d.despacho,
                 usuario=users_by_id.get(d.id_usuario),
+                id_anexo=d.id_anexo,
+                anexos=anexos_do_despacho.get(d.id_anexo, []) if d.id_anexo else [],
             )
 
         enc_out: EncaminhamentoOut | None = None
@@ -987,6 +1119,7 @@ async def _load_anexos(
                 ordem=ap.ordem,
                 documento_numero=idx,
                 pagina_processo=pagina_processo,
+                id_anexo_principal=ap.id_anexo_principal,
             )
         )
     return resultado

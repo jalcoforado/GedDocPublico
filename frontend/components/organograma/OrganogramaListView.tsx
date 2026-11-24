@@ -146,7 +146,7 @@ function KpiBadges({ no }: { no: OrganogramaNo }) {
   return (
     <div className="hidden items-center gap-2 text-[10px] text-foreground-muted sm:flex">
       <span className="inline-flex items-center gap-0.5" title="Processos ativos">
-        <FileText className="h-3 w-3 text-blue-600" aria-hidden="true" />
+        <FileText className="h-3 w-3 text-info" aria-hidden="true" />
         <span className="font-mono tabular-nums font-medium text-foreground">
           {no.processos_ativos}
         </span>

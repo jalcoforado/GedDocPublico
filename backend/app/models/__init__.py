@@ -96,6 +96,7 @@ from .nivel import Nivel
 from .servico import Servico
 from .sistema import Sistema
 from .tenant import Tenant
+from .token_conta import TokenConta
 from .transporte_regulado import (
     Empresa,
     Linha,
@@ -118,6 +119,7 @@ from .transporte_regulado import (
     VeiculoAvaliacao,
 )
 from .marcador import Marcador, ProcessoFavorito, ProcessoMarcador
+from .relatorio_salvo import RelatorioSalvo
 from .unidade_trabalho import TipoUnidadeTrabalho, UnidadeTrabalho
 from .usuario import Usuario
 from .usuario_externo import UsuarioExterno
@@ -163,6 +165,7 @@ __all__ = [
     "Processo",
     "ProcessoApensamento",
     "ProcessoFavorito",
+    "RelatorioSalvo",
     "ProcessoMarcador",
     "ProcessoVolume",
     "SolicitacaoAssinatura",
@@ -247,6 +250,7 @@ __all__ = [
     "VeiculoVistoria",
     "VeiculoDocumentoRegulado",
     "VeiculoAvaliacao",
+    "TokenConta",
     "Usuario",
     "UsuarioExterno",
     "UsuarioGrupo",

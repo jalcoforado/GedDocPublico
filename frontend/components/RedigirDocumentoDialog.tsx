@@ -1,17 +1,54 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { ExternalLink, FileText } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { EscolhaSegmentada } from "@/components/ui/escolha-segmentada";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Label } from "@/components/ui/label";
-import { RichTextEditor, RichTextView } from "@/components/ui/rich-text-editor";
+import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { GoogleConnectDialog } from "@/components/GoogleConnectDialog";
+import { PreVisualizacaoDocumento } from "@/components/PreVisualizacaoDocumento";
 import { api } from "@/lib/api";
+import { cn } from "@/lib/utils";
+
+type Modo = "editar" | "lado" | "previa";
+
+const MODOS: { valor: Modo; rotulo: string }[] = [
+  { valor: "editar", rotulo: "Editar" },
+  { valor: "lado", rotulo: "Lado a lado" },
+  { valor: "previa", rotulo: "Pré-visualizar" },
+];
+
+/** Escolha entre só o editor, editor + documento, ou só o documento (SI-30). */
+function ModoDeVisualizacao({ modo, onChange }: { modo: Modo; onChange: (m: Modo) => void }) {
+  return (
+    <div role="group" aria-label="Visualização" className="inline-flex rounded-md border border-border p-0.5">
+      {MODOS.map((m) => (
+        <button
+          key={m.valor}
+          type="button"
+          aria-pressed={modo === m.valor}
+          onClick={() => onChange(m.valor)}
+          className={cn(
+            "rounded px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            modo === m.valor
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground",
+          )}
+        >
+          {m.rotulo}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 interface Props {
   open: boolean;
@@ -20,6 +57,10 @@ interface Props {
   /** Minuta existente para retomar edição; ausente = criar nova. */
   minutaId?: number;
   onSaved?: () => void;
+  /** SI-62 — "despacho": título fixo, sem Google Docs, e "Concluir e assinar…"
+   * no rodapé, que salva e chama `onConcluirDespacho` com o id do rascunho. */
+  finalidade?: "documento" | "despacho";
+  onConcluirDespacho?: (minutaId: number) => void;
 }
 
 /**
@@ -34,9 +75,12 @@ export function RedigirDocumentoDialog({
   processoId,
   minutaId,
   onSaved,
+  finalidade = "documento",
+  onConcluirDespacho,
 }: Props) {
   const qc = useQueryClient();
   const toast = useToast();
+  const despacho = finalidade === "despacho";
 
   const [minutaAtualId, setMinutaAtualId] = useState<number | undefined>(minutaId);
   const [titulo, setTitulo] = useState("");
@@ -46,6 +90,11 @@ export function RedigirDocumentoDialog({
   const [corpo, setCorpo] = useState("");
   const [versao, setVersao] = useState<number | undefined>(undefined);
   const [showGoogleConnect, setShowGoogleConnect] = useState(false);
+  // Abre lado a lado: ver o documento enquanto escreve é o ponto (SI-30).
+  const [modo, setModo] = useState<Modo>("lado");
+  // SI-53 — a pré-seleção do modelo padrão acontece UMA vez por abertura: se a
+  // pessoa trocar para "Documento em branco", um refetch da lista não desfaz.
+  const padraoAplicado = useRef(false);
 
   const credentialQ = useQuery({
     queryKey: ["user", "google-credential"],
@@ -54,16 +103,19 @@ export function RedigirDocumentoDialog({
     throwOnError: false,
   });
   const hasGoogleCredentials = credentialQ.data?.connected === true;
+  // SI-32: sem client ID/secret no servidor não há o que conectar.
+  const googleConfigurado = credentialQ.data?.configurado !== false;
 
   useEffect(() => {
     if (open) {
       setMinutaAtualId(minutaId);
-      setTitulo("");
+      setTitulo(despacho ? "Despacho" : "");
       setDestinatario("");
       setOrigem("interno");
       setTemplateId("");
       setCorpo("");
       setVersao(undefined);
+      padraoAplicado.current = false;
     }
   }, [open, minutaId]);
 
@@ -73,27 +125,44 @@ export function RedigirDocumentoDialog({
     enabled: open && minutaAtualId === undefined,
   });
 
+  // SI-53 — o modelo padrão da prefeitura já vem selecionado.
+  useEffect(() => {
+    if (!open || minutaAtualId !== undefined || padraoAplicado.current || !templatesQ.data) return;
+    padraoAplicado.current = true;
+    const padrao = templatesQ.data.find((t) => t.padrao);
+    if (padrao) setTemplateId(String(padrao.id));
+  }, [open, minutaAtualId, templatesQ.data]);
+
   const minutaQ = useQuery({
     queryKey: ["minuta", minutaAtualId],
     queryFn: () => api.minutas.get(minutaAtualId as number),
     enabled: open && minutaAtualId !== undefined,
   });
 
+  // Preenche com a minuta carregada. Depende também de `open`: o diálogo fica
+  // montado e o efeito acima zera os campos a cada abertura — com a minuta já
+  // no cache, `minutaQ.data` é o MESMO objeto (o React Query reaproveita a
+  // referência quando nada mudou), e um efeito só em `[minutaQ.data]` não
+  // rodava de novo: "Editar" abria o documento em branco.
+  // O id confere com o pedido: na abertura, `minutaAtualId` ainda é o da vez
+  // anterior por um render — sem isso, o texto de outro documento piscava.
   useEffect(() => {
-    if (minutaQ.data) {
-      setTitulo(minutaQ.data.titulo);
-      setDestinatario(minutaQ.data.destinatario ?? "");
-      setCorpo(minutaQ.data.corpo_html ?? "");
-      setVersao(minutaQ.data.versao);
-    }
-  }, [minutaQ.data]);
+    const m = minutaQ.data;
+    if (!open || !m || m.id !== minutaAtualId) return;
+    if (minutaId !== undefined && m.id !== minutaId) return;
+    setTitulo(m.titulo);
+    setDestinatario(m.destinatario ?? "");
+    setCorpo(m.corpo_html ?? "");
+    setVersao(m.versao);
+  }, [open, minutaQ.data, minutaAtualId, minutaId]);
 
   const criarM = useMutation({
     mutationFn: () =>
       api.minutas.create(processoId, {
         titulo: titulo.trim(),
         destinatario: destinatario.trim() || null,
-        origem: origem,
+        origem: despacho ? "interno" : origem,
+        finalidade,
         id_template_origem: origem === "interno" ? (templateId ? Number(templateId) : null) : null,
       }),
     onSuccess: (m) => {
@@ -167,6 +236,25 @@ export function RedigirDocumentoDialog({
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // SI-62 — salva o que está na tela e passa ao passo de assinar.
+  const concluirM = useMutation({
+    mutationFn: () =>
+      api.minutas.update(minutaAtualId as number, {
+        titulo: titulo.trim(),
+        destinatario: destinatario.trim() || null,
+        corpo_html: corpo,
+        versao,
+      }),
+    onSuccess: (m) => {
+      setVersao(m.versao);
+      qc.invalidateQueries({ queryKey: ["minutas", processoId] });
+      qc.invalidateQueries({ queryKey: ["minuta", m.id] });
+      onConcluirDespacho?.(m.id);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const textoVazio = corpo.replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim() === "";
+
   const emEdicao = minutaAtualId !== undefined;
   const carregando = emEdicao && minutaQ.isLoading;
   // Minuta de origem Google não tem conteúdo pra editar aqui — o texto vive
@@ -175,9 +263,22 @@ export function RedigirDocumentoDialog({
   // de volta), e "Salvar rascunho" sobrescreveria corpo_html com esse vazio.
   const ehGoogle = emEdicao ? minutaQ.data?.origem === "google" : origem === "google";
 
+  // Título é o único obrigatório. O botão não fica cinza esperando por ele:
+  // clicar sem título mostra o erro sob o campo.
+  const [tentouCriar, setTentouCriar] = useState(false);
+  const faltaTitulo = titulo.trim().length === 0;
+  function criar() {
+    setTentouCriar(true);
+    if (faltaTitulo) {
+      document.getElementById("minuta-titulo")?.focus();
+      return;
+    }
+    criarM.mutate();
+  }
+
   const footer = emEdicao && ehGoogle ? (
     <div className="flex justify-end gap-2">
-      <Button variant="secondary" onClick={onClose}>
+      <Button variant="ghost" onClick={onClose}>
         Fechar
       </Button>
       <Button
@@ -200,22 +301,32 @@ export function RedigirDocumentoDialog({
     </div>
   ) : emEdicao ? (
     <div className="flex justify-end gap-2">
-      <Button variant="secondary" onClick={onClose}>
+      <Button variant="ghost" onClick={onClose}>
         Fechar
       </Button>
-      <Button onClick={() => salvarM.mutate()} disabled={salvarM.isPending || carregando}>
+      <Button
+        variant={despacho ? "secondary" : "primary"}
+        onClick={() => salvarM.mutate()}
+        disabled={salvarM.isPending || carregando || concluirM.isPending}
+      >
         {salvarM.isPending ? "Salvando…" : "Salvar rascunho"}
       </Button>
+      {despacho && (
+        <Button
+          onClick={() => concluirM.mutate()}
+          disabled={carregando || salvarM.isPending || textoVazio}
+          loading={concluirM.isPending}
+        >
+          Concluir e assinar…
+        </Button>
+      )}
     </div>
   ) : (
     <div className="flex justify-end gap-2">
-      <Button variant="secondary" onClick={onClose}>
+      <Button variant="ghost" onClick={onClose}>
         Cancelar
       </Button>
-      <Button
-        onClick={() => criarM.mutate()}
-        disabled={criarM.isPending || criarGoogleM.isPending || titulo.trim().length === 0}
-      >
+      <Button onClick={criar} loading={criarM.isPending || criarGoogleM.isPending}>
         {criarM.isPending || criarGoogleM.isPending
           ? "Criando…"
           : origem === "google"
@@ -230,76 +341,115 @@ export function RedigirDocumentoDialog({
     <Dialog
       open={open}
       onClose={onClose}
-      title={emEdicao ? "Editar documento" : "Redigir documento"}
-      size="xl"
+      title={
+        despacho
+          ? "Registrar despacho"
+          : emEdicao ? "Editar documento" : "Redigir documento"
+      }
+      description={
+        despacho
+          ? "O processo continua nesta unidade. Até ser assinado, o despacho é um rascunho que só você vê."
+          : undefined
+      }
+      size={emEdicao && !ehGoogle && modo === "lado" ? "2xl" : "xl"}
       footer={footer}
     >
       {!emEdicao ? (
         <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="minuta-titulo">Título do documento</Label>
+          <FormField
+            label="Título do documento"
+            required
+            error={
+              tentouCriar && faltaTitulo
+                ? "Dê um título ao documento, ex.: Despacho de encaminhamento."
+                : undefined
+            }
+          >
             <Input
               id="minuta-titulo"
               value={titulo}
               onChange={(e) => setTitulo(e.target.value)}
               placeholder="Ex.: Despacho de encaminhamento"
             />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="minuta-destinatario">Destinatário (opcional)</Label>
+          </FormField>
+          <FormField
+            label="Destinatário"
+            opcional
+            hint={
+              <>
+                Preenche o campo automático {"{{"}destinatario.nome{"}}"} do modelo, se houver.
+              </>
+            }
+          >
             <Input
               id="minuta-destinatario"
               value={destinatario}
               onChange={(e) => setDestinatario(e.target.value)}
               placeholder="Ex.: Secretaria de Obras"
             />
-            <p className="text-xs text-muted-foreground">
-              Preenche o campo automático {"{{"}destinatario.nome{"}}"} do modelo, se houver.
-            </p>
+          </FormField>
+          {/* Despacho é redigido só aqui: no Google Docs o texto sairia do
+              sistema antes de virar ato (o servidor também recusa). */}
+          {!despacho && (
+          <div>
+            {/* Google Docs sem conta conectada: escolher a opção abre a
+                conexão (se o servidor tiver a integração configurada), em vez
+                de deixar seguir para um "criar" que falharia. */}
+            <EscolhaSegmentada
+              nome="minuta-origem"
+              titulo="Onde redigir"
+              moldura={false}
+              valor={origem}
+              onChange={(v) => {
+                if (v === "google" && !hasGoogleCredentials) {
+                  if (googleConfigurado) setShowGoogleConnect(true);
+                  return;
+                }
+                setOrigem(v);
+              }}
+              opcoes={[
+                {
+                  valor: "interno",
+                  rotulo: "Editor da plataforma",
+                  icon: FileText,
+                  descricao: "Edita aqui mesmo, com os modelos de documento.",
+                },
+                {
+                  valor: "google",
+                  rotulo: "Google Docs",
+                  icon: ExternalLink,
+                  descricao: "Abre o documento no Google Docs, numa nova aba.",
+                  // Sem a integração no servidor não há o que conectar (SI-32).
+                  disabled: !googleConfigurado,
+                },
+              ]}
+            />
+            {!hasGoogleCredentials && !googleConfigurado && (
+              <p className="mt-1.5 text-xs text-foreground-muted">
+                A integração com o Google Docs ainda não foi configurada neste servidor. Fale
+                com o administrador do sistema.
+              </p>
+            )}
+            {!hasGoogleCredentials && googleConfigurado && (
+              <p className="mt-1.5 text-xs text-foreground-muted">
+                Para usar o Google Docs, conecte sua conta primeiro.{" "}
+                <button
+                  type="button"
+                  onClick={() => setShowGoogleConnect(true)}
+                  className="font-medium text-primary hover:underline"
+                >
+                  Conectar agora
+                </button>
+              </p>
+            )}
           </div>
-          <div className="space-y-1.5">
-            <Label>Plataforma de redação</Label>
-            <div className="space-y-2">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  value="interno"
-                  checked={origem === "interno"}
-                  onChange={(e) => setOrigem(e.target.value as "interno" | "google")}
-                  className="w-4 h-4"
-                />
-                <span className="text-sm">Plataforma (editor interno com templates)</span>
-              </label>
-
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  value="google"
-                  checked={origem === "google"}
-                  onChange={(e) => setOrigem(e.target.value as "interno" | "google")}
-                  disabled={!hasGoogleCredentials}
-                  className="w-4 h-4"
-                />
-                <span className="text-sm">Google Docs (editor externo)</span>
-              </label>
-
-              {!hasGoogleCredentials && (
-                <div className="ml-6 text-xs text-amber-600 space-y-1">
-                  <p>⚠️ Você precisa conectar sua conta Google Docs primeiro.</p>
-                  <button
-                    type="button"
-                    onClick={() => setShowGoogleConnect(true)}
-                    className="text-blue-600 hover:underline font-medium"
-                  >
-                    Conectar agora →
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
+          )}
           {origem === "interno" && (
-            <div className="space-y-1.5">
-              <Label htmlFor="minuta-template">Modelo (template)</Label>
+            <FormField
+              label="Modelo"
+              opcional
+              hint="Com um modelo, os dados do processo (número, requerente, data…) já entram preenchidos."
+            >
               <Select
                 id="minuta-template"
                 value={templateId}
@@ -309,14 +459,11 @@ export function RedigirDocumentoDialog({
                 {(templatesQ.data ?? []).map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.nome}
+                    {t.padrao ? " (padrão)" : ""}
                   </option>
                 ))}
               </Select>
-              <p className="text-xs text-muted-foreground">
-                Ao usar um modelo, os campos do processo (número, requerente, data…) são
-                preenchidos automaticamente.
-              </p>
-            </div>
+            </FormField>
           )}
         </div>
       ) : carregando ? (
@@ -336,9 +483,12 @@ export function RedigirDocumentoDialog({
               <p className="text-xs font-medium text-foreground-muted">
                 Conteúdo trazido do Google Docs (v{minutaQ.data.versao})
               </p>
-              <div className="max-h-80 overflow-y-auto rounded-md border border-border bg-card p-3">
-                <RichTextView html={minutaQ.data.corpo_html} />
-              </div>
+              {/* Como o PDF vai sair (SI-30), não o texto cru da tela. */}
+              <PreVisualizacaoDocumento
+                titulo={minutaQ.data.titulo}
+                corpoHtml={minutaQ.data.corpo_html}
+                className="h-96"
+              />
               <p className="text-xs text-foreground-subtle">
                 Vêm negrito, itálico, títulos, listas, alinhamento e tabelas.
                 Imagens, links, cores e fontes continuam só no Google Docs.
@@ -352,39 +502,53 @@ export function RedigirDocumentoDialog({
         </div>
       ) : (
         <div className="space-y-4">
+          <GradeCampos>
+            <FormField label="Título" required>
+              <Input
+                id="minuta-titulo-edit"
+                value={titulo}
+                onChange={(e) => setTitulo(e.target.value)}
+              />
+            </FormField>
+            <FormField label="Destinatário" opcional>
+              <Input
+                id="minuta-destinatario-edit"
+                value={destinatario}
+                onChange={(e) => setDestinatario(e.target.value)}
+                placeholder="Ex.: Secretaria de Obras"
+              />
+            </FormField>
+          </GradeCampos>
           <div className="space-y-1.5">
-            <Label htmlFor="minuta-titulo-edit">Título</Label>
-            <Input
-              id="minuta-titulo-edit"
-              value={titulo}
-              onChange={(e) => setTitulo(e.target.value)}
-            />
+            <div className="flex flex-wrap items-end justify-between gap-2">
+              <Label>Conteúdo</Label>
+              <ModoDeVisualizacao modo={modo} onChange={setModo} />
+            </div>
+            <div className={cn("grid gap-4", modo === "lado" && "lg:grid-cols-2")}>
+              {modo !== "previa" && (
+                <RichTextEditor
+                  value={corpo}
+                  onChange={setCorpo}
+                  minHeight={320}
+                  ariaLabel="Editor do documento"
+                  onUploadImage={async (file) => {
+                    const { url } = await api.editorImagens.upload(file);
+                    return url;
+                  }}
+                />
+              )}
+              {modo !== "editar" && (
+                <PreVisualizacaoDocumento
+                  titulo={titulo}
+                  corpoHtml={corpo}
+                  className={modo === "previa" ? "min-h-[60vh]" : undefined}
+                />
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Versão atual: v{versao}. Cada "Salvar rascunho" registra uma nova versão.
+            </p>
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="minuta-destinatario-edit">Destinatário (opcional)</Label>
-            <Input
-              id="minuta-destinatario-edit"
-              value={destinatario}
-              onChange={(e) => setDestinatario(e.target.value)}
-              placeholder="Ex.: Secretaria de Obras"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Conteúdo</Label>
-            <RichTextEditor
-              value={corpo}
-              onChange={setCorpo}
-              minHeight={320}
-              ariaLabel="Editor do documento"
-              onUploadImage={async (file) => {
-                const { url } = await api.editorImagens.upload(file);
-                return url;
-              }}
-            />
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Versão atual: v{versao}. Cada "Salvar rascunho" registra uma nova versão.
-          </p>
         </div>
       )}
     </Dialog>

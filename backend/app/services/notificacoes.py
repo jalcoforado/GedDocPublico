@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
 from ..models import Notificacao, NotificacaoPreferenciaEvento, Usuario
+from .conta_email import enviar_email
 
 logger = logging.getLogger("notificacoes")
 
@@ -269,56 +270,13 @@ async def enviar(
 
 
 async def _email_driver(n: Notificacao) -> None:
-    """Email driver — Fase 17b.
-
-    Se `SMTP_HOST` está setado: envia via aiosmtplib (STARTTLS opcional).
-    Senão: stub log (mantém comportamento de dev).
-    """
-    settings = get_settings()
-    if not settings.smtp_host:
-        logger.info(
-            "email_stub_enviado",
-            extra={
-                "tenant_id": n.tenant_id,
-                "to": n.destinatario_email,
-                "tipo": n.tipo,
-                "titulo": n.titulo,
-                "link": n.link_url,
-            },
-        )
-        return
-
-    # Real SMTP — import lazy pra evitar custo quando stub é ativo
-    import aiosmtplib  # type: ignore[import-untyped]
-    from email.message import EmailMessage
-
-    msg = EmailMessage()
-    msg["From"] = settings.smtp_from
-    msg["To"] = n.destinatario_email
-    msg["Subject"] = n.titulo
-
+    """Email driver — Fase 17b. O envio (SMTP ou stub de log sem `SMTP_HOST`)
+    é o mesmo dos e-mails da conta: `services/conta_email.enviar_email`."""
     corpo = n.mensagem
     if n.link_url:
         corpo += f"\n\nLink: {n.link_url}"
-    msg.set_content(corpo)
-
-    await aiosmtplib.send(
-        msg,
-        hostname=settings.smtp_host,
-        port=settings.smtp_port,
-        username=settings.smtp_user or None,
-        password=settings.smtp_password or None,
-        start_tls=settings.smtp_use_tls,
-        timeout=20,
-    )
-    logger.info(
-        "email_smtp_enviado",
-        extra={
-            "tenant_id": n.tenant_id,
-            "to": n.destinatario_email,
-            "tipo": n.tipo,
-            "host": settings.smtp_host,
-        },
+    await enviar_email(
+        para=n.destinatario_email, assunto=n.titulo, texto=corpo, tenant_id=n.tenant_id
     )
 
 

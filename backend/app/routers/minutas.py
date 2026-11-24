@@ -6,16 +6,21 @@
   transação de admin `minuta_template`.
 - `minutas_router`: CRUD de minutas por processo, gated por `processo.atualizar`
   (mesma permissão do upload de anexo). A FINALIZAÇÃO é adicionada no PR-C.
+  Permissão não cobre sigilo: toda rota daqui confere o processo da minuta
+  (`obter_minuta_autorizada` / `exigir_acesso_ao_processo`, SI-62) — ver
+  `tests/test_guarda_minuta_sigilosa.py`.
 """
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.deps import require_tenant_id, require_tenant_slug
 from ..auth.perms import require_permission
 from ..database import get_db
-from ..models import Usuario
+from ..models import Tenant, Usuario
 from ..schemas.minuta import (
+    DespachoConcluidoOut,
     MinutaCreate,
     MinutaHistoricoListResponse,
     MinutaListItem,
@@ -26,8 +31,17 @@ from ..schemas.minuta import (
     TemplateDocumentoOut,
     TemplateDocumentoUpdate,
 )
+from ..services import despacho as despacho_svc
 from ..services import editor_imagens
 from ..services import minutas as svc
+from ..services.anexos import AnexoError
+from ..services.assinaturas import (
+    AssinaturaCredencialLegadaError,
+    AssinaturaError,
+    AssinaturaThrottleError,
+)
+from ..services.html_pdf import CSS_DOCUMENTO, CSS_PRE_VISUALIZACAO
+from ..services.papel_timbrado import papel_timbrado
 from ..services.placeholders import PLACEHOLDERS_DISPONIVEIS
 
 templates_router = APIRouter(prefix="/templates-documento", tags=["minutas"])
@@ -39,6 +53,32 @@ async def list_placeholders(
     __: int = Depends(require_tenant_id),
 ) -> list[PlaceholderInfo]:
     return [PlaceholderInfo(**p) for p in PLACEHOLDERS_DISPONIVEIS]
+
+
+@templates_router.get("/estilo-impressao")
+async def estilo_impressao(
+    _: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    """CSS com que o PDF final da minuta é impresso (SI-30).
+
+    A pré-visualização do editor aplica ESTE estilo, não uma cópia dele no
+    frontend: se a tipografia do PDF mudar, a pré-visualização muda junto.
+    `css_tela` é a moldura da prévia (folha A4, destaque de campo pendente),
+    que não entra no PDF. Declarada antes de `/{template_id}` para não cair
+    na rota de id.
+    """
+    timbre = papel_timbrado(
+        (await db.execute(select(Tenant).where(Tenant.id == tenant_id))).scalar_one()
+    )
+    return {
+        "css": CSS_DOCUMENTO,
+        "css_tela": CSS_PRE_VISUALIZACAO,
+        # SI-53 — o mesmo timbre que `html_to_pdf_bytes` imprime.
+        "cabecalho_html": timbre.cabecalho_html(),
+        "rodape_html": timbre.rodape_html(),
+    }
 
 
 @templates_router.get("", response_model=list[TemplateDocumentoOut])
@@ -169,11 +209,16 @@ minutas_router = APIRouter(tags=["minutas"])
 )
 async def list_minutas(
     processo_id: int,
-    _: Usuario = Depends(require_permission("processo", "atualizar")),
+    usuario: Usuario = Depends(require_permission("processo", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> list[MinutaListItem]:
-    rows = await svc.listar_minutas(db, tenant_id=tenant_id, processo_id=processo_id)
+    await svc.exigir_acesso_ao_processo(
+        db, tenant_id=tenant_id, processo_id=processo_id, usuario=usuario
+    )
+    rows = await svc.listar_minutas(
+        db, tenant_id=tenant_id, processo_id=processo_id, usuario_id=usuario.id
+    )
     return [MinutaListItem.model_validate(r) for r in rows]
 
 
@@ -189,6 +234,9 @@ async def create_minuta(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> MinutaOut:
+    await svc.exigir_acesso_ao_processo(
+        db, tenant_id=tenant_id, processo_id=processo_id, usuario=usuario
+    )
     m = await svc.criar_minuta(
         db,
         tenant_id=tenant_id,
@@ -202,21 +250,26 @@ async def create_minuta(
 @minutas_router.get("/minutas/{minuta_id}", response_model=MinutaOut)
 async def get_minuta(
     minuta_id: int,
-    _: Usuario = Depends(require_permission("processo", "atualizar")),
+    usuario: Usuario = Depends(require_permission("processo", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> MinutaOut:
-    m = await svc.obter_minuta(db, tenant_id=tenant_id, minuta_id=minuta_id)
+    m = await svc.obter_minuta_autorizada(
+        db, tenant_id=tenant_id, minuta_id=minuta_id, usuario=usuario
+    )
     return MinutaOut.model_validate(m)
 
 
 @minutas_router.get("/minutas/{minuta_id}/historico", response_model=MinutaHistoricoListResponse)
 async def get_minuta_historico(
     minuta_id: int,
-    _: Usuario = Depends(require_permission("processo", "atualizar")),
+    usuario: Usuario = Depends(require_permission("processo", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> MinutaHistoricoListResponse:
+    await svc.obter_minuta_autorizada(
+        db, tenant_id=tenant_id, minuta_id=minuta_id, usuario=usuario
+    )
     versoes = await svc.listar_historico_minuta(db, tenant_id=tenant_id, minuta_id=minuta_id)
     return MinutaHistoricoListResponse(versoes=[v for v in versoes])
 
@@ -229,6 +282,9 @@ async def update_minuta(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> MinutaOut:
+    await svc.obter_minuta_autorizada(
+        db, tenant_id=tenant_id, minuta_id=minuta_id, usuario=usuario
+    )
     m = await svc.atualizar_minuta(
         db,
         tenant_id=tenant_id,
@@ -248,6 +304,9 @@ async def delete_minuta(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> None:
+    await svc.obter_minuta_autorizada(
+        db, tenant_id=tenant_id, minuta_id=minuta_id, usuario=usuario
+    )
     await svc.excluir_minuta(db, tenant_id=tenant_id, minuta_id=minuta_id, usuario_id=usuario.id)
 
 
@@ -259,6 +318,9 @@ async def finalizar_minuta(
     tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),
 ) -> MinutaOut:
+    await svc.obter_minuta_autorizada(
+        db, tenant_id=tenant_id, minuta_id=minuta_id, usuario=usuario
+    )
     m = await svc.finalizar_minuta(
         db,
         tenant_id=tenant_id,
@@ -267,6 +329,52 @@ async def finalizar_minuta(
         usuario_id=usuario.id,
     )
     return MinutaOut.model_validate(m)
+
+
+# ===================== Despacho sem encaminhar (SI-62) =====================
+
+
+@minutas_router.post(
+    "/minutas/{minuta_id}/concluir-despacho",
+    response_model=DespachoConcluidoOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def concluir_despacho(
+    minuta_id: int,
+    request: Request,
+    senha: str = Form(..., min_length=1),
+    arquivos: list[UploadFile] = File(default=[]),
+    usuario: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    tenant_slug: str = Depends(require_tenant_slug),
+    db: AsyncSession = Depends(get_db),
+) -> DespachoConcluidoOut:
+    """Conclui o rascunho de despacho: assina com a senha e registra no
+    processo sem mudar a unidade. Ver `services/despacho.py`."""
+    await svc.obter_minuta_autorizada(
+        db, tenant_id=tenant_id, minuta_id=minuta_id, usuario=usuario
+    )
+    try:
+        d = await despacho_svc.concluir_despacho(
+            db,
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            minuta_id=minuta_id,
+            usuario=usuario,
+            senha=senha,
+            arquivos=arquivos,
+            ip=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+    except AssinaturaThrottleError as e:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(e))
+    except AssinaturaCredencialLegadaError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except (AssinaturaError, AnexoError) as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return DespachoConcluidoOut(
+        id=d.id, id_movimentacao=d.id_movimentacao, id_anexo=d.id_anexo
+    )
 
 
 # ======================== Google Docs (PR-F) ========================
@@ -285,6 +393,9 @@ async def criar_minuta_em_google(
     - User must have connected Google Docs (GoogleCredencial record exists)
     - Minuta must be in rascunho status
     """
+    await svc.obter_minuta_autorizada(
+        db, tenant_id=tenant_id, minuta_id=minuta_id, usuario=usuario
+    )
     m = await svc.criar_google_doc_para_minuta(
         db, tenant_id=tenant_id, minuta_id=minuta_id, usuario_id=usuario.id
     )
@@ -294,7 +405,7 @@ async def criar_minuta_em_google(
 @minutas_router.get("/minutas/{minuta_id}/google-editor-url")
 async def get_google_editor_url(
     minuta_id: int,
-    _: Usuario = Depends(require_permission("processo", "atualizar")),
+    usuario: Usuario = Depends(require_permission("processo", "atualizar")),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
@@ -303,7 +414,9 @@ async def get_google_editor_url(
     Returns:
         {"url": "https://docs.google.com/document/d/.../edit"}
     """
-    m = await svc.obter_minuta(db, tenant_id=tenant_id, minuta_id=minuta_id)
+    m = await svc.obter_minuta_autorizada(
+        db, tenant_id=tenant_id, minuta_id=minuta_id, usuario=usuario
+    )
     if not m.google_doc_url:
         raise ValueError("Minuta does not have a Google Doc URL")
     return {"url": m.google_doc_url}
@@ -320,6 +433,9 @@ async def sincronizar_minuta_google(
     
     Puxa o DOCX do Google Drive, extrai o texto e atualiza o corpo_html da minuta.
     """
+    await svc.obter_minuta_autorizada(
+        db, tenant_id=tenant_id, minuta_id=minuta_id, usuario=usuario
+    )
     m = await svc.sincronizar_google_doc_para_minuta(
         db, tenant_id=tenant_id, minuta_id=minuta_id, usuario_id=usuario.id
     )
@@ -337,6 +453,9 @@ async def arquivar_minuta_google(
 
     Note: Minuta record is NOT deleted; only the linked Google Doc is archived.
     """
+    await svc.obter_minuta_autorizada(
+        db, tenant_id=tenant_id, minuta_id=minuta_id, usuario=usuario
+    )
     await svc.arquivar_google_doc_para_minuta(
         db, tenant_id=tenant_id, minuta_id=minuta_id, usuario_id=usuario.id
     )

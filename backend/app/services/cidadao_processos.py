@@ -46,7 +46,7 @@ from ..schemas.cidadao import (
     ProcessoCidadaoListItem,
 )
 from .audit import log as audit_log
-from .prazos import calcular_prazo, status_cidadao
+from .prazos import calcular_prazo, inicio_do_prazo, status_cidadao
 
 logger = logging.getLogger("cidadao_processos")
 
@@ -257,7 +257,7 @@ async def get_meu_detail(
         )
     ).scalar_one_or_none()
     calc = calcular_prazo(
-        data_abertura=p.data_hora_abertura,
+        data_abertura=inicio_do_prazo(p.data_hora_abertura, p.data_reinicio_prazo),
         prazo_snapshot_dias=p.prazo_servico_dias_snapshot,
         data_conclusao=data_conclusao,
         now=datetime.now(),
@@ -322,14 +322,18 @@ async def _resolver_ou_criar_manifestante(
     if manifestante is not None:
         return manifestante
 
+    # O tipo segue o documento do cidadão (14 dígitos é CNPJ); sem tipo
+    # daquela natureza, cai no primeiro tipo ativo, como antes da 0136.
+    natureza = "J" if len(cidadao.cpf_cnpj or "") == 14 else "F"
     tipo_pf = (
         await db.execute(
             select(TipoManifestante)
             .where(
                 TipoManifestante.tenant_id == tenant_id,
                 TipoManifestante.ativo.is_(True),
+                TipoManifestante.excluido.is_(False),
             )
-            .order_by(TipoManifestante.id)
+            .order_by((TipoManifestante.natureza != natureza), TipoManifestante.id)
             .limit(1)
         )
     ).scalar_one_or_none()

@@ -38,15 +38,17 @@ describe("middleware — rotas públicas", () => {
     expect(destino(pedir(caminho))).toBeNull();
   });
 
-  it.each(["/home", "/m/protocolo/processos", "/admin/tenants"])(
+  it.each(["/modulos", "/m/protocolo/processos", "/admin/tenants"])(
     "%s sem login vai para o login, guardando o destino",
     (caminho) => {
       expect(destino(pedir(caminho))).toBe(`/login?next=${encodeURIComponent(caminho)}`);
     },
   );
 
-  it("/modulos sem login vai para o login sem `next` (já é o destino padrão)", () => {
-    expect(destino(pedir("/modulos"))).toBe("/login");
+  // Desde o menu único (2026-11-05) o destino padrão é o Início, não mais o
+  // launcher `/modulos`.
+  it("/home sem login vai para o login sem `next` (já é o destino padrão)", () => {
+    expect(destino(pedir("/home"))).toBe("/login");
   });
 
   it("rota protegida com cookie de sessão segue adiante", () => {

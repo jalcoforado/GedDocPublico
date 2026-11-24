@@ -38,6 +38,7 @@ function item(id: number): ProcessoListItem {
   return {
     id, numero_processo: `2026/00${id}`, nup: null, numero_origem: null, situacao: "protocolado",
     data_hora_abertura: "2026-10-01T10:00:00", parado_desde: "2026-10-10T10:00:00",
+    arquivado: false,
     ativo: true, publico: true, nivel_sigilo: "ostensivo", externo: false, assunto: "Licença",
     tipo_processo: "Pessoal", manifestante: "Fulano", manifestante_cpf_cnpj: null,
     unidade_proprietaria: "RH", local_atual: "RH", id_usuario_responsavel: null,
@@ -150,11 +151,15 @@ describe("ações em lote", () => {
     fireEvent.click(barra().getByRole("button", { name: "Encaminhar…" }));
 
     const confirmar = await screen.findByRole("button", { name: "Confirmar encaminhamento" });
-    expect(confirmar).toBeDisabled();
+    // Padrão de formulário: sem destino, clicar mostra o que falta e não envia.
+    fireEvent.click(confirmar);
+    expect(screen.getByText("Escolha para qual unidade os processos vão.")).toBeInTheDocument();
+    expect(screen.getByText("Escolha a prioridade.")).toBeInTheDocument();
+    expect(loteMock).not.toHaveBeenCalled();
     await screen.findByRole("option", { name: "Procuradoria" });
-    fireEvent.change(screen.getByLabelText("Unidade de destino"), { target: { value: "9" } });
+    fireEvent.change(screen.getByLabelText(/Unidade de destino/), { target: { value: "9" } });
     await screen.findByRole("option", { name: "Normal" });
-    fireEvent.change(screen.getByLabelText("Prioridade"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText(/Prioridade/), { target: { value: "2" } });
     fireEvent.click(confirmar);
 
     await waitFor(() => expect(loteMock).toHaveBeenCalledWith({
@@ -168,9 +173,11 @@ describe("ações em lote", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Selecionar 2026/001" }));
     fireEvent.click(barra().getByRole("button", { name: "Arquivar…" }));
     const confirmar = await screen.findByRole("button", { name: "Confirmar arquivamento" });
-    fireEvent.change(screen.getByLabelText("Motivo do arquivamento"), { target: { value: "ok" } });
-    expect(confirmar).toBeDisabled();
-    fireEvent.change(screen.getByLabelText("Motivo do arquivamento"), {
+    fireEvent.change(screen.getByLabelText(/Motivo do arquivamento/), { target: { value: "ok" } });
+    fireEvent.click(confirmar);
+    expect(screen.getByText(/pelo menos 3 letras/)).toBeInTheDocument();
+    expect(loteMock).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText(/Motivo do arquivamento/), {
       target: { value: "Demanda atendida" } });
     fireEvent.click(confirmar);
     await waitFor(() => expect(loteMock).toHaveBeenCalledWith({

@@ -33,6 +33,8 @@ travar um comportamento, escreva a guarda — a lista delas está no fim.
 | **adicionar um módulo/tela** | `CLAUDE.md` §Adicionando um módulo | Sete coisas que costumam ser esquecidas — inclusive a regex do nginx, sem a qual a tela "não existe" no `:8090`. |
 | **gatear um endpoint** | `CLAUDE.md` §Multi-tenancy e §Modularização | Módulo, permissão e sigilo são **três eixos independentes**; nenhum substitui outro. |
 | **servir conteúdo de um processo** | `CLAUDE.md` §Sigilo gradual | `assert_acesso_processo` é obrigatório, inclusive onde a assinatura não menciona processo. Um download de anexo ficou aberto 7 meses assim. |
+| **mexer em relatório de protocolo** | [relatorios-protocolo](relatorios-protocolo.md) · `CLAUDE.md` §Sigilo gradual | Cada seção conta pela sua data; o número da seção tem de ser o total da lista dela. Sigilo vale nos totais, não só nas listas. Período em dia de Brasília. |
+| **mexer em tipo de processo/assunto** | [catalogo-protocolo](catalogo-protocolo.md) | O processo guarda só o assunto: mover assunto de tipo muda processos já abertos. A abertura carrega no máximo 200 assuntos. |
 | **mexer em permissão/RBAC** | `CLAUDE.md` §Modularização · [RUNBOOK](../RUNBOOK.md) | Todo grupo é SU hoje; o gate está inerte. Quem criar o primeiro grupo não-SU precisa conceder leitura também. |
 | **rodar/consertar a suíte** | `CLAUDE.md` §Testes e §Testes—convenções | `PYTEST_DB_HOST=db` é obrigatório. Teste com super-usuário passa pelo motivo errado. |
 | **fazer deploy** | `CLAUDE.md` §Deploy | O portão `workflow_run`, o auto-sobrescrever do `deploy.sh` e o nome do projeto compose vindo do diretório. |
@@ -68,10 +70,12 @@ contrato — e o leitor precisa saber a diferença antes de agir.
 |---|---|
 | [design-system](design-system.md) | Tokens, componentes, padrões de UI. |
 | [INTEGRACAO-PAGAMENTOS](INTEGRACAO-PAGAMENTOS.md) | Contrato de arrecadação e conciliação. |
+| [relatorios-protocolo](relatorios-protocolo.md) | O que cada número dos relatórios do protocolo mede, quem vê, limitações. |
 | [GOOGLE-DOCS-OAUTH-SETUP](GOOGLE-DOCS-OAUTH-SETUP.md) | Setup do OAuth das minutas. |
 | [runbooks/platform-operator-bootstrap](runbooks/platform-operator-bootstrap.md) | Concessão/revogação de principal de plataforma. |
 | [architecture/security/threat-model-platform-operator](architecture/security/threat-model-platform-operator.md) | Modelo de ameaça da fronteira de plataforma. |
 | [acessos-teste-local](acessos-teste-local.md) | Credenciais e atalhos do ambiente local. |
+| [catalogo-protocolo](catalogo-protocolo.md) | Tipo de processo × assunto, o catálogo sugerido de demonstração e o que ele não faz. |
 
 ### Registro — não descrevem o presente
 
@@ -95,6 +99,7 @@ Quando a documentação e uma destas discordarem, a guarda está certa:
 | `test_guarda_modularizacao.py` | Transação nova declara módulo; leitura gateada. |
 | `test_guarda_ordem_rotas.py` | Rota literal declarada antes da paramétrica irmã. |
 | `test_guarda_anexo_sigiloso.py` | Carregador cru de anexo proibido em router. |
+| `test_guarda_minuta_sigilosa.py` | Toda rota que mexe numa minuta confere o sigilo do processo. |
 | `test_guarda_link_url.py` | `notificacao.link_url` nasce com `/m/<slug>/`. |
 | `test_guarda_portas_publicadas.py` | Nada volta a publicar em `0.0.0.0`. |
 | `test_guarda_portao_de_deploy.py` | O portão de deploy e o SHA aprovado. |

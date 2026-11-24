@@ -169,9 +169,10 @@ describe("Conciliação bancária", () => {
 
     const dialogo = within(await screen.findByRole("dialog"));
     const confirmar = dialogo.getByRole("button", { name: "Desfazer conciliação" });
-    expect(confirmar).toBeDisabled();
+    // Sem justificativa, o clique não desfaz: mostra o que falta.
     fireEvent.click(confirmar);
     expect(desfazerMock).not.toHaveBeenCalled();
+    expect(await dialogo.findByText(/Explique por que desfazer/)).toBeInTheDocument();
 
     fireEvent.change(dialogo.getByLabelText(/Justificativa/), {
       target: { value: "Casado com a movimentação errada" },
@@ -216,18 +217,16 @@ describe("Importação de extrato — upload e relato (C2.2)", () => {
       "[role=dialog]",
     ) as HTMLElement;
 
-    fireEvent.change(within(dialog).getByLabelText("Conta"), {
+    fireEvent.change(within(dialog).getByLabelText(/^Conta/), {
       target: { value: "7" },
     });
-    fireEvent.change(within(dialog).getByLabelText(/Formato/i), {
-      target: { value: "OFX" },
-    });
+    fireEvent.click(within(dialog).getByRole("radio", { name: "OFX" }));
 
     const arquivo = new File(["conteudo-ofx-fake"], "extrato.ofx", { type: "text/plain" });
-    const inputArquivo = screen.getByLabelText("Arquivo") as HTMLInputElement;
+    const inputArquivo = screen.getByLabelText(/^Arquivo/) as HTMLInputElement;
     fireEvent.change(inputArquivo, { target: { files: [arquivo] } });
 
-    await waitFor(() => expect(screen.getByLabelText(/Nome do arquivo/i)).toHaveValue("extrato.ofx"));
+    await waitFor(() => expect(screen.getByLabelText(/Nome do extrato/i)).toHaveValue("extrato.ofx"));
 
     fireEvent.click(screen.getByRole("button", { name: /^Importar$/i }));
 
@@ -240,5 +239,23 @@ describe("Importação de extrato — upload e relato (C2.2)", () => {
     expect(await screen.findByText(/3 importado/i)).toBeInTheDocument();
     expect(screen.getByText(/1 ignorado/i)).toBeInTheDocument();
     expect(screen.getByText(/1 possível duplicata/i)).toBeInTheDocument();
+  });
+
+  it("sem conta nem arquivo, não importa: diz o que falta e foca a conta", async () => {
+    importarMock.mockClear();
+    renderPage();
+    fireEvent.click(await screen.findByText("Importar extrato"));
+    const dialog = (await screen.findByText("Importar extrato bancário")).closest(
+      "[role=dialog]",
+    ) as HTMLElement;
+
+    // Nada de erro ao abrir.
+    expect(within(dialog).queryByText("Escolha a conta do extrato.")).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Importar$/i }));
+
+    expect(await within(dialog).findByText("Escolha a conta do extrato.")).toBeInTheDocument();
+    expect(within(dialog).getByText(/Escolha o arquivo ou cole o conteúdo/)).toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/^Conta/)).toHaveFocus();
+    expect(importarMock).not.toHaveBeenCalled();
   });
 });

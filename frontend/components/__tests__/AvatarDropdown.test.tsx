@@ -79,23 +79,20 @@ describe("AvatarDropdown — links (fatia 3.7)", () => {
   });
 });
 
-describe("AvatarDropdown — tema e densidade como radiogroup (fatia 3.7)", () => {
-  it("tema é um radiogroup com 3 radios e o ativo marcado", () => {
+describe("AvatarDropdown — sem preferências de aparência", () => {
+  // O tema morou aqui como radiogroup (fatia 3.7) e saiu em 2026-11-11, a
+  // pedido do Heitor: o sol/lua da barra de cima troca o tema, e a escolha
+  // completa (com "Sistema") fica em /perfil.
+  it("não oferece mais o tema", () => {
     renderAvatar();
     abrir();
-    const grupo = screen.getByRole("radiogroup", { name: /tema/i });
-    const radios = within(grupo).getAllByRole("radio");
-    expect(radios.length).toBe(3);
-    expect(radios.filter((r) => r.getAttribute("aria-checked") === "true").length).toBe(1);
+    expect(screen.queryByRole("radiogroup", { name: /tema/i })).toBeNull();
   });
 
-  it("densidade é um radiogroup com 2 radios; escolher marca a opção", () => {
+  it("não oferece mais densidade (o modo compacto saiu em 2026-11-06)", () => {
     renderAvatar();
     abrir();
-    const grupo = screen.getByRole("radiogroup", { name: /densidade/i });
-    const compacto = within(grupo).getByRole("radio", { name: /compacto/i });
-    fireEvent.click(compacto);
-    expect(compacto).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByRole("radiogroup", { name: /densidade/i })).toBeNull();
   });
 });
 

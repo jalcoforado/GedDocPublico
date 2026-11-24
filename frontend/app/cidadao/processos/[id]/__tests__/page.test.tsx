@@ -128,7 +128,7 @@ beforeEach(() => {
 // =============================================================================
 
 describe("Detalhe cidadão — ProximosPassosCard", () => {
-  it("complementação aberta → mensagem 'Responda à solicitação de complementação documental'", async () => {
+  it("complementação aberta → mensagem 'A prefeitura pediu mais documentos'", async () => {
     getProcessoMock.mockResolvedValue(processo());
     checklistMock.mockResolvedValue(
       checklist({
@@ -140,7 +140,7 @@ describe("Detalhe cidadão — ProximosPassosCard", () => {
     await screen.findByText("P000042/2026");
     expect(
       await screen.findByText(
-        /Responda à solicitação de complementação documental/i,
+        /A prefeitura pediu mais documentos/i,
       ),
     ).toBeInTheDocument();
   });
@@ -325,7 +325,7 @@ describe("Detalhe cidadão — regressão de upload (contrato com backend)", () 
     // Abre dialog clicando no botão "Anexar" do item RG.
     fireEvent.click(screen.getByRole("button", { name: /^Anexar$/i }));
     // Dialog presente.
-    expect(await screen.findByText(/Anexar: RG/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Enviar: RG/i)).toBeInTheDocument();
 
     // Seleciona arquivo.
     const fakeFile = new File(["x"], "rg.pdf", { type: "application/pdf" });
@@ -336,10 +336,64 @@ describe("Detalhe cidadão — regressão de upload (contrato com backend)", () 
     fireEvent.change(input);
 
     // Envia.
-    fireEvent.click(screen.getByRole("button", { name: /^Enviar$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Enviar documento$/i }));
 
     await waitFor(() => expect(uploadMock).toHaveBeenCalledTimes(1));
     // Contrato com backend: id, file, file.name (descricao), key.
     expect(uploadMock.mock.calls[0]).toEqual([42, fakeFile, "rg.pdf", "rg"]);
+  });
+});
+
+describe("Detalhe cidadão — envio de documento pedido", () => {
+  function comRG() {
+    getProcessoMock.mockResolvedValue(processo());
+    checklistMock.mockResolvedValue(
+      checklist({
+        status_documental: "pendente",
+        obrigatorios_total: 1,
+        obrigatorios_enviados: 0,
+        itens: [
+          { key: "rg", nome: "RG", obrigatorio: true, descricao: null,
+            enviado: false, anexos: [] },
+        ],
+      }),
+    );
+  }
+
+  it("'Enviar documento' sem arquivo não fica desabilitado: diz o que falta e não sobe nada", async () => {
+    comRG();
+    renderPage();
+    await screen.findByText("P000042/2026");
+    fireEvent.click(screen.getByRole("button", { name: /^Anexar$/i }));
+    const enviar = await screen.findByRole("button", { name: /^Enviar documento$/i });
+    expect(enviar).not.toBeDisabled();
+    fireEvent.click(enviar);
+    expect(await screen.findByText(/Escolha o arquivo antes de enviar/i)).toBeInTheDocument();
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("arquivo acima do limite é recusado no navegador, antes de subir", async () => {
+    comRG();
+    renderPage();
+    await screen.findByText("P000042/2026");
+    fireEvent.click(screen.getByRole("button", { name: /^Anexar$/i }));
+    await screen.findByText(/Enviar: RG/i);
+    const grande = new File(["x"], "rg.pdf", { type: "application/pdf" });
+    Object.defineProperty(grande, "size", { value: 25 * 1024 * 1024 });
+    const input = document.getElementById("checklist-file") as HTMLInputElement;
+    Object.defineProperty(input, "files", { value: [grande] });
+    fireEvent.change(input);
+    expect(await screen.findByText(/excede 20 MB/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Enviar documento$/i }));
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("a classificação documental (CCD), jargão interno, não aparece para o cidadão", async () => {
+    getProcessoMock.mockResolvedValue(processo({ ccd_codigo: "01.02", ccd_nome: "Requerimentos diversos" }));
+    checklistMock.mockResolvedValue(checklist());
+    renderPage();
+    await screen.findByText("P000042/2026");
+    expect(screen.queryByText(/Classificação documental/i)).toBeNull();
+    expect(screen.queryByText(/Requerimentos diversos/i)).toBeNull();
   });
 });

@@ -41,7 +41,7 @@ export function UnidadeAtiva() {
 
   const pilula = cn(
     "inline-flex h-9 min-w-0 max-w-full items-center gap-1.5 rounded-full px-3",
-    "bg-white/15 text-xs font-semibold text-primary-foreground sm:text-sm",
+    "bg-brand/10 text-xs font-semibold text-brand sm:text-sm",
   );
 
   if (!lotacao.podeTrocar) {
@@ -70,8 +70,8 @@ export function UnidadeAtiva() {
         title={lotacao.ativa.nome}
         className={cn(
           pilula,
-          "transition-colors duration-fast hover:bg-white/25",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white",
+          "transition-colors duration-fast hover:bg-brand/15",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         )}
       >
         {conteudo}

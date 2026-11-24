@@ -227,6 +227,16 @@ async def cen(admin_engine):
     from app.database import engine as app_engine
 
     await app_engine.dispose()
+    await _limpar_tenant(admin_engine, dados["tenant"].id)
+    async with _sm(admin_engine)() as s:
+        await s.execute(
+            text("DELETE FROM protocolos.prioridade WHERE id=:p"),
+            {"p": dados["prioridade"]},
+        )
+        await s.commit()
+
+
+async def _limpar_tenant(admin_engine, tenant_id: int) -> None:
     async with _sm(admin_engine)() as s:
         for stmt in (
             "UPDATE protocolos.processo SET id_ultima_movimentacao=NULL WHERE tenant_id=:t",
@@ -249,12 +259,65 @@ async def cen(admin_engine):
             "DELETE FROM utils.tipo_unidade_trabalho WHERE tenant_id=:t",
             "DELETE FROM aprimora_py.tenant WHERE id=:t",
         ):
-            await s.execute(text(stmt), {"t": dados["tenant"].id})
-        await s.execute(
-            text("DELETE FROM protocolos.prioridade WHERE id=:p"),
-            {"p": dados["prioridade"]},
-        )
+            await s.execute(text(stmt), {"t": tenant_id})
         await s.commit()
+
+
+@pytest_asyncio.fixture
+async def outra_prefeitura(admin_engine):
+    """Segunda prefeitura, com assunto, manifestante e unidade próprios: os ids
+    que um usuário da primeira não pode usar (SI-27). As chaves são os nomes
+    dos campos do payload, para entrar direto em `_edicao(cen, **{campo: ...})`."""
+    slug = _slug("si27-")
+    async with _sm(admin_engine)() as s:
+        tenant, _ = await provisionar_tenant(
+            s, slug=slug, nome="Pref SI-27", admin_email=f"{slug}@t.local",
+            admin_nome="Adm", admin_cpf=uuid.uuid4().hex[:11], plano="basico",
+        )
+
+    async with _sm(admin_engine)() as s:
+        unidade = (
+            await s.execute(
+                text("SELECT id FROM utils.unidade_trabalho WHERE tenant_id=:t LIMIT 1"),
+                {"t": tenant.id},
+            )
+        ).scalar_one()
+        id_tipo_manifestante = (
+            await s.execute(
+                text(
+                    "SELECT id FROM protocolos.tipo_manifestante WHERE tenant_id=:t "
+                    "ORDER BY id LIMIT 1"
+                ),
+                {"t": tenant.id},
+            )
+        ).scalar_one()
+        tp = TipoProcesso(
+            tenant_id=tenant.id, tipo_processo="Geral SI-27",
+            exige_processo_pai=False, ativo=True, excluido=False,
+        )
+        manif = Manifestante(
+            tenant_id=tenant.id, id_tipo_manifestante=id_tipo_manifestante,
+            nome="João de Outra Cidade", cpf_cnpj=uuid.uuid4().hex[:11],
+            ativo=True, excluido=False,
+        )
+        s.add_all([tp, manif])
+        await s.flush()
+        assunto = Assunto(
+            tenant_id=tenant.id, assunto="Assunto de outra prefeitura",
+            id_tipo_processo=tp.id, exige_processo_pai=False, ativo=True, excluido=False,
+        )
+        s.add(assunto)
+        await s.commit()
+        dados = {
+            "tenant": tenant,
+            "id_assunto": assunto.id,
+            "id_manifestante": manif.id,
+            "id_unidade_proprietaria": unidade,
+        }
+
+    yield dados
+
+    await _limpar_tenant(admin_engine, tenant.id)
 
 
 def _as_operador(engine, uid: int, tenant_id: int, tenant_slug: str):
@@ -358,6 +421,8 @@ async def test_check_constraint_barra_situacao_inconsistente(admin_engine, cen):
             situacao="rascunho", id_unidade_proprietaria=cen["origem"],
             id_manifestante=cen["manifestante"], nivel_sigilo="ostensivo",
             ativo=True, excluido=False,
+            # Rascunho é de quem o criou (SI-16): sem autor, ninguém o vê.
+            id_usuario=cen["operador"],
         )
         s.add(rascunho_com_numero)
         with pytest.raises(IntegrityError, match="ck_processo_situacao_numero"):
@@ -390,6 +455,8 @@ async def test_emitir_numero_e_idempotente(admin_engine, cen):
             situacao="rascunho", id_unidade_proprietaria=cen["origem"],
             id_manifestante=cen["manifestante"], nivel_sigilo="ostensivo",
             ativo=True, excluido=False,
+            # Rascunho é de quem o criou (SI-16): sem autor, ninguém o vê.
+            id_usuario=cen["operador"],
         )
         s.add(p)
         await s.flush()
@@ -417,6 +484,8 @@ async def test_pdf_recusa_gerar_para_rascunho(admin_engine, cen):
             situacao="rascunho", id_unidade_proprietaria=cen["origem"],
             id_manifestante=cen["manifestante"], nivel_sigilo="ostensivo",
             ativo=True, excluido=False,
+            # Rascunho é de quem o criou (SI-16): sem autor, ninguém o vê.
+            id_usuario=cen["operador"],
         )
         s.add(p)
         await s.commit()
@@ -447,6 +516,8 @@ async def test_listagem_exclui_rascunho_por_padrao_e_filtro_devolve(admin_engine
             situacao="rascunho", id_unidade_proprietaria=cen["origem"],
             id_manifestante=cen["manifestante"], nivel_sigilo="ostensivo",
             ativo=True, excluido=False,
+            # Rascunho é de quem o criou (SI-16): sem autor, ninguém o vê.
+            id_usuario=cen["operador"],
         )
         protocolado = Processo(
             tenant_id=t.id, id_assunto=cen["assunto"], virtual=True,
@@ -499,6 +570,8 @@ async def test_apensar_rascunho_e_recusado(admin_engine, cen):
             situacao="rascunho", id_unidade_proprietaria=cen["origem"],
             id_manifestante=cen["manifestante"], nivel_sigilo="ostensivo",
             ativo=True, excluido=False,
+            # Rascunho é de quem o criou (SI-16): sem autor, ninguém o vê.
+            id_usuario=cen["operador"],
         )
         principal = Processo(
             tenant_id=t.id, id_assunto=cen["assunto"], virtual=True,
@@ -548,6 +621,8 @@ async def test_cidadao_nao_ve_rascunho_do_mesmo_manifestante(admin_engine, cen):
             situacao="rascunho", id_unidade_proprietaria=cen["origem"],
             id_manifestante=cen["manifestante"], nivel_sigilo="ostensivo",
             ativo=True, excluido=False,
+            # Rascunho é de quem o criou (SI-16): sem autor, ninguém o vê.
+            id_usuario=cen["operador"],
         )
         s.add(rascunho)
         await s.commit()
@@ -573,3 +648,289 @@ async def test_cidadao_nao_ve_rascunho_do_mesmo_manifestante(admin_engine, cen):
                 text("DELETE FROM utils.usuario_externo WHERE id=:u"), {"u": cidadao.id}
             )
             await s.commit()
+
+
+# ============================================================================
+# SI-16 — editar, abrir e excluir o rascunho; rascunho é de quem o criou.
+# Decisões de produto de 2026-11-05 (`services/rascunho_processo.py`). Tudo
+# pela borda HTTP e com usuário comum, pelo motivo do topo deste arquivo; o
+# super-usuário entra só para provar que ele também não vê rascunho alheio.
+# ============================================================================
+
+
+async def _novo_rascunho(client, cen) -> dict:
+    r = await client.post(
+        "/api/v2/processos",
+        json={
+            "id_assunto": cen["assunto"],
+            "id_manifestante": cen["manifestante"],
+            "id_unidade_proprietaria": cen["origem"],
+            "observacao": "versão 1",
+            "rascunho": True,
+        },
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+async def _outro_operador(admin_engine, cen) -> int:
+    async with _sm(admin_engine)() as s:
+        uid = await _cria_usuario_comum(s, cen["tenant"].id, unidade_id=cen["origem"])
+        await s.commit()
+    return uid
+
+
+async def _admin_do_tenant(admin_engine, tenant_id: int) -> int:
+    """O admin que o provisionamento cria é super-usuário."""
+    async with _sm(admin_engine)() as s:
+        return (
+            await s.execute(
+                text(
+                    "SELECT u.id FROM utils.usuario u "
+                    "JOIN utils.usuario_grupo ug ON ug.id_usuario = u.id "
+                    "JOIN utils.grupo g ON g.id = ug.id_grupo "
+                    "WHERE u.tenant_id = :t AND g.grupo <> 'Grupo E3' LIMIT 1"
+                ),
+                {"t": tenant_id},
+            )
+        ).scalar_one()
+
+
+def _edicao(cen, **campos) -> dict:
+    return {
+        "id_assunto": cen["assunto"],
+        "id_manifestante": cen["manifestante"],
+        "id_unidade_proprietaria": cen["origem"],
+        **campos,
+    }
+
+
+@pytest.mark.asyncio
+async def test_si16_autor_edita_rascunho_e_detalhe_traz_os_ids(admin_engine, cen):
+    """Editar troca os campos; trocar a unidade proprietária leva junto onde
+    o rascunho está (ele nunca tramitou). O detalhe traz os ids que a tela de
+    edição precisa para se pré-preencher."""
+    t = cen["tenant"]
+    _as_operador(admin_engine, cen["operador"], t.id, t.slug)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await _novo_rascunho(c, cen)
+        assert (r["id_assunto"], r["id_manifestante"], r["id_unidade_proprietaria"]) == (
+            cen["assunto"], cen["manifestante"], cen["origem"])
+        assert r["id_tipo_processo"] is not None
+
+        ed = await c.put(
+            f"/api/v2/processos/{r['id']}/rascunho",
+            json=_edicao(cen, observacao="versão 2", id_unidade_proprietaria=cen["destino"]),
+        )
+    assert ed.status_code == 200, ed.text
+    p = ed.json()
+    assert p["observacao"] == "versão 2"
+    assert p["situacao"] == "rascunho" and p["numero_processo"] is None
+    assert p["id_unidade_proprietaria"] == cen["destino"]
+    assert p["local_atual"] == "Setor de Destino"
+    # A movimentação de abertura acompanha a unidade.
+    async with _sm(admin_engine)() as s:
+        unidades = (
+            await s.execute(
+                text("SELECT id_unidade_responsavel FROM protocolos.movimentacao "
+                     "WHERE id_processo=:p AND excluido=false"),
+                {"p": r["id"]},
+            )
+        ).scalars().all()
+        auditado = (
+            await s.execute(
+                text("SELECT count(*) FROM aprimora_py.audit_log WHERE tenant_id=:t "
+                     "AND id_entidade=:p AND acao='processo.rascunho_editado'"),
+                {"t": t.id, "p": r["id"]},
+            )
+        ).scalar_one()
+    assert unidades == [cen["destino"]]
+    assert auditado == 1
+
+
+@pytest.mark.asyncio
+async def test_si16_edicao_recusa_referencia_que_nao_existe(admin_engine, cen):
+    t = cen["tenant"]
+    _as_operador(admin_engine, cen["operador"], t.id, t.slug)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await _novo_rascunho(c, cen)
+        ed = await c.put(
+            f"/api/v2/processos/{r['id']}/rascunho", json=_edicao(cen, id_assunto=999_999_999)
+        )
+    assert ed.status_code == 400, ed.text
+    assert "Assunto" in ed.json()["detail"]
+
+
+# ============================================================================
+# SI-27 — criar processo confere se as referências são da mesma prefeitura
+# ============================================================================
+
+_CAMPOS_SI27 = [
+    ("id_assunto", "Assunto"),
+    ("id_manifestante", "Manifestante"),
+    ("id_unidade_proprietaria", "Unidade proprietária"),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rascunho", [False, True], ids=["direto", "rascunho"])
+@pytest.mark.parametrize("campo, rotulo", _CAMPOS_SI27, ids=[c for c, _ in _CAMPOS_SI27])
+async def test_si27_criar_recusa_referencia_de_outra_prefeitura(
+    admin_engine, cen, outra_prefeitura, campo, rotulo, rascunho
+):
+    """A tela só oferece itens da própria prefeitura, mas a API chamada direto
+    aceitava o id de outra — e a RLS, que seria a rede, está inerte (F-12).
+    Usuário comum de propósito: o bypass de SU não pode mascarar nada aqui."""
+    t = cen["tenant"]
+    _as_operador(admin_engine, cen["operador"], t.id, t.slug)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post(
+            "/api/v2/processos",
+            json=_edicao(cen, rascunho=rascunho, **{campo: outra_prefeitura[campo]}),
+        )
+    assert r.status_code == 400, r.text
+    assert rotulo in r.json()["detail"]
+
+    async with _sm(admin_engine)() as s:
+        gravados = (
+            await s.execute(
+                text("SELECT count(*) FROM protocolos.processo WHERE tenant_id IN (:a, :b)"),
+                {"a": t.id, "b": outra_prefeitura["tenant"].id},
+            )
+        ).scalar_one()
+    assert gravados == 0
+
+
+@pytest.mark.asyncio
+async def test_si27_editar_rascunho_recusa_unidade_de_outra_prefeitura(
+    admin_engine, cen, outra_prefeitura
+):
+    """A edição do rascunho passou a usar a mesma conferência da criação."""
+    t = cen["tenant"]
+    _as_operador(admin_engine, cen["operador"], t.id, t.slug)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await _novo_rascunho(c, cen)
+        ed = await c.put(
+            f"/api/v2/processos/{r['id']}/rascunho",
+            json=_edicao(
+                cen, id_unidade_proprietaria=outra_prefeitura["id_unidade_proprietaria"]
+            ),
+        )
+    assert ed.status_code == 400, ed.text
+    assert "Unidade proprietária" in ed.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_si16_abrir_da_numero_e_fica_na_unidade(admin_engine, cen):
+    """Abrir numera sem tramitar: o processo fica onde estava. Depois de
+    aberto não é mais rascunho: editar, abrir de novo e excluir dão 409."""
+    t = cen["tenant"]
+    _as_operador(admin_engine, cen["operador"], t.id, t.slug)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await _novo_rascunho(c, cen)
+        aberto = await c.post(f"/api/v2/processos/{r['id']}/abrir")
+        de_novo = await c.post(f"/api/v2/processos/{r['id']}/abrir")
+        editar = await c.put(f"/api/v2/processos/{r['id']}/rascunho", json=_edicao(cen))
+        excluir = await c.delete(f"/api/v2/processos/{r['id']}/rascunho")
+    assert aberto.status_code == 200, aberto.text
+    p = aberto.json()
+    assert p["situacao"] == "protocolado" and p["numero_processo"]
+    assert p["local_atual"] == r["local_atual"]
+    assert (de_novo.status_code, editar.status_code, excluir.status_code) == (409, 409, 409)
+
+    async with _sm(admin_engine)() as s:
+        acoes = (
+            await s.execute(
+                text("SELECT acao FROM aprimora_py.audit_log WHERE tenant_id=:t "
+                     "AND id_entidade=:p"),
+                {"t": t.id, "p": r["id"]},
+            )
+        ).scalars().all()
+        encaminhamentos = (
+            await s.execute(
+                text("SELECT count(*) FROM protocolos.encaminhamento WHERE id_processo=:p"),
+                {"p": r["id"]},
+            )
+        ).scalar_one()
+    assert "processo.aberto_do_rascunho" in acoes
+    assert encaminhamentos == 0
+
+
+@pytest.mark.asyncio
+async def test_si16_excluir_rascunho_some_de_tudo(admin_engine, cen):
+    t = cen["tenant"]
+    _as_operador(admin_engine, cen["operador"], t.id, t.slug)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await _novo_rascunho(c, cen)
+        apaga = await c.delete(f"/api/v2/processos/{r['id']}/rascunho")
+        detalhe = await c.get(f"/api/v2/processos/{r['id']}")
+        lista = await c.get("/api/v2/processos", params={"situacao": "todos", "page_size": 100})
+    assert apaga.status_code == 204, apaga.text
+    assert detalhe.status_code == 404
+    assert r["id"] not in [i["id"] for i in lista.json()["items"]]
+    async with _sm(admin_engine)() as s:
+        excluido = (
+            await s.execute(
+                text("SELECT excluido FROM protocolos.processo WHERE id=:p"), {"p": r["id"]}
+            )
+        ).scalar_one()
+    assert excluido is True  # exclusão lógica: a linha continua no banco
+
+
+@pytest.mark.asyncio
+async def test_si16_rascunho_alheio_nao_existe_nem_para_super_usuario(admin_engine, cen):
+    """Outro operador e o super-usuário: 404 em ler, editar, abrir, excluir e
+    encaminhar, e o rascunho não aparece em Rascunhos nem em Todos."""
+    t = cen["tenant"]
+    _as_operador(admin_engine, cen["operador"], t.id, t.slug)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await _novo_rascunho(c, cen)
+        meus = await c.get("/api/v2/processos", params={"situacao": "rascunho"})
+    assert r["id"] in [i["id"] for i in meus.json()["items"]]
+
+    outros = [
+        await _outro_operador(admin_engine, cen),
+        await _admin_do_tenant(admin_engine, t.id),
+    ]
+    for uid in outros:
+        _as_operador(admin_engine, uid, t.id, t.slug)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            respostas = {
+                "ler": await c.get(f"/api/v2/processos/{r['id']}"),
+                "editar": await c.put(
+                    f"/api/v2/processos/{r['id']}/rascunho", json=_edicao(cen)),
+                "abrir": await c.post(f"/api/v2/processos/{r['id']}/abrir"),
+                "excluir": await c.delete(f"/api/v2/processos/{r['id']}/rascunho"),
+                "encaminhar": await c.post(
+                    f"/api/v2/processos/{r['id']}/encaminhamentos",
+                    json={"id_unidade_destino": cen["destino"],
+                          "id_prioridade": cen["prioridade"]},
+                ),
+            }
+            listas = [
+                await c.get("/api/v2/processos", params={"situacao": sit, "page_size": 100})
+                for sit in ("rascunho", "todos")
+            ]
+        codigos = {k: v.status_code for k, v in respostas.items()}
+        assert codigos == dict.fromkeys(respostas, 404), (uid, codigos)
+        for lista in listas:
+            assert r["id"] not in [i["id"] for i in lista.json()["items"]]
+
+    async with _sm(admin_engine)() as s:
+        situacao = (
+            await s.execute(
+                text("SELECT situacao FROM protocolos.processo WHERE id=:p"), {"p": r["id"]}
+            )
+        ).scalar_one()
+    assert situacao == "rascunho"  # ninguém de fora conseguiu numerar
+
+
+@pytest.mark.asyncio
+async def test_si16_rascunho_nao_se_arquiva(admin_engine, cen):
+    t = cen["tenant"]
+    _as_operador(admin_engine, cen["operador"], t.id, t.slug)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await _novo_rascunho(c, cen)
+        arq = await c.post(f"/api/v2/processos/{r['id']}/arquivar", json={"motivo": "teste"})
+    assert arq.status_code == 400, arq.text
+    assert "Rascunho" in arq.json()["detail"]

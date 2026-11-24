@@ -85,8 +85,12 @@ interface RichTextEditorProps {
   minHeight?: number;
   className?: string;
   ariaLabel?: string;
+  /** Id da área editável — âncora para rolar/focar o editor (roteiro, erro). */
+  id?: string;
   /** Sem isso, "inserir imagem" pede uma URL em vez de fazer upload. */
   onUploadImage?: (file: File) => Promise<string>;
+  /** Campos automáticos (`{{chave}}`) que a barra oferece para inserir no cursor. */
+  campos?: { chave: string; descricao: string }[];
 }
 
 export function RichTextEditor({
@@ -96,7 +100,9 @@ export function RichTextEditor({
   minHeight = 180,
   className,
   ariaLabel,
+  id,
   onUploadImage,
+  campos,
 }: RichTextEditorProps) {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -132,6 +138,10 @@ export function RichTextEditor({
         ),
         role: "textbox",
         "aria-multiline": "true",
+        // `<label for>` não nomeia div editável (não é controle "rotulável"):
+        // o nome segue no aria-label; o id serve de âncora para o roteiro do
+        // formulário rolar e focar o editor.
+        ...(id ? { id } : {}),
         "aria-label": ariaLabel ?? "Editor de texto",
         style: `min-height:${minHeight}px`,
       },
@@ -359,6 +369,29 @@ export function RichTextEditor({
               icon={Trash2}
               onClick={() => editor.chain().focus().deleteTable().run()}
             />
+          </>
+        )}
+        {campos && campos.length > 0 && (
+          <>
+            <Divider />
+            {/* Entra onde está o cursor — o editor guarda a seleção mesmo
+                com o foco na lista, e `focus()` a devolve antes de inserir. */}
+            <select
+              aria-label="Inserir campo automático"
+              value=""
+              onChange={(e) => {
+                const chave = e.target.value;
+                if (chave) editor.chain().focus().insertContent(`{{${chave}}}`).run();
+              }}
+              className="h-8 max-w-[11rem] rounded-md border-0 bg-transparent px-1.5 text-xs text-foreground-muted hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="">Inserir campo…</option>
+              {campos.map((c) => (
+                <option key={c.chave} value={c.chave}>
+                  {c.descricao}
+                </option>
+              ))}
+            </select>
           </>
         )}
         <div className="ml-auto flex items-center gap-0.5">

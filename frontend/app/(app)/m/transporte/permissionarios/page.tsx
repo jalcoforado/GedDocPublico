@@ -1,16 +1,40 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { IdCard, Inbox, Plus } from "lucide-react";
+import {
+  Ban,
+  IdCard,
+  Inbox,
+  PauseCircle,
+  Pencil,
+  Plus,
+  RotateCcw,
+  SearchX,
+  Trash2,
+} from "lucide-react";
 import { useState } from "react";
 
+import {
+  dicaVigencia,
+  erroEmail,
+  erroValidade,
+  GrupoCampos,
+  InputMascarado,
+  mascaraCompleta,
+  useValidacao,
+} from "@/components/transporte/formulario";
+import { documentoParaExibir } from "@/components/transporte/rotulos";
+import { Alert } from "@/components/ui/alert";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
+import { SkeletonRow } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
@@ -124,6 +148,13 @@ export default function PermissionariosPage() {
       }),
   });
   const totalPages = Math.max(1, Math.ceil((listaQ.data?.total ?? 0) / PAGE_SIZE));
+  const filtrando = situacaoFiltro !== "" || tipoFiltro !== "";
+
+  function limparFiltros() {
+    setSituacaoFiltro("");
+    setTipoFiltro("");
+    setPage(1);
+  }
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["tr-permissionarios"] });
 
@@ -160,6 +191,25 @@ export default function PermissionariosPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // Mesmas regras do backend (`PermissionarioCreate`), ditas no campo e com
+  // o conserto — o servidor devolvia "cnh_validade é obrigatória…" no topo.
+  const cnhDigitos = form.cnh_numero.replace(/\D/g, "");
+  const v = useValidacao<"nome" | "cpf" | "email" | "cnh_numero" | "cnh_validade" | "data_validade_permissao">({
+    nome: form.nome.trim() === "" ? "Informe o nome completo." : undefined,
+    cpf:
+      form.cpf.trim() === ""
+        ? "Informe o CPF."
+        : !mascaraCompleta("cpf", form.cpf)
+          ? "CPF incompleto: use o formato 000.000.000-00."
+          : undefined,
+    email: erroEmail(form.email),
+    cnh_numero:
+      cnhDigitos !== "" && cnhDigitos.length !== 11 ? "A CNH tem 11 dígitos: confira o número." : undefined,
+    cnh_validade:
+      cnhDigitos !== "" && form.cnh_validade === "" ? "Informe a validade: é obrigatória quando há CNH." : undefined,
+    data_validade_permissao: erroValidade(form.data_inicio_permissao, form.data_validade_permissao),
+  });
+
   function set<K extends keyof PermForm>(key: K, value: PermForm[K]) {
     setForm((f) => ({ ...f, [key]: value }));
   }
@@ -167,6 +217,7 @@ export default function PermissionariosPage() {
     setEditing(null);
     setForm(EMPTY);
     setErr(null);
+    v.reiniciar();
     setDialogOpen(true);
   }
   function openEdit(p: Permissionario) {
@@ -189,6 +240,7 @@ export default function PermissionariosPage() {
       observacoes: p.observacoes ?? "",
     });
     setErr(null);
+    v.reiniciar();
     setDialogOpen(true);
   }
   function closeDialog() {
@@ -198,14 +250,7 @@ export default function PermissionariosPage() {
   }
   function salvar() {
     setErr(null);
-    if (form.nome.trim() === "") {
-      setErr("Nome é obrigatório.");
-      return;
-    }
-    if (form.cpf.trim() === "") {
-      setErr("CPF é obrigatório.");
-      return;
-    }
+    if (!v.conferir()) return;
     const payload = {
       nome: form.nome.trim(),
       cpf: form.cpf.trim(),
@@ -246,11 +291,11 @@ export default function PermissionariosPage() {
         }
       />
 
-      <div className="flex flex-wrap gap-3">
-        <div>
-          <Label htmlFor="f_sit">Situação</Label>
+      <FilterBar ariaLabel="Filtros dos permissionários">
+        <FilterBar.Group label="Situação" className="w-full sm:w-48">
           <Select
             id="f_sit"
+            aria-label="Situação"
             value={situacaoFiltro}
             onChange={(e) => {
               setSituacaoFiltro(e.target.value);
@@ -264,11 +309,11 @@ export default function PermissionariosPage() {
               </option>
             ))}
           </Select>
-        </div>
-        <div>
-          <Label htmlFor="f_tipo">Tipo de serviço</Label>
+        </FilterBar.Group>
+        <FilterBar.Group label="Tipo de serviço" className="w-full sm:w-56">
           <Select
             id="f_tipo"
+            aria-label="Tipo de serviço"
             value={tipoFiltro}
             onChange={(e) => {
               setTipoFiltro(e.target.value);
@@ -282,16 +327,33 @@ export default function PermissionariosPage() {
               </option>
             ))}
           </Select>
-        </div>
-      </div>
+        </FilterBar.Group>
+        {filtrando && (
+          <FilterBar.Actions>
+            <Button variant="ghost" onClick={limparFiltros}>
+              Limpar
+            </Button>
+          </FilterBar.Actions>
+        )}
+      </FilterBar>
 
       {!listaQ.isLoading && (listaQ.data?.items.length ?? 0) === 0 ? (
+        // Filtro sem resultado não é cadastro vazio: o botão de cadastrar
+        // convidaria a duplicar quem já existe sob outra situação.
         <EmptyState
-          icon={Inbox}
-          title="Nenhum permissionário"
-          description="Cadastre o primeiro permissionário do transporte regulado."
+          icon={filtrando ? SearchX : Inbox}
+          title={filtrando ? "Nenhum permissionário encontrado" : "Nenhum permissionário"}
+          description={
+            filtrando
+              ? "Nenhum permissionário corresponde aos filtros aplicados."
+              : "Cadastre o primeiro permissionário do transporte regulado."
+          }
           action={
-            canCreate ? (
+            filtrando ? (
+              <Button variant="secondary" onClick={limparFiltros}>
+                Limpar filtros
+              </Button>
+            ) : canCreate ? (
               <Button onClick={openNew}>
                 <Plus className="mr-1 h-4 w-4" />
                 Cadastrar permissionário
@@ -312,64 +374,54 @@ export default function PermissionariosPage() {
             </TR>
           </THead>
           <TBody>
-            {listaQ.isLoading && (
-              <TR>
-                <TD colSpan={6} className="text-center text-muted-foreground">
-                  Carregando...
-                </TD>
-              </TR>
-            )}
+            {listaQ.isLoading &&
+              Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} cols={6} />)}
             {listaQ.data?.items.map((p) => (
               <TR key={p.id}>
                 <TD>{p.nome}</TD>
-                <TD className="font-mono">{p.cpf}</TD>
+                <TD className="whitespace-nowrap font-mono">{documentoParaExibir(p.cpf)}</TD>
                 <TD>{TIPO_LABEL[p.tipo_servico] ?? p.tipo_servico}</TD>
-                <TD className="text-muted-foreground">{p.numero_permissao ?? "—"}</TD>
+                <TD className="whitespace-nowrap text-muted-foreground">
+                  {p.numero_permissao ?? "—"}
+                </TD>
                 <TD>
                   <Badge intent={SIT_INTENT[p.situacao] ?? "neutral"}>
                     {SIT_LABEL[p.situacao] ?? p.situacao}
                   </Badge>
                 </TD>
                 <TD className="text-right">
-                  <div className="inline-flex flex-wrap justify-end gap-2">
-                    {canEdit && (
-                      <Button variant="secondary" size="sm" onClick={() => openEdit(p)}>
-                        Editar
-                      </Button>
-                    )}
-                    {canEdit && p.situacao !== "ativo" && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => actionM.mutate({ id: p.id, acao: "reativar" })}
-                      >
-                        Reativar
-                      </Button>
-                    )}
-                    {canEdit && p.situacao !== "suspenso" && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => actionM.mutate({ id: p.id, acao: "suspender" })}
-                      >
-                        Suspender
-                      </Button>
-                    )}
-                    {canEdit && p.situacao !== "inativo" && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => actionM.mutate({ id: p.id, acao: "inativar" })}
-                      >
-                        Inativar
-                      </Button>
-                    )}
-                    {canDelete && (
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        disabled={deleteM.isPending}
-                        onClick={async () => {
+                  {/* Reativar/Suspender vêm antes: são o que muda na linha
+                      conforme a situação. Inativar e Excluir, destrutivas,
+                      ficam no ⋯. */}
+                  <AcoesDaLinha
+                    acoes={[
+                      { label: "Editar", icon: Pencil, onClick: () => openEdit(p), oculta: !canEdit },
+                      {
+                        label: "Reativar",
+                        icon: RotateCcw,
+                        onClick: () => actionM.mutate({ id: p.id, acao: "reativar" }),
+                        oculta: !canEdit || p.situacao === "ativo",
+                      },
+                      {
+                        label: "Suspender",
+                        icon: PauseCircle,
+                        onClick: () => actionM.mutate({ id: p.id, acao: "suspender" }),
+                        oculta: !canEdit || p.situacao === "suspenso",
+                      },
+                      {
+                        label: "Inativar",
+                        icon: Ban,
+                        perigo: true,
+                        onClick: () => actionM.mutate({ id: p.id, acao: "inativar" }),
+                        oculta: !canEdit || p.situacao === "inativo",
+                      },
+                      {
+                        label: "Excluir",
+                        icon: Trash2,
+                        perigo: true,
+                        disabled: deleteM.isPending,
+                        oculta: !canDelete,
+                        onClick: async () => {
                           const ok = await confirm({
                             title: "Excluir permissionário",
                             message: `Excluir o permissionário "${p.nome}"? Esta ação não pode ser desfeita.`,
@@ -377,12 +429,10 @@ export default function PermissionariosPage() {
                             intent: "danger",
                           });
                           if (ok) deleteM.mutate(p.id);
-                        }}
-                      >
-                        Excluir
-                      </Button>
-                    )}
-                  </div>
+                        },
+                      },
+                    ]}
+                  />
                 </TD>
               </TR>
             ))}
@@ -419,110 +469,210 @@ export default function PermissionariosPage() {
       <Dialog
         open={dialogOpen}
         onClose={closeDialog}
-        title={editing ? `Editar — ${editing.nome}` : "Novo permissionário"}
+        title={editing ? `Editar permissionário — ${editing.nome}` : "Novo permissionário"}
+        description={
+          editing
+            ? undefined
+            : "Quem é, o que pode dirigir e qual permissão tem. Só nome e CPF são obrigatórios."
+        }
         size="lg"
         footer={
           <>
-            <Button variant="secondary" onClick={closeDialog}>
+            <Button variant="ghost" onClick={closeDialog}>
               Cancelar
             </Button>
-            <Button onClick={salvar} disabled={saveM.isPending}>
-              {saveM.isPending ? "Salvando..." : "Salvar"}
+            <Button onClick={salvar} loading={saveM.isPending}>
+              {editing ? "Salvar alterações" : "Cadastrar permissionário"}
             </Button>
           </>
         }
       >
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div className="sm:col-span-2">
-            <Label htmlFor="nome" required>
-              Nome
-            </Label>
-            <Input id="nome" value={form.nome} onChange={(e) => set("nome", e.target.value)} />
+        <div ref={v.ref} className="space-y-5">
+          <GrupoCampos titulo="Dados pessoais">
+            <FormField label="Nome completo" required error={v.erro("nome")}>
+              <Input
+                id="nome"
+                value={form.nome}
+                onChange={(e) => set("nome", e.target.value)}
+                onBlur={v.sair("nome")}
+                placeholder="Ex.: Maria da Silva Souza"
+                autoComplete="off"
+              />
+            </FormField>
+            <GradeCampos colunas={3}>
+              <FormField label="CPF" required error={v.erro("cpf")}>
+                <InputMascarado
+                  id="cpf"
+                  mascara="cpf"
+                  value={form.cpf}
+                  onValueChange={(x) => set("cpf", x)}
+                  onBlur={v.sair("cpf")}
+                  placeholder="000.000.000-00"
+                />
+              </FormField>
+              <FormField label="RG" opcional>
+                <Input id="rg" value={form.rg} onChange={(e) => set("rg", e.target.value)} placeholder="Ex.: 2001234567" />
+              </FormField>
+              <FormField label="Data de nascimento" opcional>
+                <Input
+                  id="nasc"
+                  type="date"
+                  value={form.data_nascimento}
+                  onChange={(e) => set("data_nascimento", e.target.value)}
+                />
+              </FormField>
+            </GradeCampos>
+            <GradeCampos>
+              <FormField label="Telefone" opcional>
+                <Input
+                  id="tel"
+                  type="tel"
+                  value={form.telefone}
+                  onChange={(e) => set("telefone", e.target.value)}
+                  placeholder="Ex.: (88) 99999-0000"
+                />
+              </FormField>
+              <FormField label="E-mail" opcional error={v.erro("email")}>
+                <Input
+                  id="email"
+                  type="email"
+                  value={form.email}
+                  onChange={(e) => set("email", e.target.value)}
+                  onBlur={v.sair("email")}
+                  placeholder="Ex.: maria@email.com"
+                />
+              </FormField>
+            </GradeCampos>
+          </GrupoCampos>
+
+          <GrupoCampos titulo="Serviço e permissão" descricao="O que a pessoa está autorizada a explorar.">
+            <GradeCampos>
+              <FormField label="Tipo de serviço" required>
+                <Select
+                  id="tipo"
+                  value={form.tipo_servico}
+                  onChange={(e) => set("tipo_servico", e.target.value as TipoServico)}
+                >
+                  {TIPOS.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Número da permissão" opcional hint="Como consta no termo de permissão.">
+                <Input
+                  id="numperm"
+                  value={form.numero_permissao}
+                  onChange={(e) => set("numero_permissao", e.target.value)}
+                  placeholder="Ex.: TX-0123/2026"
+                />
+              </FormField>
+            </GradeCampos>
+            <GradeCampos>
+              <FormField label="Início da permissão" opcional>
+                <Input
+                  id="ini"
+                  type="date"
+                  value={form.data_inicio_permissao}
+                  onChange={(e) => set("data_inicio_permissao", e.target.value)}
+                />
+              </FormField>
+              <FormField
+                label="Validade da permissão"
+                opcional
+                error={v.erro("data_validade_permissao")}
+                hint={dicaVigencia(
+                  form.data_inicio_permissao,
+                  form.data_validade_permissao,
+                  "Último dia em que a permissão vale.",
+                )}
+              >
+                <Input
+                  id="val"
+                  type="date"
+                  value={form.data_validade_permissao}
+                  onChange={(e) => set("data_validade_permissao", e.target.value)}
+                  onBlur={v.sair("data_validade_permissao")}
+                />
+              </FormField>
+            </GradeCampos>
+            <FormField
+              label="Situação"
+              hint={
+                editing
+                  ? "Suspender e reativar também ficam nas ações da linha."
+                  : "Cadastro novo entra como Pendente, salvo se mudar aqui."
+              }
+            >
+              <Select
+                id="sit"
+                value={form.situacao}
+                onChange={(e) => set("situacao", e.target.value as PermissionarioSituacao)}
+              >
+                {SITUACOES.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          </GrupoCampos>
+
+          <GrupoCampos titulo="CNH" descricao="Opcional. Se informar o número, informe também a validade.">
+            <GradeCampos colunas={3}>
+              <FormField label="Número da CNH" error={v.erro("cnh_numero")} hint="11 dígitos.">
+                <Input
+                  id="cnh"
+                  inputMode="numeric"
+                  maxLength={11}
+                  className="font-mono tabular-nums"
+                  value={form.cnh_numero}
+                  onChange={(e) => set("cnh_numero", e.target.value.replace(/\D/g, ""))}
+                  onBlur={v.sair("cnh_numero")}
+                  placeholder="Ex.: 01234567890"
+                />
+              </FormField>
+              <FormField label="Categoria">
+                <Select id="cnhcat" value={form.cnh_categoria} onChange={(e) => set("cnh_categoria", e.target.value)}>
+                  <option value="">Selecione…</option>
+                  {CNH_CATS.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField
+                label="Validade da CNH"
+                required={cnhDigitos !== ""}
+                error={v.erro("cnh_validade")}
+                hint={form.cnh_validade ? dicaVigencia("", form.cnh_validade, "") : undefined}
+              >
+                <Input
+                  id="cnhval"
+                  type="date"
+                  value={form.cnh_validade}
+                  onChange={(e) => set("cnh_validade", e.target.value)}
+                  onBlur={v.sair("cnh_validade")}
+                />
+              </FormField>
+            </GradeCampos>
+          </GrupoCampos>
+
+          <div className="border-t border-border pt-5">
+            <FormField label="Observações" opcional>
+              <Textarea
+                id="obs"
+                rows={2}
+                value={form.observacoes}
+                onChange={(e) => set("observacoes", e.target.value)}
+                placeholder="Ex.: ponto de táxi habitual, pendências de documento"
+              />
+            </FormField>
           </div>
-          <div>
-            <Label htmlFor="cpf" required>
-              CPF
-            </Label>
-            <Input id="cpf" value={form.cpf} onChange={(e) => set("cpf", e.target.value)} placeholder="000.000.000-00" />
-          </div>
-          <div>
-            <Label htmlFor="rg">RG</Label>
-            <Input id="rg" value={form.rg} onChange={(e) => set("rg", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="nasc">Data de nascimento</Label>
-            <Input id="nasc" type="date" value={form.data_nascimento} onChange={(e) => set("data_nascimento", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="tel">Telefone</Label>
-            <Input id="tel" value={form.telefone} onChange={(e) => set("telefone", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="email">E-mail</Label>
-            <Input id="email" value={form.email} onChange={(e) => set("email", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="tipo" required>
-              Tipo de serviço
-            </Label>
-            <Select id="tipo" value={form.tipo_servico} onChange={(e) => set("tipo_servico", e.target.value as TipoServico)}>
-              {TIPOS.map((t) => (
-                <option key={t.value} value={t.value}>
-                  {t.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="cnh">CNH (número)</Label>
-            <Input id="cnh" value={form.cnh_numero} onChange={(e) => set("cnh_numero", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="cnhcat">CNH categoria</Label>
-            <Select id="cnhcat" value={form.cnh_categoria} onChange={(e) => set("cnh_categoria", e.target.value)}>
-              <option value="">—</option>
-              {CNH_CATS.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="cnhval">CNH validade</Label>
-            <Input id="cnhval" type="date" value={form.cnh_validade} onChange={(e) => set("cnh_validade", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="numperm">Número da permissão</Label>
-            <Input id="numperm" value={form.numero_permissao} onChange={(e) => set("numero_permissao", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="sit">Situação</Label>
-            <Select id="sit" value={form.situacao} onChange={(e) => set("situacao", e.target.value as PermissionarioSituacao)}>
-              {SITUACOES.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="ini">Início da permissão</Label>
-            <Input id="ini" type="date" value={form.data_inicio_permissao} onChange={(e) => set("data_inicio_permissao", e.target.value)} />
-          </div>
-          <div>
-            <Label htmlFor="val">Validade da permissão</Label>
-            <Input id="val" type="date" value={form.data_validade_permissao} onChange={(e) => set("data_validade_permissao", e.target.value)} />
-          </div>
-          <div className="sm:col-span-2">
-            <Label htmlFor="obs">Observações</Label>
-            <Textarea id="obs" rows={2} value={form.observacoes} onChange={(e) => set("observacoes", e.target.value)} />
-          </div>
-          {err && (
-            <div role="alert" className="sm:col-span-2 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground">
-              {err}
-            </div>
-          )}
+
+          {err && <Alert intent="danger">{err}</Alert>}
         </div>
       </Dialog>
     </div>

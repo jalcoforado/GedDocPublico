@@ -1,11 +1,11 @@
 "use client";
 
-import { Palette, RotateCcw, Type } from "lucide-react";
+import { RotateCcw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import {
   FONTES,
@@ -56,20 +56,97 @@ interface CoresDoTemaProps {
   valores: Record<Campo, string>;
   onChange: (campo: Campo, valor: string) => void;
   disabled?: boolean;
+  /**
+   * A tela tentou salvar: mostra o erro de todas as cores inválidas, não só
+   * das que a pessoa já visitou.
+   */
+  mostrarErros?: boolean;
+}
+
+/** Há alguma cor preenchida fora do formato `#RRGGBB`? */
+export function temCorInvalida(valores: Record<Campo, string>): boolean {
+  return CAMPOS.some(({ campo }) => valores[campo] !== "" && !corValida(valores[campo]));
 }
 
 /**
- * Editor do tema do município: três cores e uma pré-visualização ao vivo.
+ * Seletor + código + "voltar ao padrão" de uma cor, como UM controle para o
+ * `FormField`: o id e os `aria-*` que ele injeta vão para o campo de texto,
+ * que é onde o erro de formato acontece.
+ */
+function CampoCor({
+  id,
+  rotulo,
+  valor,
+  padrao,
+  disabled,
+  onValor,
+  onBlur,
+  "aria-invalid": ariaInvalid,
+  "aria-describedby": ariaDescribedBy,
+}: {
+  id?: string;
+  rotulo: string;
+  valor: string;
+  padrao: string;
+  disabled?: boolean;
+  onValor: (v: string) => void;
+  onBlur: () => void;
+  "aria-invalid"?: boolean | "true" | "false";
+  "aria-describedby"?: string;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="color"
+        aria-label={`${rotulo} — seletor`}
+        value={corValida(valor) ? valor : padrao}
+        onChange={(e) => onValor(e.target.value)}
+        disabled={disabled}
+        className="h-10 w-12 shrink-0 cursor-pointer rounded-md border border-border bg-card disabled:cursor-not-allowed disabled:opacity-50"
+      />
+      <Input
+        id={id}
+        value={valor}
+        placeholder="Padrão do sistema"
+        maxLength={7}
+        onChange={(e) => onValor(e.target.value.trim())}
+        onBlur={onBlur}
+        disabled={disabled}
+        aria-invalid={ariaInvalid}
+        aria-describedby={ariaDescribedBy}
+        className="font-mono"
+      />
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        onClick={() => onValor("")}
+        disabled={disabled || valor === ""}
+        aria-label={`Voltar ${rotulo.toLowerCase()} ao padrão`}
+        title="Voltar ao padrão do sistema"
+      >
+        <RotateCcw className="h-4 w-4" aria-hidden="true" />
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * Editor do tema do município: quatro cores, a fonte dos títulos e uma
+ * pré-visualização ao vivo.
  *
  * A pré-visualização usa a MESMA derivação que o sistema aplica depois de
  * salvar (`derivarTema`), escopada ao próprio quadro por CSS custom properties
  * — o que se vê aqui é o que vai para a tela, inclusive o ajuste de contraste.
  */
-export function CoresDoTema({ valores, onChange, disabled }: CoresDoTemaProps) {
+export function CoresDoTema({ valores, onChange, disabled, mostrarErros }: CoresDoTemaProps) {
   const theme = useModoTema();
   // Cor atual de cada token, lida do CSS: é o valor inicial do seletor quando
   // o município ainda não definiu a cor (o `<input type="color">` exige hex).
   const [padroes, setPadroes] = useState<Record<string, string>>({});
+  // Erro de formato só depois de sair do campo (ou de tentar salvar): no meio
+  // da digitação, um código pela metade ainda não é um erro.
+  const [tocados, setTocados] = useState<Set<Campo>>(new Set());
 
   useEffect(() => {
     const css = getComputedStyle(document.documentElement);
@@ -89,97 +166,62 @@ export function CoresDoTema({ valores, onChange, disabled }: CoresDoTemaProps) {
   const neutro = hslParaHex({ h: 0, s: 0, l: 50 });
 
   return (
-    <div className="md:col-span-2">
-      <div className="flex items-center gap-2">
-        <Palette className="h-4 w-4 text-foreground-muted" aria-hidden="true" />
-        <h3 className="text-sm font-semibold">Cores e fonte do sistema</h3>
-      </div>
-      <p className="mt-0.5 text-xs text-foreground-muted">
-        Definem a aparência do sistema para todos os usuários do município. A
-        tonalidade é ajustada quando necessário para manter os textos legíveis.
-      </p>
-
-      <div className="mt-3 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
-        <div className="space-y-3">
-          {CAMPOS.map(({ campo, rotulo, ajuda, token }) => {
-            const valor = valores[campo];
-            const invalida = valor !== "" && !corValida(valor);
-            return (
-              <div key={campo}>
-                <Label htmlFor={campo}>{rotulo}</Label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    aria-label={`${rotulo} — seletor`}
-                    value={corValida(valor) ? valor : padroes[token] || neutro}
-                    onChange={(e) => onChange(campo, e.target.value)}
-                    disabled={disabled}
-                    className="h-10 w-12 shrink-0 cursor-pointer rounded-md border border-border bg-card disabled:cursor-not-allowed disabled:opacity-50"
-                  />
-                  <Input
-                    id={campo}
-                    value={valor}
-                    placeholder="Padrão do sistema"
-                    maxLength={7}
-                    onChange={(e) => onChange(campo, e.target.value.trim())}
-                    disabled={disabled}
-                    aria-invalid={invalida}
-                    aria-describedby={`${campo}-ajuda`}
-                    className="font-mono"
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onChange(campo, "")}
-                    disabled={disabled || valor === ""}
-                    aria-label={`Voltar ${rotulo.toLowerCase()} ao padrão`}
-                  >
-                    <RotateCcw className="h-4 w-4" aria-hidden="true" />
-                  </Button>
-                </div>
-                <p id={`${campo}-ajuda`} className="mt-1 text-xs text-foreground-muted">
-                  {invalida ? (
-                    <span className="text-danger-soft-foreground">
-                      Use o formato #RRGGBB, como {padroes[token] || neutro}.
-                    </span>
-                  ) : (
-                    ajuda
-                  )}
-                </p>
-              </div>
-            );
-          })}
-
-          <div>
-            <Label htmlFor="fonte_titulos">
-              <Type className="mr-1 inline h-3.5 w-3.5 text-foreground-muted" aria-hidden="true" />
-              Fonte dos títulos
-            </Label>
-            <Select
-              id="fonte_titulos"
-              value={valores.fonte_titulos}
-              onChange={(e) => onChange("fonte_titulos", e.target.value)}
-              disabled={disabled}
-              aria-describedby="fonte_titulos-ajuda"
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
+      <div className="space-y-4">
+        {CAMPOS.map(({ campo, rotulo, ajuda, token }) => {
+          const valor = valores[campo];
+          const invalida = valor !== "" && !corValida(valor);
+          const exemplo = padroes[token] || neutro;
+          return (
+            <FormField
+              key={campo}
+              label={rotulo}
+              hint={ajuda}
+              error={
+                invalida && (mostrarErros || tocados.has(campo))
+                  ? `Use o formato #RRGGBB, como ${exemplo}.`
+                  : undefined
+              }
             >
-              {/* A padrão é a opção VAZIA: gravar "montserrat" seria o mesmo
-                  resultado, mas prenderia o município a ela se o padrão do
-                  produto mudar. */}
-              {FONTES.map((f) => (
-                <option key={f.chave} value={f.css ? f.chave : ""}>
-                  {f.rotulo}
-                </option>
-              ))}
-            </Select>
-            <p id="fonte_titulos-ajuda" className="mt-1 text-xs text-foreground-muted">
-              Vale para os títulos. O texto corrido e as tabelas continuam na
-              fonte padrão, que é a que lê bem em tamanho pequeno.
-            </p>
-          </div>
-        </div>
+              <CampoCor
+                id={campo}
+                rotulo={rotulo}
+                valor={valor}
+                padrao={exemplo}
+                disabled={disabled}
+                onValor={(v) => onChange(campo, v)}
+                onBlur={() => setTocados((s) => (s.has(campo) ? s : new Set(s).add(campo)))}
+              />
+            </FormField>
+          );
+        })}
 
-        {/* Pré-visualização: os tokens derivados valem só dentro deste quadro. */}
+        <FormField
+          label="Fonte dos títulos"
+          hint="Vale para os títulos. O texto corrido e as tabelas continuam na fonte padrão, que é a que lê bem em tamanho pequeno."
+        >
+          <Select
+            id="fonte_titulos"
+            value={valores.fonte_titulos}
+            onChange={(e) => onChange("fonte_titulos", e.target.value)}
+            disabled={disabled}
+          >
+            {/* A padrão é a opção VAZIA: gravar "montserrat" seria o mesmo
+                resultado, mas prenderia o município a ela se o padrão do
+                produto mudar. */}
+            {FONTES.map((f) => (
+              <option key={f.chave} value={f.css ? f.chave : ""}>
+                {f.rotulo}
+              </option>
+            ))}
+          </Select>
+        </FormField>
+      </div>
+
+      {/* Pré-visualização: os tokens derivados valem só dentro deste quadro.
+          Fica no alto da coluna (sticky) para acompanhar a rolagem dos campos. */}
+      <div className="lg:sticky lg:top-24 lg:self-start">
+        <div className="mb-1 text-sm font-medium text-foreground">Como vai ficar</div>
         <div
           aria-label="Pré-visualização das cores e da fonte"
           role="img"
@@ -207,6 +249,9 @@ export function CoresDoTema({ valores, onChange, disabled }: CoresDoTemaProps) {
             <div className="text-xs text-brand underline">Link de exemplo</div>
           </div>
         </div>
+        <p className="mt-1.5 text-xs text-foreground-muted">
+          A tonalidade é ajustada quando necessário para manter os textos legíveis.
+        </p>
       </div>
     </div>
   );

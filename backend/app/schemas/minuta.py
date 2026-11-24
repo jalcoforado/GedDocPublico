@@ -13,6 +13,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 MinutaOrigem = Literal["interno", "google"]
 MinutaStatus = Literal["rascunho", "finalizada", "cancelada"]
+# SI-62: "despacho" = rascunho de despacho avulso (só o autor vê; conclui com
+# senha em `POST /minutas/{id}/concluir-despacho`).
+MinutaFinalidade = Literal["documento", "despacho"]
 
 
 # ============================ Template de documento =========================
@@ -23,6 +26,8 @@ class TemplateDocumentoCreate(BaseModel):
     id_unidade_trabalho: int | None = None
     corpo_html: str = Field(min_length=1)
     ativo: bool = True
+    # SI-53 — marcar desmarca o padrão anterior da prefeitura.
+    padrao: bool = False
 
 
 class TemplateDocumentoUpdate(BaseModel):
@@ -32,6 +37,7 @@ class TemplateDocumentoUpdate(BaseModel):
     id_unidade_trabalho: int | None = None
     corpo_html: str | None = Field(default=None, min_length=1)
     ativo: bool | None = None
+    padrao: bool | None = None
 
 
 class TemplateDocumentoOut(BaseModel):
@@ -45,6 +51,7 @@ class TemplateDocumentoOut(BaseModel):
     corpo_html: str
     placeholders_utilizados: list | None
     ativo: bool
+    padrao: bool
     id_usuario_criacao: int | None
     criado_em: datetime
     atualizado_em: datetime | None
@@ -66,6 +73,7 @@ class MinutaCreate(BaseModel):
     # F10 — alimenta {{destinatario.nome}} ANTES de resolver o template (mail-merge
     # é no instante da criação, não há como preencher depois e re-resolver).
     destinatario: str | None = Field(default=None, max_length=300)
+    finalidade: MinutaFinalidade = "documento"
 
 
 class MinutaUpdate(BaseModel):
@@ -85,6 +93,7 @@ class MinutaOut(BaseModel):
     titulo: str
     destinatario: str | None
     origem: MinutaOrigem
+    finalidade: MinutaFinalidade
     status: MinutaStatus
     versao: int
     corpo_html: str | None
@@ -105,12 +114,20 @@ class MinutaListItem(BaseModel):
     id_processo: int
     titulo: str
     origem: MinutaOrigem
+    finalidade: MinutaFinalidade
     status: MinutaStatus
     versao: int
     id_anexo_final: int | None
     id_usuario_criacao: int
     criado_em: datetime
     atualizado_em: datetime | None
+
+
+class DespachoConcluidoOut(BaseModel):
+    """Resposta de `POST /minutas/{id}/concluir-despacho` (SI-62)."""
+    id: int
+    id_movimentacao: int | None
+    id_anexo: int | None
 
 
 class MinutaHistoricoItem(BaseModel):

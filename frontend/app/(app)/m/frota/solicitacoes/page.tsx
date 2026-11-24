@@ -1,16 +1,37 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Car, ClipboardList, FileText, Gauge, Inbox, MapPin, Plus } from "lucide-react";
-import { useState } from "react";
+import {
+  Ban,
+  Car,
+  ClipboardList,
+  Eraser,
+  FileText,
+  Inbox,
+  LogIn,
+  LogOut,
+  MapPin,
+  Pencil,
+  Plus,
+  ThumbsDown,
+  ThumbsUp,
+  Trash2,
+} from "lucide-react";
+import { type ReactNode, useState } from "react";
 
+import { fmtKm, rotuloVeiculo, useErrosDoFormulario } from "@/components/frota/formulario";
+import { fmtDataHora } from "@/components/frota/rotulos";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
+import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CampoComUnidade } from "@/components/ui/campo-com-unidade";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { EscolhaSegmentada, type OpcaoEscolha } from "@/components/ui/escolha-segmentada";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { Select } from "@/components/ui/select";
@@ -35,12 +56,14 @@ const STATUS_LABEL: Record<SolicitacaoStatus, string> = {
   em_uso: "Em uso",
   concluida: "Concluída",
 };
-const STATUS_INTENT: Record<SolicitacaoStatus, "neutral" | "success" | "danger" | "warning"> = {
+// Mesma régua de cor das demais telas da Frota (ver components/frota/rotulos.ts):
+// aguardando decisão = warning; aprovada e em uso estão andando = info.
+const STATUS_INTENT: Record<SolicitacaoStatus, "neutral" | "success" | "danger" | "warning" | "info"> = {
   solicitada: "warning",
-  aprovada: "success",
+  aprovada: "info",
   rejeitada: "danger",
   cancelada: "neutral",
-  em_uso: "warning",
+  em_uso: "info",
   concluida: "success",
 };
 
@@ -95,10 +118,50 @@ function nullify(v: string): string | null {
   return t === "" ? null : t;
 }
 
-function fmt(dt: string): string {
-  if (!dt) return "—";
-  const d = new Date(dt);
-  return isNaN(d.getTime()) ? dt : d.toLocaleString("pt-BR");
+/**
+ * Erro do campo de quilometragem: vazio, não inteiro ou abaixo do piso. O
+ * piso é a mesma regra do backend (saída ≥ km do veículo; retorno ≥ saída),
+ * dita antes de enviar e com o número que vale.
+ */
+function erroKm(valor: string, minimo: number | null, piso: string): string | undefined {
+  if (valor.trim() === "") return "Informe a quilometragem do painel.";
+  const km = Number(valor);
+  if (!Number.isInteger(km) || km < 0) return "Use só números inteiros, sem ponto nem vírgula.";
+  if (minimo != null && km < minimo) return `O mínimo é ${fmtKm(minimo)} — ${piso}.`;
+  return undefined;
+}
+
+const NECESSITA_MOTORISTA: OpcaoEscolha<"sim" | "nao">[] = [
+  {
+    valor: "nao",
+    rotulo: "Não, só o veículo",
+    descricao: "Alguém da própria unidade dirige.",
+  },
+  {
+    valor: "sim",
+    rotulo: "Sim, com motorista",
+    descricao: "A frota designa um motorista junto com o veículo.",
+  },
+];
+
+/** O pedido em uma linha, no topo dos diálogos do fluxo: quem decide vê o que está decidindo. */
+function ResumoSolicitacao({
+  s,
+  extra,
+}: {
+  s: SolicitacaoVeiculo;
+  extra?: ReactNode;
+}) {
+  return (
+    <div className="rounded-md border border-border bg-surface-1 px-3 py-2 text-sm">
+      <div className="font-medium text-foreground">{s.finalidade}</div>
+      <div className="text-xs text-foreground-muted">
+        {s.destino} · {fmtDataHora(s.data_saida_prevista)} até {fmtDataHora(s.data_retorno_prevista)} ·{" "}
+        {s.quantidade_passageiros} {s.quantidade_passageiros === 1 ? "passageiro" : "passageiros"}
+      </div>
+      {extra && <div className="mt-1 text-xs text-foreground-muted">{extra}</div>}
+    </div>
+  );
 }
 
 export default function SolicitacoesPage() {
@@ -130,6 +193,12 @@ export default function SolicitacoesPage() {
   const [retornoForm, setRetornoForm] = useState<RetornoForm>(RETORNO_EMPTY);
   const [retornoErr, setRetornoErr] = useState<string | null>(null);
 
+  // Rejeição: era um window.prompt — sem rótulo, sem dizer como corrigir, e o
+  // "obrigatório" só aparecia num toast depois que a caixa já tinha fechado.
+  const [rejeitarSol, setRejeitarSol] = useState<SolicitacaoVeiculo | null>(null);
+  const [motivo, setMotivo] = useState("");
+  const [rejeitarErr, setRejeitarErr] = useState<string | null>(null);
+
   const listQ = useQuery({
     queryKey: ["frota-solicitacoes"],
     queryFn: () => api.solicitacoes.listAll(),
@@ -154,6 +223,53 @@ export default function SolicitacoesPage() {
   };
   const motoristaNome = (id: number | null) =>
     motoristas.find((x) => x.id === id)?.nome ?? null;
+
+  // Última quilometragem conhecida do veículo designado: o piso da saída (o
+  // backend recusa abaixo dela) e a dica do campo.
+  const kmDoVeiculo = (id: number | null) =>
+    veiculos.find((x) => x.id === id)?.quilometragem_atual ?? null;
+  const kmMinimoSaida = saidaSol ? kmDoVeiculo(saidaSol.id_veiculo_designado) : null;
+
+  const campos = useErrosDoFormulario({
+    finalidade: form.finalidade.trim() ? undefined : "Diga para que o veículo vai ser usado.",
+    destino: form.destino.trim() ? undefined : "Informe o destino.",
+    passageiros:
+      Number.isInteger(form.quantidade_passageiros) && form.quantidade_passageiros >= 1
+        ? undefined
+        : "Informe ao menos 1 passageiro.",
+    saida: form.data_saida_prevista ? undefined : "Informe quando o veículo sai.",
+    retorno: !form.data_retorno_prevista
+      ? "Informe quando o veículo volta."
+      : form.data_saida_prevista && form.data_retorno_prevista < form.data_saida_prevista
+        ? "O retorno não pode ser antes da saída."
+        : undefined,
+  });
+  const camposRejeitar = useErrosDoFormulario({
+    motivo: motivo.trim() ? undefined : "Escreva o motivo da rejeição.",
+  });
+  const camposDesignar = useErrosDoFormulario({
+    d_veiculo: designarForm.id_veiculo ? undefined : "Escolha o veículo.",
+    d_motorista:
+      designarSol?.necessita_motorista && !designarForm.id_motorista
+        ? "Esta solicitação pede motorista — escolha um."
+        : undefined,
+  });
+  const camposSaida = useErrosDoFormulario({
+    km_saida: erroKm(saidaForm.km_saida, kmMinimoSaida, "a última quilometragem do veículo"),
+  });
+  // Quanto o veículo rodou, à medida que se digita o km de chegada — confere
+  // na hora um dígito a mais ou a menos.
+  const kmRetorno = Number(retornoForm.km_retorno);
+  const percorrido =
+    retornoSol?.km_saida != null &&
+    retornoForm.km_retorno.trim() !== "" &&
+    Number.isInteger(kmRetorno) &&
+    kmRetorno >= retornoSol.km_saida
+      ? kmRetorno - retornoSol.km_saida
+      : null;
+  const camposRetorno = useErrosDoFormulario({
+    km_retorno: erroKm(retornoForm.km_retorno, retornoSol?.km_saida ?? null, "a quilometragem da saída"),
+  });
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["frota-solicitacoes"] });
 
@@ -190,8 +306,9 @@ export default function SolicitacoesPage() {
     onSuccess: () => {
       invalidate();
       toast.success("Solicitação rejeitada.");
+      closeRejeitar();
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => setRejeitarErr(e.message),
   });
   const deleteM = useMutation({
     mutationFn: (id: number) => api.solicitacoes.remove(id),
@@ -250,6 +367,7 @@ export default function SolicitacoesPage() {
     setEditing(null);
     setForm(EMPTY);
     setErr(null);
+    campos.limpar();
     setDialogOpen(true);
   }
 
@@ -266,6 +384,7 @@ export default function SolicitacoesPage() {
       observacoes: s.observacoes ?? "",
     });
     setErr(null);
+    campos.limpar();
     setDialogOpen(true);
   }
 
@@ -277,6 +396,7 @@ export default function SolicitacoesPage() {
 
   function salvar() {
     setErr(null);
+    if (!campos.podeEnviar()) return;
     const payload = {
       id_unidade_solicitante: form.id_unidade_solicitante ?? null,
       finalidade: form.finalidade.trim(),
@@ -290,14 +410,23 @@ export default function SolicitacoesPage() {
     saveM.mutate(payload);
   }
 
-  async function onRejeitar(s: SolicitacaoVeiculo) {
-    const justificativa = window.prompt("Justificativa da rejeição (obrigatória):", "");
-    if (justificativa === null) return;
-    if (justificativa.trim() === "") {
-      toast.error("A justificativa é obrigatória para rejeitar.");
-      return;
-    }
-    rejeitarM.mutate({ id: s.id, justificativa: justificativa.trim() });
+  function openRejeitar(s: SolicitacaoVeiculo) {
+    setRejeitarSol(s);
+    setMotivo("");
+    setRejeitarErr(null);
+    camposRejeitar.limpar();
+  }
+
+  function closeRejeitar() {
+    setRejeitarSol(null);
+    setMotivo("");
+    setRejeitarErr(null);
+  }
+
+  function confirmarRejeicao() {
+    setRejeitarErr(null);
+    if (!rejeitarSol || !camposRejeitar.podeEnviar()) return;
+    rejeitarM.mutate({ id: rejeitarSol.id, justificativa: motivo.trim() });
   }
 
   function openDesignar(s: SolicitacaoVeiculo) {
@@ -307,6 +436,7 @@ export default function SolicitacoesPage() {
       id_motorista: s.id_motorista_designado,
       observacoes_designacao: s.observacoes_designacao ?? "",
     });
+    camposDesignar.limpar();
     setDesignarErr(null);
     setDesignarOpen(true);
   }
@@ -320,17 +450,9 @@ export default function SolicitacoesPage() {
 
   function salvarDesignar() {
     setDesignarErr(null);
-    if (!designarSol) return;
-    if (!designarForm.id_veiculo) {
-      setDesignarErr("Selecione um veículo.");
-      return;
-    }
-    if (designarSol.necessita_motorista && !designarForm.id_motorista) {
-      setDesignarErr("Esta solicitação exige motorista.");
-      return;
-    }
+    if (!designarSol || !camposDesignar.podeEnviar()) return;
     const data: DesignacaoInput = {
-      id_veiculo: designarForm.id_veiculo,
+      id_veiculo: designarForm.id_veiculo!,
       id_motorista: designarForm.id_motorista ?? null,
       observacoes_designacao: nullify(designarForm.observacoes_designacao),
     };
@@ -340,6 +462,7 @@ export default function SolicitacoesPage() {
   function openSaida(s: SolicitacaoVeiculo) {
     setSaidaSol(s);
     setSaidaForm(SAIDA_EMPTY);
+    camposSaida.limpar();
     setSaidaErr(null);
     setSaidaOpen(true);
   }
@@ -353,16 +476,8 @@ export default function SolicitacoesPage() {
 
   function salvarSaida() {
     setSaidaErr(null);
-    if (!saidaSol) return;
-    if (saidaForm.km_saida.trim() === "") {
-      setSaidaErr("Informe a quilometragem de saída.");
-      return;
-    }
+    if (!saidaSol || !camposSaida.podeEnviar()) return;
     const km = Number(saidaForm.km_saida);
-    if (!Number.isFinite(km) || km < 0) {
-      setSaidaErr("Quilometragem de saída inválida.");
-      return;
-    }
     registrarSaidaM.mutate({
       id: saidaSol.id,
       data: { km_saida: km, observacoes_saida: nullify(saidaForm.observacoes_saida) },
@@ -372,6 +487,7 @@ export default function SolicitacoesPage() {
   function openRetorno(s: SolicitacaoVeiculo) {
     setRetornoSol(s);
     setRetornoForm(RETORNO_EMPTY);
+    camposRetorno.limpar();
     setRetornoErr(null);
     setRetornoOpen(true);
   }
@@ -385,20 +501,8 @@ export default function SolicitacoesPage() {
 
   function salvarRetorno() {
     setRetornoErr(null);
-    if (!retornoSol) return;
-    if (retornoForm.km_retorno.trim() === "") {
-      setRetornoErr("Informe a quilometragem de retorno.");
-      return;
-    }
+    if (!retornoSol || !camposRetorno.podeEnviar()) return;
     const km = Number(retornoForm.km_retorno);
-    if (!Number.isFinite(km) || km < 0) {
-      setRetornoErr("Quilometragem de retorno inválida.");
-      return;
-    }
-    if (retornoSol.km_saida != null && km < retornoSol.km_saida) {
-      setRetornoErr(`Quilometragem de retorno não pode ser menor que a de saída (${retornoSol.km_saida}).`);
-      return;
-    }
     registrarRetornoM.mutate({
       id: retornoSol.id,
       data: { km_retorno: km, observacoes_retorno: nullify(retornoForm.observacoes_retorno) },
@@ -412,7 +516,7 @@ export default function SolicitacoesPage() {
     <div className="space-y-4">
       <PageHeader
         icon={ClipboardList}
-        title="Solicitações de Veículo"
+        title="Solicitações de veículo"
         description="Pedidos de uso de veículo da frota, com finalidade, destino e datas previstas."
         breadcrumbs={[{ label: "Frota Pública", href: "/m/frota" }, { label: "Solicitações" }]}
         actions={
@@ -443,14 +547,13 @@ export default function SolicitacoesPage() {
         <Table>
           <THead>
             <TR>
-              <TH>Finalidade</TH>
-              <TH>Destino</TH>
-              <TH>Saída prevista</TH>
-              <TH>Retorno previsto</TH>
-              <TH className="text-right">Passag.</TH>
-              <TH>Unidade</TH>
-              <TH>Designado</TH>
-              <TH>Saída / Retorno</TH>
+              {/* Dez colunas não cabiam em 1440px: Status e Ações ficavam
+                  fora da tela, atrás da rolagem lateral. Agora são pares que
+                  se leem juntos (o quê + para onde; saída + retorno; veículo +
+                  motorista + o que aconteceu) numa célula de duas linhas. */}
+              <TH>Solicitação</TH>
+              <TH>Previsto</TH>
+              <TH>Execução</TH>
               <TH>Status</TH>
               <TH className="text-right">Ações</TH>
             </TR>
@@ -458,7 +561,7 @@ export default function SolicitacoesPage() {
           <TBody>
             {listQ.isLoading && (
               <TR>
-                <TD colSpan={10} className="text-center text-muted-foreground">
+                <TD colSpan={6} className="text-center text-muted-foreground">
                   Carregando solicitações...
                 </TD>
               </TR>
@@ -469,50 +572,61 @@ export default function SolicitacoesPage() {
               const isEmUso = s.status === "em_uso";
               return (
                 <TR key={s.id}>
-                  <TD className="font-medium">{s.finalidade}</TD>
-                  <TD className="text-muted-foreground">{s.destino}</TD>
-                  <TD className="tabular-nums">{fmt(s.data_saida_prevista)}</TD>
-                  <TD className="tabular-nums">{fmt(s.data_retorno_prevista)}</TD>
-                  <TD className="text-right tabular-nums">{s.quantidade_passageiros}</TD>
-                  <TD className="text-muted-foreground">{unidadeNome(s.id_unidade_solicitante)}</TD>
-                  <TD>
+                  {/* Finalidade e destino são texto livre: cortados numa linha,
+                      com o texto inteiro no title. Quebrando, cada linha virava
+                      um bloco de cinco linhas. */}
+                  <TD className="max-w-[20rem]">
+                    <div className="truncate font-medium" title={s.finalidade}>
+                      {s.finalidade}
+                    </div>
+                    {/* Destino, passageiros e unidade: o "para onde, quantos e
+                        quem pede" — eram três colunas, duas quase sempre "—". */}
+                    <div
+                      className="truncate text-xs text-muted-foreground"
+                      title={[s.destino, unidadeNome(s.id_unidade_solicitante)].filter((x) => x && x !== "—").join(" · ")}
+                    >
+                      {s.destino}
+                      {" · "}
+                      {s.quantidade_passageiros} {s.quantidade_passageiros === 1 ? "passageiro" : "passageiros"}
+                      {unidadeNome(s.id_unidade_solicitante) !== "—" && ` · ${unidadeNome(s.id_unidade_solicitante)}`}
+                    </div>
+                  </TD>
+                  <TD className="whitespace-nowrap tabular-nums">
+                    <div>{fmtDataHora(s.data_saida_prevista)}</div>
+                    <div className="text-xs text-muted-foreground">
+                      até {fmtDataHora(s.data_retorno_prevista)}
+                    </div>
+                  </TD>
+                  <TD className="max-w-[16rem]">
                     {s.id_veiculo_designado ? (
-                      <div className="text-xs">
-                        <div className="font-medium">
+                      <>
+                        <div className="truncate font-medium">
                           {veiculoLabel(s.id_veiculo_designado) ?? `#${s.id_veiculo_designado}`}
                         </div>
-                        {s.id_motorista_designado && (
-                          <div className="text-muted-foreground">
-                            {motoristaNome(s.id_motorista_designado) ?? `#${s.id_motorista_designado}`}
+                        <div className="truncate text-xs text-muted-foreground">
+                          {s.id_motorista_designado
+                            ? (motoristaNome(s.id_motorista_designado) ?? `#${s.id_motorista_designado}`)
+                            : "Sem motorista"}
+                        </div>
+                        {/* O último fato da viagem numa linha; os dois no title. */}
+                        {(s.data_saida_real || s.data_retorno_real) && (
+                          <div
+                            className="truncate text-xs tabular-nums text-muted-foreground"
+                            title={[
+                              s.data_saida_real &&
+                                `Saída: ${fmtDataHora(s.data_saida_real)}${s.km_saida != null ? ` · ${s.km_saida} km` : ""}`,
+                              s.data_retorno_real &&
+                                `Retorno: ${fmtDataHora(s.data_retorno_real)}${s.km_retorno != null ? ` · ${s.km_retorno} km` : ""}`,
+                            ]
+                              .filter(Boolean)
+                              .join("\n")}
+                          >
+                            {s.data_retorno_real
+                              ? `Voltou ${fmtDataHora(s.data_retorno_real)}${s.km_retorno != null ? ` · ${s.km_retorno} km` : ""}`
+                              : `Saiu ${fmtDataHora(s.data_saida_real!)}${s.km_saida != null ? ` · ${s.km_saida} km` : ""}`}
                           </div>
                         )}
-                      </div>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </TD>
-                  <TD>
-                    {s.data_saida_real || s.data_retorno_real ? (
-                      <div className="text-xs">
-                        {s.data_saida_real && (
-                          <div>
-                            <span className="text-muted-foreground">Saída: </span>
-                            {fmt(s.data_saida_real)}
-                            {s.km_saida != null && (
-                              <span className="text-muted-foreground"> · {s.km_saida} km</span>
-                            )}
-                          </div>
-                        )}
-                        {s.data_retorno_real && (
-                          <div>
-                            <span className="text-muted-foreground">Retorno: </span>
-                            {fmt(s.data_retorno_real)}
-                            {s.km_retorno != null && (
-                              <span className="text-muted-foreground"> · {s.km_retorno} km</span>
-                            )}
-                          </div>
-                        )}
-                      </div>
+                      </>
                     ) : (
                       <span className="text-muted-foreground">—</span>
                     )}
@@ -521,87 +635,86 @@ export default function SolicitacoesPage() {
                     <Badge intent={STATUS_INTENT[s.status]}>{STATUS_LABEL[s.status]}</Badge>
                   </TD>
                   <TD className="text-right">
-                    <div className="inline-flex flex-wrap justify-end gap-2">
-                      {canEdit && isSolicitada && (
-                        <Button variant="secondary" size="sm" onClick={() => openEdit(s)}>
-                          Editar
-                        </Button>
-                      )}
-                      {canEdit && isSolicitada && (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          disabled={aprovarM.isPending}
-                          onClick={() => aprovarM.mutate(s.id)}
-                        >
-                          Aprovar
-                        </Button>
-                      )}
-                      {canEdit && isSolicitada && (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          disabled={rejeitarM.isPending}
-                          onClick={() => onRejeitar(s)}
-                        >
-                          Rejeitar
-                        </Button>
-                      )}
-                      {canEdit && isAprovada && (
-                        <Button variant="secondary" size="sm" onClick={() => openDesignar(s)}>
-                          Designar
-                        </Button>
-                      )}
-                      {canEdit && isAprovada && s.id_veiculo_designado && (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          disabled={limparDesignacaoM.isPending}
-                          onClick={async () => {
+                    {/* Só o próximo passo do fluxo fica à vista (Aprovar →
+                        Designar → Registrar saída → Registrar retorno); o resto
+                        vai para o ⋯. Antes eram até cinco botões empilhados. */}
+                    <AcoesDaLinha
+                      visiveis={1}
+                      acoes={[
+                        {
+                          label: "Aprovar",
+                          icon: ThumbsUp,
+                          oculta: !(canEdit && isSolicitada),
+                          disabled: aprovarM.isPending,
+                          onClick: () => aprovarM.mutate(s.id),
+                        },
+                        {
+                          label: "Registrar saída",
+                          icon: LogOut,
+                          oculta: !(canEdit && isAprovada && s.id_veiculo_designado),
+                          onClick: () => openSaida(s),
+                        },
+                        {
+                          label: s.id_veiculo_designado ? "Trocar designação" : "Designar",
+                          icon: Car,
+                          oculta: !(canEdit && isAprovada),
+                          onClick: () => openDesignar(s),
+                        },
+                        {
+                          label: "Registrar retorno",
+                          icon: LogIn,
+                          oculta: !(canEdit && isEmUso),
+                          onClick: () => openRetorno(s),
+                        },
+                        {
+                          label: "Rejeitar",
+                          icon: ThumbsDown,
+                          oculta: !(canEdit && isSolicitada),
+                          disabled: rejeitarM.isPending,
+                          onClick: () => openRejeitar(s),
+                        },
+                        {
+                          label: "Editar",
+                          icon: Pencil,
+                          oculta: !(canEdit && isSolicitada),
+                          onClick: () => openEdit(s),
+                        },
+                        {
+                          label: "Limpar designação",
+                          icon: Eraser,
+                          oculta: !(canEdit && isAprovada && s.id_veiculo_designado),
+                          disabled: limparDesignacaoM.isPending,
+                          onClick: async () => {
                             const ok = await confirm({
                               title: "Limpar designação",
                               message: "Remover o veículo/motorista designados desta solicitação?",
                               confirmLabel: "Limpar",
                             });
                             if (ok) limparDesignacaoM.mutate(s.id);
-                          }}
-                        >
-                          Limpar designação
-                        </Button>
-                      )}
-                      {canEdit && isAprovada && s.id_veiculo_designado && (
-                        <Button variant="secondary" size="sm" onClick={() => openSaida(s)}>
-                          Registrar saída
-                        </Button>
-                      )}
-                      {canEdit && isEmUso && (
-                        <Button variant="secondary" size="sm" onClick={() => openRetorno(s)}>
-                          Registrar retorno
-                        </Button>
-                      )}
-                      {canEdit && (isSolicitada || isAprovada) && (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          disabled={cancelarM.isPending}
-                          onClick={async () => {
+                          },
+                        },
+                        {
+                          label: "Cancelar",
+                          icon: Ban,
+                          perigo: true,
+                          oculta: !(canEdit && (isSolicitada || isAprovada)),
+                          disabled: cancelarM.isPending,
+                          onClick: async () => {
                             const ok = await confirm({
                               title: "Cancelar solicitação",
                               message: `Cancelar a solicitação "${s.finalidade}"?`,
                               confirmLabel: "Cancelar solicitação",
                             });
                             if (ok) cancelarM.mutate(s.id);
-                          }}
-                        >
-                          Cancelar
-                        </Button>
-                      )}
-                      {canDelete && (
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          disabled={deleteM.isPending}
-                          onClick={async () => {
+                          },
+                        },
+                        {
+                          label: "Excluir",
+                          icon: Trash2,
+                          perigo: true,
+                          oculta: !canDelete,
+                          disabled: deleteM.isPending,
+                          onClick: async () => {
                             const ok = await confirm({
                               title: "Excluir solicitação",
                               message: "Esta ação não pode ser desfeita. Excluir a solicitação?",
@@ -609,12 +722,10 @@ export default function SolicitacoesPage() {
                               intent: "danger",
                             });
                             if (ok) deleteM.mutate(s.id);
-                          }}
-                        >
-                          Excluir
-                        </Button>
-                      )}
-                    </div>
+                          },
+                        },
+                      ]}
+                    />
                   </TD>
                 </TR>
               );
@@ -626,334 +737,456 @@ export default function SolicitacoesPage() {
       <Dialog
         open={dialogOpen}
         onClose={closeDialog}
-        title={editing ? `Editar — ${editing.finalidade}` : "Nova solicitação"}
+        title={editing ? "Editar solicitação" : "Nova solicitação de veículo"}
+        description={
+          editing
+            ? editing.finalidade
+            : "Depois de criada, a solicitação espera aprovação; o veículo é designado em seguida."
+        }
         size="lg"
         footer={
           <>
-            <Button variant="secondary" onClick={closeDialog}>
+            <Button variant="ghost" onClick={closeDialog}>
               Cancelar
             </Button>
-            <Button onClick={salvar} disabled={saveM.isPending}>
-              {saveM.isPending ? "Salvando..." : "Salvar"}
+            <Button type="submit" form="form-solicitacao" loading={saveM.isPending}>
+              {editing ? "Salvar alterações" : "Criar solicitação"}
             </Button>
           </>
         }
       >
-        <div className="space-y-4">
-          <SectionCard
-            icon={FileText}
-            title="Dados da solicitação"
-            description="Finalidade, destino e quem é a unidade solicitante."
-          >
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="sm:col-span-2">
-                <Label htmlFor="finalidade" required>
-                  Finalidade
-                </Label>
+        <form
+          id="form-solicitacao"
+          noValidate
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            salvar();
+          }}
+        >
+          <SectionCard icon={FileText} title="Para que e para onde" description="O motivo da viagem e quem vai.">
+            <div className="space-y-4">
+              <FormField label="Finalidade" required error={campos.erro("finalidade")}>
                 <Input
                   id="finalidade"
                   value={form.finalidade}
                   onChange={(e) => set("finalidade", e.target.value)}
+                  onBlur={campos.tocar("finalidade")}
+                  placeholder="Ex.: Visita técnica às escolas da zona rural"
+                  maxLength={255}
                 />
-              </div>
-              <div className="sm:col-span-2">
-                <Label htmlFor="destino" required>
-                  Destino
-                </Label>
-                <Input id="destino" value={form.destino} onChange={(e) => set("destino", e.target.value)} />
-              </div>
-              <div>
-                <Label htmlFor="unidade">Unidade solicitante</Label>
-                <Select
-                  id="unidade"
-                  value={form.id_unidade_solicitante ?? ""}
-                  onChange={(e) =>
-                    set("id_unidade_solicitante", e.target.value ? Number(e.target.value) : null)
-                  }
-                >
-                  <option value="">—</option>
-                  {unidades.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.unidade_trabalho}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="passageiros" required>
-                  Qtd. de passageiros
-                </Label>
+              </FormField>
+              <FormField label="Destino" required error={campos.erro("destino")}>
                 <Input
-                  id="passageiros"
-                  type="number"
-                  min={1}
-                  value={form.quantidade_passageiros}
-                  onChange={(e) =>
-                    set("quantidade_passageiros", e.target.value ? Number(e.target.value) : 1)
-                  }
+                  id="destino"
+                  value={form.destino}
+                  onChange={(e) => set("destino", e.target.value)}
+                  onBlur={campos.tocar("destino")}
+                  placeholder="Ex.: Secretaria de Saúde — Centro"
+                  maxLength={255}
                 />
-              </div>
+              </FormField>
+              <GradeCampos>
+                <FormField label="Unidade solicitante" opcional hint="Quem está pedindo o veículo.">
+                  <Select
+                    id="unidade"
+                    value={form.id_unidade_solicitante ?? ""}
+                    onChange={(e) =>
+                      set("id_unidade_solicitante", e.target.value ? Number(e.target.value) : null)
+                    }
+                  >
+                    <option value="">Nenhuma</option>
+                    {unidades.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.unidade_trabalho}
+                      </option>
+                    ))}
+                  </Select>
+                </FormField>
+                <FormField
+                  label="Passageiros"
+                  required
+
+                  error={campos.erro("passageiros")}
+                >
+                  <Input
+                    id="passageiros"
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    value={form.quantidade_passageiros}
+                    onChange={(e) =>
+                      set("quantidade_passageiros", e.target.value ? Number(e.target.value) : 1)
+                    }
+                    onBlur={campos.tocar("passageiros")}
+                  />
+                </FormField>
+              </GradeCampos>
             </div>
           </SectionCard>
 
-          <SectionCard
-            icon={MapPin}
-            title="Previsão de uso"
-            description="Datas/horas previstas de saída e retorno e necessidade de motorista."
-          >
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <Label htmlFor="saida" required>
-                  Saída prevista
-                </Label>
-                <Input
-                  id="saida"
-                  type="datetime-local"
-                  value={form.data_saida_prevista}
-                  onChange={(e) => set("data_saida_prevista", e.target.value)}
-                />
-              </div>
-              <div>
-                <Label htmlFor="retorno" required>
-                  Retorno previsto
-                </Label>
-                <Input
-                  id="retorno"
-                  type="datetime-local"
-                  value={form.data_retorno_prevista}
-                  onChange={(e) => set("data_retorno_prevista", e.target.value)}
-                />
-              </div>
-              <div className="flex items-center gap-2 sm:col-span-2">
-                <input
-                  id="necessita_motorista"
-                  type="checkbox"
-                  checked={form.necessita_motorista}
-                  onChange={(e) => set("necessita_motorista", e.target.checked)}
-                  className="h-4 w-4 rounded border-gray-300"
-                />
-                <Label htmlFor="necessita_motorista" className="!mb-0">
-                  Necessita motorista
-                </Label>
-              </div>
-              <div className="sm:col-span-2">
-                <Label htmlFor="obs">Observações</Label>
+          <SectionCard icon={MapPin} title="Quando" description="Saída e retorno previstos, com a hora.">
+            <div className="space-y-4">
+              <GradeCampos>
+                <FormField label="Saída prevista" required error={campos.erro("saida")}>
+                  <Input
+                    id="saida"
+                    type="datetime-local"
+                    value={form.data_saida_prevista}
+                    onChange={(e) => set("data_saida_prevista", e.target.value)}
+                    onBlur={campos.tocar("saida")}
+                  />
+                </FormField>
+                <FormField label="Retorno previsto" required error={campos.erro("retorno")}>
+                  <Input
+                    id="retorno"
+                    type="datetime-local"
+                    min={form.data_saida_prevista || undefined}
+                    value={form.data_retorno_prevista}
+                    onChange={(e) => set("data_retorno_prevista", e.target.value)}
+                    onBlur={campos.tocar("retorno")}
+                  />
+                </FormField>
+              </GradeCampos>
+              <EscolhaSegmentada
+                nome="necessita_motorista"
+                titulo="Precisa de motorista?"
+                moldura={false}
+                valor={form.necessita_motorista ? "sim" : "nao"}
+                opcoes={NECESSITA_MOTORISTA}
+                onChange={(o) => set("necessita_motorista", o === "sim")}
+              />
+              <FormField label="Observações" opcional>
                 <Textarea
                   id="obs"
                   rows={3}
                   value={form.observacoes}
                   onChange={(e) => set("observacoes", e.target.value)}
+                  placeholder="Ex.: levar material de apoio; precisa de bagageiro"
                 />
-              </div>
+              </FormField>
             </div>
           </SectionCard>
 
           {err && (
-            <div role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground">
+            <Alert intent="danger" title="Não foi possível salvar">
               {err}
-            </div>
+            </Alert>
           )}
-        </div>
+        </form>
+      </Dialog>
+
+      <Dialog
+        open={rejeitarSol != null}
+        onClose={closeRejeitar}
+        title="Rejeitar solicitação"
+        size="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={closeRejeitar}>
+              Cancelar
+            </Button>
+            <Button type="submit" form="form-rejeitar" variant="danger" loading={rejeitarM.isPending}>
+              Rejeitar solicitação
+            </Button>
+          </>
+        }
+      >
+        <form
+          id="form-rejeitar"
+          noValidate
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            confirmarRejeicao();
+          }}
+        >
+          {rejeitarSol && <ResumoSolicitacao s={rejeitarSol} />}
+          <FormField
+            label="Motivo da rejeição"
+            required
+            hint="Fica registrado na solicitação, para quem pediu saber por quê."
+            error={camposRejeitar.erro("motivo")}
+          >
+            <Textarea
+              id="motivo"
+              rows={3}
+              value={motivo}
+              onChange={(e) => setMotivo(e.target.value)}
+              onBlur={camposRejeitar.tocar("motivo")}
+              placeholder="Ex.: Não há veículo disponível na data; remarcar para a semana seguinte"
+              maxLength={2000}
+            />
+          </FormField>
+          {rejeitarErr && (
+            <Alert intent="danger" title="Não foi possível rejeitar">
+              {rejeitarErr}
+            </Alert>
+          )}
+        </form>
       </Dialog>
 
       <Dialog
         open={designarOpen}
         onClose={closeDesignar}
-        title={designarSol ? `Designar — ${designarSol.finalidade}` : "Designar"}
+        title="Designar veículo e motorista"
         size="md"
         footer={
           <>
-            <Button variant="secondary" onClick={closeDesignar}>
+            <Button variant="ghost" onClick={closeDesignar}>
               Cancelar
             </Button>
-            <Button onClick={salvarDesignar} disabled={designarM.isPending}>
-              {designarM.isPending ? "Salvando..." : "Designar"}
+            <Button type="submit" form="form-designar" loading={designarM.isPending}>
+              {designarSol?.id_veiculo_designado ? "Trocar designação" : "Designar"}
             </Button>
           </>
         }
       >
-        <SectionCard
-          icon={Car}
-          title="Veículo e motorista"
-          description="Apenas veículos disponíveis e motoristas ativos podem ser designados."
+        <form
+          id="form-designar"
+          noValidate
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            salvarDesignar();
+          }}
         >
-          <div className="grid grid-cols-1 gap-4">
-            <div>
-              <Label htmlFor="d_veiculo" required>
-                Veículo
-              </Label>
-              <Select
-                id="d_veiculo"
-                value={designarForm.id_veiculo ?? ""}
-                onChange={(e) =>
-                  setDesignarForm((f) => ({
-                    ...f,
-                    id_veiculo: e.target.value ? Number(e.target.value) : null,
-                  }))
-                }
-              >
-                <option value="">—</option>
-                {veiculosDisponiveis.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {[v.placa, v.marca, v.modelo].filter(Boolean).join(" ")}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="d_motorista" required={designarSol?.necessita_motorista}>
-                Motorista
-                {designarSol?.necessita_motorista ? " (obrigatório)" : " (opcional)"}
-              </Label>
-              <Select
-                id="d_motorista"
-                value={designarForm.id_motorista ?? ""}
-                onChange={(e) =>
-                  setDesignarForm((f) => ({
-                    ...f,
-                    id_motorista: e.target.value ? Number(e.target.value) : null,
-                  }))
-                }
-              >
-                <option value="">—</option>
-                {motoristasAtivos.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.nome}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="d_obs">Observações da designação</Label>
-              <Textarea
-                id="d_obs"
-                rows={2}
-                value={designarForm.observacoes_designacao}
-                onChange={(e) =>
-                  setDesignarForm((f) => ({ ...f, observacoes_designacao: e.target.value }))
-                }
-              />
-            </div>
-            {designarErr && (
-              <div role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground">
-                {designarErr}
-              </div>
-            )}
-          </div>
-        </SectionCard>
+          {designarSol && <ResumoSolicitacao s={designarSol} />}
+          <FormField
+            label="Veículo"
+            required
+            hint={
+              veiculosDisponiveis.length === 0
+                ? "Nenhum veículo disponível agora — os em uso ou em manutenção não aparecem."
+                : "Só aparecem os veículos disponíveis."
+            }
+            error={camposDesignar.erro("d_veiculo")}
+          >
+            <Select
+              id="d_veiculo"
+              value={designarForm.id_veiculo ?? ""}
+              onChange={(e) =>
+                setDesignarForm((f) => ({
+                  ...f,
+                  id_veiculo: e.target.value ? Number(e.target.value) : null,
+                }))
+              }
+              onBlur={camposDesignar.tocar("d_veiculo")}
+            >
+              <option value="">Selecione o veículo</option>
+              {veiculosDisponiveis.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {rotuloVeiculo(v)}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+          <FormField
+            label="Motorista"
+            required={designarSol?.necessita_motorista}
+            opcional={!designarSol?.necessita_motorista}
+            hint={
+              designarSol?.necessita_motorista
+                ? "Esta solicitação pede motorista. Só aparecem os ativos."
+                : "Em branco, quem pediu dirige. Só aparecem os ativos."
+            }
+            error={camposDesignar.erro("d_motorista")}
+          >
+            <Select
+              id="d_motorista"
+              value={designarForm.id_motorista ?? ""}
+              onChange={(e) =>
+                setDesignarForm((f) => ({
+                  ...f,
+                  id_motorista: e.target.value ? Number(e.target.value) : null,
+                }))
+              }
+              onBlur={camposDesignar.tocar("d_motorista")}
+            >
+              <option value="">{designarSol?.necessita_motorista ? "Selecione o motorista" : "Sem motorista"}</option>
+              {motoristasAtivos.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.nome}
+                </option>
+              ))}
+            </Select>
+          </FormField>
+          <FormField label="Observações" opcional>
+            <Textarea
+              id="d_obs"
+              rows={2}
+              value={designarForm.observacoes_designacao}
+              onChange={(e) =>
+                setDesignarForm((f) => ({ ...f, observacoes_designacao: e.target.value }))
+              }
+              placeholder="Ex.: retirar a chave na portaria às 7h"
+              maxLength={2000}
+            />
+          </FormField>
+          {designarErr && (
+            <Alert intent="danger" title="Não foi possível designar">
+              {designarErr}
+            </Alert>
+          )}
+        </form>
       </Dialog>
 
       <Dialog
         open={saidaOpen}
         onClose={closeSaida}
-        title={saidaSol ? `Registrar saída — ${saidaSol.finalidade}` : "Registrar saída"}
+        title="Registrar saída"
+        description="A data e a hora da saída são registradas agora, automaticamente."
         size="md"
         footer={
           <>
-            <Button variant="secondary" onClick={closeSaida}>
+            <Button variant="ghost" onClick={closeSaida}>
               Cancelar
             </Button>
-            <Button onClick={salvarSaida} disabled={registrarSaidaM.isPending}>
-              {registrarSaidaM.isPending ? "Salvando..." : "Registrar saída"}
+            <Button type="submit" form="form-saida" loading={registrarSaidaM.isPending}>
+              Registrar saída
             </Button>
           </>
         }
       >
-        <SectionCard
-          icon={Gauge}
-          title="Saída do veículo"
-          description="A data/hora da saída é registrada automaticamente. A quilometragem deve ser maior ou igual à atual do veículo."
+        <form
+          id="form-saida"
+          noValidate
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            salvarSaida();
+          }}
         >
-          <div className="grid grid-cols-1 gap-4">
-            <div>
-              <Label htmlFor="km_saida" required>
-                Quilometragem de saída
-              </Label>
-              <Input
-                id="km_saida"
-                type="number"
-                min={0}
-                value={saidaForm.km_saida}
-                onChange={(e) => setSaidaForm((f) => ({ ...f, km_saida: e.target.value }))}
-              />
-            </div>
-            <div>
-              <Label htmlFor="obs_saida">Observações da saída</Label>
-              <Textarea
-                id="obs_saida"
-                rows={2}
-                value={saidaForm.observacoes_saida}
-                onChange={(e) =>
-                  setSaidaForm((f) => ({ ...f, observacoes_saida: e.target.value }))
-                }
-              />
-            </div>
-            {saidaErr && (
-              <div role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground">
-                {saidaErr}
-              </div>
-            )}
-          </div>
-        </SectionCard>
+          {saidaSol && (
+            <ResumoSolicitacao
+              s={saidaSol}
+              extra={[
+                veiculoLabel(saidaSol.id_veiculo_designado),
+                saidaSol.id_motorista_designado ? motoristaNome(saidaSol.id_motorista_designado) : "Sem motorista",
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            />
+          )}
+          <FormField
+            label="Quilometragem na saída"
+            required
+            hint={
+              kmMinimoSaida != null
+                ? `O que marca o painel agora. Último registro do veículo: ${fmtKm(kmMinimoSaida)}.`
+                : "O que marca o painel agora."
+            }
+            error={camposSaida.erro("km_saida")}
+          >
+            <CampoComUnidade
+              id="km_saida"
+              type="number"
+              inputMode="numeric"
+              min={kmMinimoSaida ?? 0}
+              sufixo="km"
+              value={saidaForm.km_saida}
+              onChange={(e) => setSaidaForm((f) => ({ ...f, km_saida: e.target.value }))}
+              onBlur={camposSaida.tocar("km_saida")}
+              placeholder={kmMinimoSaida != null ? `Ex.: ${kmMinimoSaida}` : undefined}
+            />
+          </FormField>
+          <FormField label="Observações" opcional>
+            <Textarea
+              id="obs_saida"
+              rows={2}
+              value={saidaForm.observacoes_saida}
+              onChange={(e) => setSaidaForm((f) => ({ ...f, observacoes_saida: e.target.value }))}
+              placeholder="Ex.: tanque cheio; arranhão na porta traseira já existente"
+              maxLength={2000}
+            />
+          </FormField>
+          {saidaErr && (
+            <Alert intent="danger" title="Não foi possível registrar a saída">
+              {saidaErr}
+            </Alert>
+          )}
+        </form>
       </Dialog>
 
       <Dialog
         open={retornoOpen}
         onClose={closeRetorno}
-        title={retornoSol ? `Registrar retorno — ${retornoSol.finalidade}` : "Registrar retorno"}
+        title="Registrar retorno"
+        description="A data e a hora do retorno são registradas agora. A quilometragem informada passa a ser a do veículo."
         size="md"
         footer={
           <>
-            <Button variant="secondary" onClick={closeRetorno}>
+            <Button variant="ghost" onClick={closeRetorno}>
               Cancelar
             </Button>
-            <Button onClick={salvarRetorno} disabled={registrarRetornoM.isPending}>
-              {registrarRetornoM.isPending ? "Salvando..." : "Registrar retorno"}
+            <Button type="submit" form="form-retorno" loading={registrarRetornoM.isPending}>
+              Registrar retorno
             </Button>
           </>
         }
       >
-        <SectionCard
-          icon={Gauge}
-          title="Retorno do veículo"
-          description="A data/hora do retorno é registrada automaticamente. A quilometragem de retorno atualiza a do veículo e deve ser maior ou igual à de saída."
+        <form
+          id="form-retorno"
+          noValidate
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            salvarRetorno();
+          }}
         >
-          <div className="grid grid-cols-1 gap-4">
-            {retornoSol?.km_saida != null && (
-              <p className="text-sm text-muted-foreground">
-                Quilometragem de saída registrada: <strong>{retornoSol.km_saida} km</strong>.
-              </p>
-            )}
-            <div>
-              <Label htmlFor="km_retorno" required>
-                Quilometragem de retorno
-              </Label>
-              <Input
-                id="km_retorno"
-                type="number"
-                min={retornoSol?.km_saida ?? 0}
-                value={retornoForm.km_retorno}
-                onChange={(e) => setRetornoForm((f) => ({ ...f, km_retorno: e.target.value }))}
-              />
-            </div>
-            <div>
-              <Label htmlFor="obs_retorno">Observações do retorno</Label>
-              <Textarea
-                id="obs_retorno"
-                rows={2}
-                value={retornoForm.observacoes_retorno}
-                onChange={(e) =>
-                  setRetornoForm((f) => ({ ...f, observacoes_retorno: e.target.value }))
-                }
-              />
-            </div>
-            {retornoErr && (
-              <div role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground">
-                {retornoErr}
-              </div>
-            )}
-          </div>
-        </SectionCard>
+          {retornoSol && (
+            <ResumoSolicitacao
+              s={retornoSol}
+              extra={[
+                veiculoLabel(retornoSol.id_veiculo_designado),
+                retornoSol.data_saida_real &&
+                  `saiu ${fmtDataHora(retornoSol.data_saida_real)}${retornoSol.km_saida != null ? ` com ${fmtKm(retornoSol.km_saida)}` : ""}`,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            />
+          )}
+          <FormField
+            label="Quilometragem no retorno"
+            required
+            hint={
+              percorrido != null
+                ? `Percorridos nesta viagem: ${fmtKm(percorrido)}.`
+                : retornoSol?.km_saida != null
+                  ? `Saiu com ${fmtKm(retornoSol.km_saida)}; o retorno não pode ser menor.`
+                  : "O que marca o painel na chegada."
+            }
+            error={camposRetorno.erro("km_retorno")}
+          >
+            <CampoComUnidade
+              id="km_retorno"
+              type="number"
+              inputMode="numeric"
+              min={retornoSol?.km_saida ?? 0}
+              sufixo="km"
+              value={retornoForm.km_retorno}
+              onChange={(e) => setRetornoForm((f) => ({ ...f, km_retorno: e.target.value }))}
+              onBlur={camposRetorno.tocar("km_retorno")}
+            />
+          </FormField>
+          <FormField label="Observações" opcional>
+            <Textarea
+              id="obs_retorno"
+              rows={2}
+              value={retornoForm.observacoes_retorno}
+              onChange={(e) =>
+                setRetornoForm((f) => ({ ...f, observacoes_retorno: e.target.value }))
+              }
+              placeholder="Ex.: pneu dianteiro calibrado na volta"
+              maxLength={2000}
+            />
+          </FormField>
+          {retornoErr && (
+            <Alert intent="danger" title="Não foi possível registrar o retorno">
+              {retornoErr}
+            </Alert>
+          )}
+        </form>
       </Dialog>
     </div>
   );

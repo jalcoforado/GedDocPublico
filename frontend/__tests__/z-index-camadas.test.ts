@@ -23,7 +23,6 @@ const IGNORAR = new Set(["node_modules", ".next", "coverage", "__tests__"]);
 
 /** Empilhamento local legítimo — cada entrada com a razão. */
 const LOCAIS_PERMITIDOS: Record<string, string> = {
-  "app/(app)/m/pagamentos/autorizacao/page.tsx": "barra de ações sticky dentro da página",
   "app/(app)/m/pagamentos/tesouraria/page.tsx": "barra de ações sticky dentro da página",
   "app/cidadao/servicos/[slug]/page.tsx": "barra de ação sticky dentro da página",
   "components/workflow/WorkflowEditor.tsx": "painel flutuante dentro do canvas do editor",
