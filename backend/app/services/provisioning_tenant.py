@@ -271,6 +271,63 @@ async def criar_registro_de_tenant(
 # ---------------------------------------------------------------------------
 
 
+async def garantir_unidade_padrao(
+    db: AsyncSession, *, tenant_id: int
+) -> UnidadeTrabalho:
+    """get_or_create do tipo de unidade `SEC` + da unidade `PG` do tenant.
+
+    Extraída de `semear_tenant` para que o `seed_bootstrap` monte a MESMA
+    unidade padrão pelas MESMAS chaves naturais. Enquanto eram dois caminhos,
+    o tenant do seed nascia sem unidade alguma e o admin dele sem lotação — e
+    `utils.usuario.id_unidade_trabalho` é o que o `seed_demo` usa para montar
+    as caixas de trabalho, que por isso ficavam vazias, com um `[aviso]` e
+    exit 0.
+
+    **Não comita** — quem chama decide a transação. Idempotente pelas chaves
+    naturais (`TIPO_UNIDADE_CODIGO`, `UNIDADE_SIGLA`), como o resto do ato
+    municipal.
+    """
+    tu = (
+        await db.execute(
+            select(TipoUnidadeTrabalho).where(
+                TipoUnidadeTrabalho.tenant_id == tenant_id,
+                TipoUnidadeTrabalho.codigo == TIPO_UNIDADE_CODIGO,
+                TipoUnidadeTrabalho.excluido.is_(False),
+            )
+        )
+    ).scalars().first()
+    if tu is None:
+        tu = TipoUnidadeTrabalho(
+            tenant_id=tenant_id,
+            tipo_unidade_trabalho=TIPO_UNIDADE_NOME,
+            codigo=TIPO_UNIDADE_CODIGO,
+        )
+        db.add(tu)
+        await db.flush()
+
+    unidade = (
+        await db.execute(
+            select(UnidadeTrabalho).where(
+                UnidadeTrabalho.tenant_id == tenant_id,
+                UnidadeTrabalho.sigla == UNIDADE_SIGLA,
+                UnidadeTrabalho.excluido.is_(False),
+            )
+        )
+    ).scalars().first()
+    if unidade is None:
+        unidade = UnidadeTrabalho(
+            tenant_id=tenant_id,
+            unidade_trabalho=UNIDADE_NOME,
+            sigla=UNIDADE_SIGLA,
+            id_tipo_unidade_trabalho=tu.id,
+        )
+        db.add(unidade)
+        await db.flush()
+
+
+    return unidade
+
+
 async def semear_tenant(
     db: AsyncSession,
     *,
@@ -339,42 +396,7 @@ async def semear_tenant(
             f"(nível valor=0 ou sistema '{app_name}')."
         )
 
-    tu = (
-        await db.execute(
-            select(TipoUnidadeTrabalho).where(
-                TipoUnidadeTrabalho.tenant_id == tenant_id,
-                TipoUnidadeTrabalho.codigo == TIPO_UNIDADE_CODIGO,
-                TipoUnidadeTrabalho.excluido.is_(False),
-            )
-        )
-    ).scalars().first()
-    if tu is None:
-        tu = TipoUnidadeTrabalho(
-            tenant_id=tenant_id,
-            tipo_unidade_trabalho=TIPO_UNIDADE_NOME,
-            codigo=TIPO_UNIDADE_CODIGO,
-        )
-        db.add(tu)
-        await db.flush()
-
-    unidade = (
-        await db.execute(
-            select(UnidadeTrabalho).where(
-                UnidadeTrabalho.tenant_id == tenant_id,
-                UnidadeTrabalho.sigla == UNIDADE_SIGLA,
-                UnidadeTrabalho.excluido.is_(False),
-            )
-        )
-    ).scalars().first()
-    if unidade is None:
-        unidade = UnidadeTrabalho(
-            tenant_id=tenant_id,
-            unidade_trabalho=UNIDADE_NOME,
-            sigla=UNIDADE_SIGLA,
-            id_tipo_unidade_trabalho=tu.id,
-        )
-        db.add(unidade)
-        await db.flush()
+    unidade = await garantir_unidade_padrao(db, tenant_id=tenant_id)
 
     tem_tipo_manifestante = (
         await db.execute(

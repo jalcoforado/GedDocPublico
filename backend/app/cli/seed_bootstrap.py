@@ -47,6 +47,7 @@ from ..models import (
     WorkflowDefinition,
 )
 from ..services.modulos import contratar_modulos_iniciais
+from ..services.provisioning_tenant import garantir_unidade_padrao
 
 APP = get_settings().app_name
 
@@ -372,6 +373,11 @@ async def seed(db: AsyncSession) -> dict:
             )
         )
     ).scalars().first()
+    # A unidade padrão vem antes do admin porque ele nasce lotado nela. É a
+    # mesma `garantir_unidade_padrao` do provisionamento, pelas mesmas chaves
+    # naturais — o tenant do seed não é um tenant de segunda classe.
+    unidade = await garantir_unidade_padrao(db, tenant_id=tenant_id)
+
     if usuario is None:
         usuario = Usuario(
             tenant_id=tenant_id,
@@ -385,8 +391,17 @@ async def seed(db: AsyncSession) -> dict:
             app=APP,
             nivel_acesso_sigilo="interno",
             must_change_password=False,
+            id_unidade_trabalho=unidade.id,
         )
         db.add(usuario)
+        await db.flush()
+    elif usuario.id_unidade_trabalho is None:
+        # Repara o admin que JÁ existe sem lotação: todo banco criado antes
+        # desta correção tem um. O seed roda a cada deploy justamente para
+        # consertar pré-requisito faltante, e sem isso o conserto exigiria
+        # UPDATE à mão em cada ambiente. Só preenche quando está nulo —
+        # lotação escolhida por alguém não é sobrescrita.
+        usuario.id_unidade_trabalho = unidade.id
         await db.flush()
 
     # 4. Grupo SU + vínculo
@@ -533,6 +548,7 @@ async def seed(db: AsyncSession) -> dict:
         "tenant_id": tenant_id,
         "usuario_id": usuario.id,
         "is_super": True,
+        "unidade_lotacao_id": usuario.id_unidade_trabalho,
         "vinculos_sistema": vinculos_sistema,
         "modulos": resultado_modulos,
         "modulos_contratados": contratados,
