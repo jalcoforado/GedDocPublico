@@ -149,10 +149,19 @@ async def test_seed_bootstrap_lota_o_admin_na_unidade_padrao():
     **O que este teste NÃO prova.** Medido por inversão em 2026-11-24: ele
     passa mesmo com a correção desfeita, porque o admin já existe no banco
     COM lotação e o ramo `usuario is None` (criação) só ocorre em banco
-    virgem. Aqui ele vale como asserção de estado — admin lotado, na unidade
-    de sigla `PG`. Quem reprova a regressão é
+    virgem. Aqui ele vale como asserção de estado — admin lotado, e a unidade
+    padrão existente. Quem reprova a regressão é
     `test_seed_bootstrap_repara_admin_que_ja_existe_sem_lotacao`, que inverte
     o estado antes de exigir o conserto.
+
+    **Por que ele não exige que a lotação SEJA a unidade `PG`.** A primeira
+    versão exigia, e reprovou no CI com `assert 'PMS' == 'PG'`: lá o
+    `ci/seed-e2e.sql` insere `admin@local.test` já lotado na unidade `PMS`
+    (id 3), e o seed — corretamente — não sobrescreve lotação existente, como
+    `test_seed_bootstrap_nao_sobrescreve_lotacao_escolhida` exige. A asserção
+    contradizia a própria regra. Em que unidade o admin está depende de qual
+    banco e de quais testes correram antes; o que o seed garante é o par
+    "admin lotado" + "unidade padrão existe", e é isso que se afirma aqui.
     """
     async with SessionLocal() as db:
         res = await seed(db)
@@ -166,20 +175,28 @@ async def test_seed_bootstrap_lota_o_admin_na_unidade_padrao():
         res["unidade_lotacao_id"]
     )
 
-    # A unidade é a MESMA chave natural do provisionamento (sigla PG) — duas
-    # unidades "padrão" diferentes por caminho de criação seria pior do que
-    # nenhuma.
+    # A unidade padrão do seed usa a MESMA chave natural do provisionamento
+    # (sigla PG) — duas unidades "padrão" diferentes por caminho de criação
+    # seria pior do que nenhuma. Afirmação sobre a unidade, não sobre onde o
+    # admin está lotado: ele pode ter sido movido antes (ver docstring).
     async with SessionLocal() as db:
         await db.execute(
             text("SET LOCAL app.tenant_id = '%d'" % res["tenant_id"])
         )
-        sigla = (
+        padrao = (
             await db.execute(
-                text("SELECT sigla FROM utils.unidade_trabalho WHERE id = :uid"),
-                {"uid": res["unidade_lotacao_id"]},
+                text(
+                    "SELECT id FROM utils.unidade_trabalho "
+                    "WHERE tenant_id = :tid AND sigla = :sigla "
+                    "AND excluido = false"
+                ),
+                {"tid": res["tenant_id"], "sigla": UNIDADE_SIGLA},
             )
         ).scalar()
-    assert sigla == UNIDADE_SIGLA
+    assert padrao is not None, (
+        f"o seed deve garantir a unidade padrão de sigla {UNIDADE_SIGLA} — "
+        "é nela que o admin de banco virgem nasce lotado"
+    )
 
 
 @pytest.mark.asyncio
@@ -199,6 +216,8 @@ async def test_seed_bootstrap_repara_admin_que_ja_existe_sem_lotacao():
         await db.commit()
     usuario_id, tenant_id = res["usuario_id"], res["tenant_id"]
 
+    lotacao_original = res["unidade_lotacao_id"]
+
     async with SessionLocal() as db:
         await db.execute(text("SET LOCAL app.tenant_id = '%d'" % tenant_id))
         await db.execute(
@@ -213,14 +232,32 @@ async def test_seed_bootstrap_repara_admin_que_ja_existe_sem_lotacao():
         "a inversão não surtiu efeito — o teste não exercitaria o reparo"
     )
 
-    async with SessionLocal() as db:
-        res2 = await seed(db)
-        await db.commit()
+    try:
+        async with SessionLocal() as db:
+            res2 = await seed(db)
+            await db.commit()
 
-    assert res2["unidade_lotacao_id"] is not None
-    assert await _lotacao_no_banco(usuario_id, tenant_id) is not None, (
-        "o seed deve repor a lotação do admin que já existe"
-    )
+        assert res2["unidade_lotacao_id"] is not None
+        assert await _lotacao_no_banco(usuario_id, tenant_id) is not None, (
+            "o seed deve repor a lotação do admin que já existe"
+        )
+    finally:
+        # O reparo repõe a lotação na unidade PADRÃO, que no CI não é a de
+        # origem (`PMS`, do `ci/seed-e2e.sql`). Sem devolver, este teste
+        # MOVE o admin compartilhado pelo resto da suíte — efeito colateral
+        # silencioso, que depende da ordem dos arquivos.
+        async with SessionLocal() as db:
+            await db.execute(
+                text("SET LOCAL app.tenant_id = '%d'" % tenant_id)
+            )
+            await db.execute(
+                text(
+                    "UPDATE utils.usuario SET id_unidade_trabalho = :un "
+                    "WHERE id = :uid"
+                ),
+                {"un": lotacao_original, "uid": usuario_id},
+            )
+            await db.commit()
 
 
 @pytest.mark.asyncio
