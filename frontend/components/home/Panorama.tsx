@@ -124,7 +124,7 @@ export function Panorama({ acesso }: { acesso: AcessoPanorama }) {
           <QuadroGrafico
             pergunta="Para onde vai o dinheiro?"
             resposta="Despesas por natureza nos últimos 12 meses."
-            acao={{ href: "/m/pagamentos/dashboard", label: "Financeiro" }}
+            acao={{ href: "/m/pagamentos/dashboard", label: "Despesa" }}
           >
             {pagQ.isLoading ? (
               <Esqueleto altura="h-56" />

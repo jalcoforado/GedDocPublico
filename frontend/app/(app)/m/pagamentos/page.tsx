@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 
 import { fmtData, fmtMoeda } from "@/components/pagamentos/format";
 import { NavVisaoFinanceiro } from "@/components/pagamentos/NavVisaoFinanceiro";
+import { PanoramaVisaoGeral } from "@/components/pagamentos/PanoramaVisaoGeral";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -267,7 +268,7 @@ export default function PagamentosHomePage() {
       <PageHeader
         icon={Inbox}
         title="Visão geral"
-        description="O que espera por você em Pagamentos, do pedido ao pagamento."
+        description="O que espera por você em Despesa, do pedido ao pagamento."
         actions={
           <Button asChild variant="secondary">
             <Link href="/m/pagamentos/fluxo">
@@ -278,6 +279,11 @@ export default function PagamentosHomePage() {
         }
       />
       <NavVisaoFinanceiro />
+
+      {/* Os gráficos vêm ANTES das filas de propósito: quem abre esta tela
+          quer saber "como está" em dois segundos, e as filas logo abaixo
+          dizem "o que me cabe fazer". */}
+      <PanoramaVisaoGeral />
 
       {!fila ? (
         <div role="status" className="space-y-6 animate-aparece-depois motion-reduce:animate-none">

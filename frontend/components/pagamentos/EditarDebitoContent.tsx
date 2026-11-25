@@ -31,7 +31,7 @@ export function EditarDebitoContent({ id }: { id: number }) {
   });
   const detalhe = `/m/pagamentos/solicitacoes/${id}`;
   const breadcrumbs = [
-    { label: "Pagamentos", href: "/m/pagamentos" },
+    { label: "Despesa", href: "/m/pagamentos" },
     { label: "Solicitações", href: "/m/pagamentos/solicitacoes" },
     { label: `Solicitação #${id}`, href: detalhe },
   ];

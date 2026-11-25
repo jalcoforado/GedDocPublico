@@ -706,7 +706,7 @@ export function DetalheDebitoContent({ id }: { id: number }) {
   });
 
   const breadcrumbs = [
-    { label: "Pagamentos", href: "/m/pagamentos" },
+    { label: "Despesa", href: "/m/pagamentos" },
     { label: "Solicitações", href: "/m/pagamentos/solicitacoes" },
   ];
 

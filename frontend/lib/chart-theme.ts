@@ -30,6 +30,13 @@ export const GRAFICO = {
   positivo: "hsl(var(--success))",
   negativo: "hsl(var(--danger))",
   alerta: "hsl(var(--warning))",
+  /**
+   * Parcela que existe mas está fora de alcance — recurso bloqueado,
+   * indisponível, fora do período. Cinza de propósito: não é bom nem ruim,
+   * e pintá-lo de cor forte faria competir por atenção com o que o gestor
+   * precisa decidir. Segue o tema escuro como os demais.
+   */
+  neutro: "hsl(var(--foreground-subtle))",
   grade: "hsl(var(--border))",
   eixo: "hsl(var(--foreground-subtle))",
   texto: "hsl(var(--foreground))",

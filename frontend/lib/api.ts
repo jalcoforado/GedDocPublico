@@ -2395,6 +2395,9 @@ export interface FluxoMensalItem {
 
 export interface ComposicaoItem {
   codigo: string; descricao: string; valor: string;
+  /** Id da dimensão — a barra só é clicável quando ele existe. Nulo na linha
+   *  agregada ("Outras"), que junta várias dimensões. */
+  id?: number | null;
 }
 
 export interface DebitoResumoItem {
@@ -2421,13 +2424,261 @@ export interface DashboardAlertas {
   contas_abaixo_minimo: ContaAlertaItem[];
 }
 
+export interface EtapaValorItem {
+  chave: string;
+  rotulo: string;
+  qtd: number;
+  /** O valor é o que a contagem não diz. */
+  valor: string | number;
+}
+
+export interface EnvelhecimentoItem {
+  faixa: string;
+  qtd: number;
+  valor: string | number;
+}
+
+export interface FluxoSemanalItem {
+  semana: string;
+  rotulo: string;
+  entraram: number;
+  autorizadas: number;
+}
+
+export interface PanoramaVisaoGeral {
+  etapas: EtapaValorItem[];
+  envelhecimento: EnvelhecimentoItem[];
+  fluxo_semanal: FluxoSemanalItem[];
+  em_curso_qtd: number;
+  em_curso_valor: string | number;
+  mais_antigo_dias: number;
+  apurado_em?: string | null;
+}
+
+export interface DotacaoOut {
+  id: number;
+  exercicio: number;
+  id_unidade: number;
+  nome_unidade: string;
+  funcao: string;
+  subfuncao: string;
+  programa: string;
+  acao: string;
+  natureza_codigo: string;
+  grupo_despesa: string;
+  id_fonte_recursos: number;
+  codigo_fonte: string;
+  descricao: string;
+  valor_inicial: string | number;
+  ativa: boolean;
+}
+
+export interface CreditoOut {
+  id: number;
+  id_dotacao: number;
+  tipo: string;
+  valor: string | number;
+  data: string;
+  ato: string;
+  justificativa?: string | null;
+  criado_em: string;
+}
+
+export interface PosicaoDotacaoItem {
+  id_dotacao: number;
+  exercicio: number;
+  descricao: string;
+  nome_unidade: string;
+  funcao: string;
+  programa: string;
+  natureza_codigo: string;
+  codigo_fonte: string;
+  valor_inicial: string | number;
+  creditos: string | number;
+  dotacao_atualizada: string | number;
+  empenhado: string | number;
+  disponivel: string | number;
+  execucao_pct: number;
+  despesas_com_retorno: number;
+  /** Execução baixa pode ser "gastou pouco" ou "o retorno não chegou". */
+  despesas_sem_retorno: number;
+  estourada: boolean;
+}
+
+export interface ExecucaoOrcamentaria {
+  exercicio?: number | null;
+  qtd_dotacoes: number;
+  dotacao_inicial: string | number;
+  creditos: string | number;
+  dotacao_atualizada: string | number;
+  empenhado: string | number;
+  disponivel: string | number;
+  execucao_pct: number;
+  dotacoes_estouradas: number;
+  despesas_sem_retorno: number;
+  /** Despesa paga sem dotação: contada, nunca rateada. */
+  despesas_sem_dotacao_qtd: number;
+  despesas_sem_dotacao_valor: string | number;
+  itens: PosicaoDotacaoItem[];
+  apurado_em?: string | null;
+}
+
+/** Ficha do catálogo de indicadores. `disponivel: false` significa que o
+ *  conceito é pedido pela gestão pública e NÃO existe no sistema — com o
+ *  motivo em `restricoes`. */
+export interface IndicadorCatalogo {
+  codigo: string;
+  nome: string;
+  grupo: string;
+  definicao: string;
+  formula: string;
+  fonte: string;
+  granularidade: string;
+  periodicidade: string;
+  restricoes: string;
+  nao_confundir: string;
+  disponivel: boolean;
+}
+
+export type SeveridadeAlerta = "CRITICO" | "ALTO" | "MEDIO" | "INFORMATIVO";
+
+export interface AlertaItem {
+  codigo: string;
+  severidade: SeveridadeAlerta;
+  titulo: string;
+  descricao: string;
+  impacto_valor?: string | number | null;
+  impacto_qtd?: number | null;
+  escopo?: string | null;
+  /** De onde saiu o número — para quem quiser conferir sem perguntar. */
+  origem: string;
+  acao: string;
+  href?: string | null;
+}
+
+export interface Alertas {
+  itens: AlertaItem[];
+  criticos: number;
+  altos: number;
+  medios: number;
+  informativos: number;
+  apurado_em?: string | null;
+}
+
+export interface PrevisaoHorizonteItem {
+  dias: number;
+  ate: string;
+  vence_acumulado: string | number;
+  vence_na_janela: string | number;
+  qtd_parcelas: number;
+  saldo_projetado: string | number;
+  suficiente: boolean;
+}
+
+export interface PrevisaoContaRisco {
+  id_conta: number;
+  nome: string;
+  saldo_atual: string | number;
+  vence_no_horizonte: string | number;
+  qtd_parcelas: number;
+  saldo_projetado: string | number;
+  falta: string | number;
+}
+
+/** Projeção de saída. `considera_receita` é sempre false: não há módulo de
+ *  receita, e a tela precisa dizer isso. */
+export interface PrevisaoFinanceira {
+  saldo_atual: string | number;
+  bloqueado: string | number;
+  base_projecao: string | number;
+  vencidas_valor: string | number;
+  vencidas_qtd: number;
+  horizontes: PrevisaoHorizonteItem[];
+  contas_em_risco: PrevisaoContaRisco[];
+  considera_receita: boolean;
+  apurado_em?: string | null;
+}
+
+export interface ImpactoFonteItem {
+  id_fonte: number;
+  codigo: string;
+  descricao: string;
+  qtd_debitos: number;
+  pendente: string | number;
+  disponivel_antes: string | number;
+  disponivel_depois: string | number;
+  suficiente: boolean;
+  falta: string | number;
+}
+
+export interface ImpactoUnidadeItem {
+  sigla: string;
+  nome: string;
+  valor: string | number;
+  qtd_debitos: number;
+}
+
+/** Impacto de autorizar as despesas pendentes. A leitura que decide é a da
+ *  FONTE: o débito só pode ser pago por conta da própria fonte. */
+export interface ImpactoAutorizacoes {
+  qtd_debitos: number;
+  total_pendente: string | number;
+  disponivel_total: string | number;
+  disponivel_total_depois: string | number;
+  fontes: ImpactoFonteItem[];
+  fontes_insuficientes: number;
+  por_unidade: ImpactoUnidadeItem[];
+  apurado_em?: string | null;
+}
+
+export interface ContaDisponibilidadeItem {
+  id_conta: number;
+  nome: string;
+  banco: string;
+  grupo_despesa: string;
+  fonte_codigo?: string | null;
+  fonte_descricao?: string | null;
+  /** Nulo quando a prefeitura não classificou a fonte — ver insight do painel. */
+  fonte_vinculacao?: string | null;
+  finalidade?: string | null;
+  saldo_atual: string | number;
+  /** Pode ser NEGATIVO quando comprometido + bloqueado passa do saldo. */
+  disponivel: string | number;
+  comprometido: string | number;
+  bloqueado: string | number;
+  insuficiencia?: string | number;
+  abaixo_minimo?: boolean;
+}
+
+/** Dimensões pelas quais o painel recorta a despesa paga. Só entram as que o
+ *  débito carrega de verdade — filtrar por algo inferido erraria o número. */
+export type DimensaoDespesa = "unidade" | "fornecedor" | "contrato" | "natureza" | "fonte";
+
+export type FiltrosDespesa = Partial<Record<DimensaoDespesa, number>>;
+
 export interface PagamentosDashboard {
   kpis: DashboardKpis;
   fluxo_mensal: FluxoMensalItem[];
   por_natureza: ComposicaoItem[];
   por_fonte: ComposicaoItem[];
+  /** Painel executivo: secretaria, fornecedor e contrato — as três dimensões
+   * que o gestor pergunta primeiro. Opcionais porque o backend as devolve
+   * vazias quando não há pagamento no período, e para não quebrar quem
+   * consome uma versão anterior da resposta. */
+  por_secretaria?: ComposicaoItem[];
+  top_fornecedores?: ComposicaoItem[];
+  top_contratos?: ComposicaoItem[];
+  /** Onde o dinheiro está e quanto dele é livre, conta a conta. */
+  disponibilidade_contas?: ContaDisponibilidadeItem[];
   maiores_debitos: DebitoResumoItem[];
   alertas: DashboardAlertas;
+  /** Procedência do número: desde quando os gráficos contam, e o instante da apuração. */
+  periodo_inicio?: string | null;
+  apurado_em?: string | null;
+  /** Recorte ativo e o total pago dentro dele. Os KPIs de saldo NÃO são
+   *  recortados: saldo é da conta bancária, não da secretaria. */
+  filtros_ativos?: FiltrosDespesa;
+  total_filtrado?: string | number | null;
 }
 
 export interface MinutaCreateInput {
@@ -5223,6 +5474,33 @@ export const api = {
         request<Parcela>(`/pagamentos/parcelas/${id}/revogar-liberacao`, {
           method: "POST", body: JSON.stringify({ justificativa }) }),
     },
+    autorizacao: {
+      /** Impacto no caixa de autorizar o que está pendente. Só leitura. */
+      impacto: () =>
+        request<ImpactoAutorizacoes>("/pagamentos/autorizacao/impacto"),
+    },
+    /** Valor parado por etapa, envelhecimento da fila e ritmo semanal. */
+    panorama: () => request<PanoramaVisaoGeral>("/pagamentos/panorama"),
+    /** Projeção de SAÍDA em 7/15/30/60/90 dias. Não inclui receita. */
+    previsao: () => request<PrevisaoFinanceira>("/pagamentos/previsao"),
+    /** Alertas gerenciais com impacto, origem e ação. */
+    alertas: () => request<Alertas>("/pagamentos/alertas"),
+    /** Catálogo formal dos indicadores. Fonte única das definições. */
+    catalogoIndicadores: () =>
+      request<IndicadorCatalogo[]>("/pagamentos/catalogo-indicadores"),
+    orcamento: {
+      execucao: (exercicio?: number) =>
+        request<ExecucaoOrcamentaria>(
+          `/pagamentos/orcamento/execucao${qs({ exercicio })}`),
+      dotacoes: (exercicio?: number) =>
+        request<DotacaoOut[]>(`/pagamentos/orcamento/dotacoes${qs({ exercicio })}`),
+      criarDotacao: (data: Record<string, unknown>) =>
+        request<DotacaoOut>("/pagamentos/orcamento/dotacoes", {
+          method: "POST", body: JSON.stringify(data) }),
+      lancarCredito: (data: Record<string, unknown>) =>
+        request<CreditoOut>("/pagamentos/orcamento/creditos", {
+          method: "POST", body: JSON.stringify(data) }),
+    },
     filas: {
       autorizacao: () =>
         request<FilaAutorizacaoFonteGrupo[]>("/pagamentos/autorizacao/fila"),
@@ -5297,8 +5575,8 @@ export const api = {
         categoria: filtros?.categoria, exercicio: filtros?.exercicio,
         incluir_concluidas: filtros?.incluir_concluidas,
       })}`),
-    dashboard: (meses = 12) =>
-      request<PagamentosDashboard>(`/pagamentos/dashboard${qs({ meses })}`),
+    dashboard: (meses = 12, filtros: FiltrosDespesa = {}) =>
+      request<PagamentosDashboard>(`/pagamentos/dashboard${qs({ meses, ...filtros })}`),
   },
 
   // Fase 3

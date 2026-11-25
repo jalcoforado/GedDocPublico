@@ -117,7 +117,7 @@ export default function SolicitacoesPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        breadcrumbs={[{ label: "Pagamentos", href: "/m/pagamentos" }]}
+        breadcrumbs={[{ label: "Despesa", href: "/m/pagamentos" }]}
         title="Solicitações de pagamento"
         description="Acompanhe cada solicitação pelas etapas de aprovação, do rascunho à autorização."
         icon={ClipboardList}

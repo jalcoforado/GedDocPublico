@@ -114,7 +114,7 @@ export default function IntegracoesPage() {
       <PageHeader
         icon={KeyRound}
         breadcrumbs={[
-          { label: "Pagamentos", href: "/m/pagamentos" },
+          { label: "Despesa", href: "/m/pagamentos" },
           { label: "Cadastros e controle", href: "/m/pagamentos/cadastros" },
           { label: "Sistemas integrados" },
         ]}

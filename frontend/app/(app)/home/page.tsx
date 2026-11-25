@@ -345,7 +345,7 @@ function CartaoPagamentos({ faixa }: { faixa: boolean }) {
   const k = q.data?.kpis;
   return (
     <Cartao
-      titulo="Pagamentos"
+      titulo="Despesa"
       icone={Banknote}
       href={MENUS.pagamentos.raiz}
       carregando={q.isLoading}

@@ -108,7 +108,7 @@ export default function AuditoriaPagamentosPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        breadcrumbs={[{ label: "Pagamentos", href: "/m/pagamentos" }]}
+        breadcrumbs={[{ label: "Despesa", href: "/m/pagamentos" }]}
         title="Trilha de auditoria"
         description="Quem autorizou, liberou, pagou, estornou ou conciliou — e quando. O registro não pode ser alterado."
         icon={ScrollText}

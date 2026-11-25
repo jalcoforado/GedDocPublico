@@ -1,6 +1,6 @@
 "use client";
 
-import { LucideIcon, Minus, TrendingDown, TrendingUp } from "lucide-react";
+import { Info, LucideIcon, Minus, TrendingDown, TrendingUp } from "lucide-react";
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
@@ -42,6 +42,16 @@ interface KpiCardProps {
   label: string;
   value: React.ReactNode;
   hint?: React.ReactNode;
+  /**
+   * O que este número significa e de onde ele vem. Opcional: nenhum card
+   * existente muda de aparência por causa disto.
+   *
+   * Existe porque um painel executivo sem definição vira discussão — dois
+   * gestores leem "comprometido" de dois jeitos e a reunião trava no que o
+   * número quer dizer, em vez do que fazer com ele. O texto também vai para
+   * leitor de tela, não só para o `title` do mouse.
+   */
+  definicao?: string;
   icon?: LucideIcon;
   intent?: Intent;
   /** Para tendência: valor atual e anterior, e flag se queda é boa. */
@@ -124,6 +134,7 @@ export function KpiCard({
   label,
   value,
   hint,
+  definicao,
   icon: Icon,
   intent = "default",
   current,
@@ -153,6 +164,20 @@ export function KpiCard({
           <span className="text-[11px] font-medium uppercase tracking-wider text-foreground-muted">
             {label}
           </span>
+          {definicao && (
+            <>
+              {/* Ícone não-focável (não cria parada de Tab numa grade de 8
+                  cards); quem usa leitor de tela recebe o texto pelo
+                  `sr-only` logo abaixo, que é lido junto com o rótulo. */}
+              <span title={definicao} className="inline-flex">
+                <Info
+                  className="h-3.5 w-3.5 shrink-0 text-foreground-subtle"
+                  aria-hidden="true"
+                />
+              </span>
+              <span className="sr-only">{definicao}</span>
+            </>
+          )}
           <TrendBadge delta={delta} lowerIsBetter={lowerIsBetter} />
         </div>
         {Icon && (
