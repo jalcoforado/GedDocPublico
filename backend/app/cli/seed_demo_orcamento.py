@@ -12,6 +12,10 @@ só o caso feliz — é justamente neles que o painel prova que não inventa nú
    número final.
 4. Despesa **sem dotação** — contada à parte, nunca rateada.
 
+Os valores foram dimensionados para cobrir o volume que o `seed_demo_historico`
+gera num ano (~R$ 7,3 mi): orçamento menor que a despesa executada deixaria
+quase tudo "sem dotação" e passaria a impressão errada numa demonstração.
+
 Idempotente: identifica as dotações pelo prefixo DEMO na ação e não duplica.
 Os valores são fictícios e o texto da descrição diz isso.
 
@@ -37,22 +41,22 @@ MARCA = "DEMO-ORC"
 # (sufixo da ação, função, subfunção, programa, descrição, valor inicial, código da fonte)
 _DOTACOES = [
     ("2001", "10", "301", "0012", "Manutenção da Atenção Básica (demonstração)",
-     "900000.00", "DEMO-1600"),
+     "3000000.00", "DEMO-1600"),
     ("2002", "12", "361", "0020", "Manutenção do Ensino Fundamental (demonstração)",
-     "1200000.00", "DEMO-1540"),
+     "4000000.00", "DEMO-1540"),
     ("2003", "04", "122", "0001", "Manutenção da Administração Geral (demonstração)",
-     "600000.00", "DEMO-1500"),
+     "2000000.00", "DEMO-1500"),
     ("2004", "15", "452", "0033", "Limpeza Urbana e Serviços Continuados (demonstração)",
-     "300000.00", "DEMO-1500"),
+     "1000000.00", "DEMO-1500"),
     ("2005", "08", "244", "0041", "Proteção Social Básica (demonstração)",
-     "150000.00", "DEMO-1500"),
+     "500000.00", "DEMO-1500"),
 ]
 
 # Créditos: uma suplementação e uma anulação, para a dotação atualizada
 # diferir da inicial e a conta ficar visível na tela.
 _CREDITOS = [
-    ("2001", "SUPLEMENTAR", "150000.00", "Decreto 045/2026 (demonstração)"),
-    ("2003", "ANULACAO", "80000.00", "Decreto 046/2026 (demonstração)"),
+    ("2001", "SUPLEMENTAR", "450000.00", "Decreto 045/2026 (demonstração)"),
+    ("2003", "ANULACAO", "250000.00", "Decreto 046/2026 (demonstração)"),
 ]
 
 
@@ -144,7 +148,7 @@ async def aplicar(tenant_id: int) -> dict:
             alvo = debitos[0]
             alvo.id_dotacao = pequena.id
             alvo.exercicio = 2026
-            alvo.valor_empenhado = Decimal("200000.00")
+            alvo.valor_empenhado = Decimal("700000.00")  # acima da dotação 2005 (500 mil)
             alvo.revisado = True
         await s.commit()
 
