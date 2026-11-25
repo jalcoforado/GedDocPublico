@@ -95,7 +95,7 @@ de uma chave de idempotência antiga.
 
 ```bash
 curl -X POST https://<tenant>.<host>/api/v2/integracao/pagamentos/debitos \
-  -H "X-Api-Key: apy_ab12cd34.6f1e9c...segredo" \
+  -H "X-Api-Key: <prefixo>.<segredo>" \
   -H "Idempotency-Key: 8f14e45f-ceea-4f1a-8c8e-0a1b2c3d4e5f" \
   -H "Content-Type: application/json" \
   -d '{
@@ -129,7 +129,7 @@ acontecer no fluxo normal — a resposta é **409**.
 
 ```bash
 curl -X POST https://<tenant>.<host>/api/v2/integracao/pagamentos/debitos/42/liquidar \
-  -H "X-Api-Key: apy_ab12cd34.6f1e9c...segredo" \
+  -H "X-Api-Key: <prefixo>.<segredo>" \
   -H "Idempotency-Key: 3b6a9f2e-1111-4c22-9999-abcdef012345" \
   -H "Content-Type: application/json" \
   -d '{"valor_liquidado": "980.00"}'
@@ -163,7 +163,7 @@ dá certo pela tela administrativa.
 
 ```bash
 curl -X POST https://<tenant>.<host>/api/v2/integracao/pagamentos/debitos/42/empenho \
-  -H "X-Api-Key: apy_ab12cd34.6f1e9c...segredo" \
+  -H "X-Api-Key: <prefixo>.<segredo>" \
   -H "Idempotency-Key: 7c2b1a44-2222-4d33-8888-0123456789ab" \
   -H "Content-Type: application/json" \
   -d '{"valor_empenhado": "980.00", "numero_ne": "2026NE000123"}'
@@ -231,7 +231,7 @@ usa `criado_em`).
 CURSOR=""
 while :; do
   RESP=$(curl -s "https://<tenant>.<host>/api/v2/integracao/pagamentos/debitos?limite=100&alterado_desde=2026-08-01T00:00:00${CURSOR:+&cursor=$CURSOR}" \
-    -H "X-Api-Key: apy_ab12cd34.6f1e9c...segredo")
+    -H "X-Api-Key: <prefixo>.<segredo>")
   echo "$RESP" | jq -c '.items[]'
   CURSOR=$(echo "$RESP" | jq -r '.proximo_cursor')
   [ "$CURSOR" = "null" ] && break
