@@ -129,7 +129,7 @@ export default function ExcecoesPagamentosPage() {
   return (
     <div className="space-y-4">
       <PageHeader
-        breadcrumbs={[{ label: "Pagamentos", href: "/m/pagamentos" }]}
+        breadcrumbs={[{ label: "Despesa", href: "/m/pagamentos" }]}
         title="Exceções"
         description="Situações do módulo de pagamentos que pedem conferência. É uma foto do momento da consulta."
         icon={ShieldAlert}

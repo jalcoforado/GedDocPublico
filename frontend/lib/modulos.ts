@@ -99,7 +99,7 @@ export const ICONES_MODULO: Record<string, React.ComponentType<{ className?: str
  */
 export const NOME_MODULO: Record<string, string> = {
   protocolo: "Protocolo",
-  pagamentos: "Pagamentos",
+  pagamentos: "Despesa",
   frota: "Frota",
   transporte: "Transporte Regulado",
   administracao: "Administração",

@@ -10,7 +10,7 @@ export default function NovasolicitacaoPage() {
     <div className="space-y-6">
       <PageHeader
         breadcrumbs={[
-          { label: "Pagamentos", href: "/m/pagamentos" },
+          { label: "Despesa", href: "/m/pagamentos" },
           { label: "Solicitações", href: "/m/pagamentos/solicitacoes" },
         ]}
         title="Nova solicitação de pagamento"

@@ -74,7 +74,7 @@ export default function ExportContabilPage() {
       <PageHeader
         icon={FileSpreadsheet}
         breadcrumbs={[
-          { label: "Pagamentos", href: "/m/pagamentos" },
+          { label: "Despesa", href: "/m/pagamentos" },
           { label: "Export contábil" },
         ]}
         title="Export contábil"

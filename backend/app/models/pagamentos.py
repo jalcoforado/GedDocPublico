@@ -207,12 +207,79 @@ class Debito(Base):
     # Liquidação (v2.0 RF-VAL-02/RN-01) — guarda antes de autorizar.
     liquidacao_confirmada: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     data_liquidacao: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Retorno do sistema financeiro (migration 0144). NULL ≠ zero: NULL é "ainda
+    # não voltou". Não entram no cálculo de saldo — `comprometido_conta` segue
+    # olhando parcela em aberto de débito AUTORIZADO, não empenho.
+    valor_empenhado: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    # Orçamento (0146). NULO em toda despesa anterior ao orçamento e em quem
+    # não classificar: despesa sem dotação não entra na execução orçamentária,
+    # e o painel diz quanto do pago está nessa situação em vez de ratear.
+    id_dotacao: Mapped[int | None] = mapped_column(
+        ForeignKey("pagamentos.dotacao.id"), nullable=True)
+    exercicio: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    valor_liquidado: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    # True quando os valores vieram do retorno; a edição material do débito
+    # derruba para False, para a divergência aparecer em vez de passar calada.
+    revisado: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Categoria da fila cronológica (F3, migration 0108) — só usada quando o
     # débito NÃO tem contrato; com contrato, `categoria_do_debito` usa a do
     # contrato e esta coluna fica None.
     categoria: Mapped[str | None] = mapped_column(String(20), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class Dotacao(Base):
+    """Dotação orçamentária de um exercício (0146).
+
+    A classificação funcional-programática mora em colunas, não em tabelas de
+    catálogo: a prefeitura importa a classificação pronta do sistema
+    orçamentário, e seis cadastros à mão não se manteriam. O valor ATUALIZADO
+    não é coluna — é `valor_inicial + Σ créditos`, derivado na hora
+    (`pagamentos_orcamento.posicao_dotacao`).
+    """
+    __tablename__ = "dotacao"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    exercicio: Mapped[int] = mapped_column(Integer, nullable=False)
+    id_unidade: Mapped[int] = mapped_column(ForeignKey("utils.unidade_trabalho.id"), nullable=False)
+    funcao: Mapped[str] = mapped_column(String(10), nullable=False)
+    subfuncao: Mapped[str] = mapped_column(String(10), nullable=False)
+    programa: Mapped[str] = mapped_column(String(20), nullable=False)
+    acao: Mapped[str] = mapped_column(String(20), nullable=False)
+    natureza_codigo: Mapped[str] = mapped_column(String(20), nullable=False)
+    grupo_despesa: Mapped[str] = mapped_column(String(20), nullable=False)
+    id_fonte_recursos: Mapped[int] = mapped_column(
+        ForeignKey("pagamentos.fonte_recursos.id"), nullable=False)
+    descricao: Mapped[str] = mapped_column(String(255), nullable=False)
+    valor_inicial: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    ativa: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class CreditoAdicional(Base):
+    """Suplementação, crédito especial/extraordinário e anulação (0146).
+
+    `valor` é SEMPRE positivo; quem decide o sinal é o `tipo`. Valor negativo
+    gravado por engano viraria suplementação que diminui a dotação, e ninguém
+    olha duas vezes para um número positivo numa soma.
+    """
+    __tablename__ = "credito_adicional"
+    __table_args__ = {"schema": "pagamentos"}
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("aprimora_py.tenant.id"), nullable=False)
+    id_dotacao: Mapped[int] = mapped_column(ForeignKey("pagamentos.dotacao.id"), nullable=False)
+    tipo: Mapped[str] = mapped_column(String(20), nullable=False)
+    valor: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    data: Mapped[date] = mapped_column(Date, nullable=False)
+    ato: Mapped[str] = mapped_column(String(120), nullable=False)
+    justificativa: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    id_usuario: Mapped[int | None] = mapped_column(ForeignKey("utils.usuario.id"), nullable=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 

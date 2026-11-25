@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import { MENUS, menuDoModulo } from "@/lib/menus";
+import { PERMS_LEITURA_PAGAMENTOS } from "@/lib/menus/pagamentos";
 import type { NavItem } from "@/lib/menus/tipos";
 import { moduloDoPathname } from "@/lib/modulos";
 
@@ -117,6 +118,16 @@ const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> 
     anyOf: ["pagamento_pagar", "pagamento_autorizar", "pagamento_auditar", "pagamento_cadastro"],
   },
   "/m/pagamentos/caixa": { perm: "pagamento_cadastro" },
+  // Previsão financeira (fatia 5): leitura ampla, espelhando o router
+  // (`require_any_permission(*PERMS_LEITURA)`) — saber se o caixa aguenta os
+  // próximos vencimentos não é privilégio de quem autoriza.
+  "/m/pagamentos/previsao": { anyOf: PERMS_LEITURA_PAGAMENTOS },
+  // Central de alertas (fatia 6): mesma leitura ampla da previsão.
+  "/m/pagamentos/alertas": { anyOf: PERMS_LEITURA_PAGAMENTOS },
+  // Catálogo de indicadores (fatia 7): definições são leitura de todos.
+  "/m/pagamentos/catalogo": { anyOf: PERMS_LEITURA_PAGAMENTOS },
+  // Execução orçamentária (O1): leitura ampla, como as demais visões.
+  "/m/pagamentos/orcamento": { anyOf: PERMS_LEITURA_PAGAMENTOS },
   "/m/pagamentos/excecoes": {
     anyOf: ["pagamento_solicitar", "pagamento_gerir", "pagamento_validar",
             "pagamento_autorizar", "pagamento_pagar", "pagamento_auditar",
@@ -209,7 +220,7 @@ describe("split dos menus", () => {
       protocolo: ["Processos", "Fluxo e prazos", "Gestão documental", "Cadastros"],
       frota: ["Frota"],
       transporte: ["Transporte Regulado"],
-      pagamentos: ["Pagamentos", "Controle", "Cadastros"],
+      pagamentos: ["Despesa", "Controle", "Cadastros"],
       administracao: ["Administração"],
     };
     for (const [slug, menu] of Object.entries(MENUS)) {

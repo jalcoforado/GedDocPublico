@@ -24,6 +24,16 @@ from pydantic import BaseModel, Field
 
 from ..schemas.common import Paginated
 from ..schemas.pagamentos import (
+    PanoramaVisaoGeralOut,
+    CreditoCreate,
+    CreditoOut,
+    DotacaoCreate,
+    DotacaoOut,
+    ExecucaoOrcamentariaOut,
+    IndicadorCatalogo,
+    AlertasOut,
+    PrevisaoFinanceiraOut,
+    ImpactoAutorizacoesOut,
     AnexoDebitoOut, AutoridadeAprovarIn, AutorizarLoteIn, ContaElegivelOut, DashboardOut, DebitoCreate, DebitoDetalheOut,
     DebitoHistoricoOut, DebitoOut, DebitoUpdate, DecisaoIn, DecisaoJustificadaIn,
     ExcecaoCronologicaIn, ExcecaoCronologicaOut, FichaFonteOut,
@@ -45,6 +55,11 @@ from ..services import pagamentos_estados as est
 from ..services import pagamentos_excecoes as excecoes
 from ..services import pagamentos_export as export
 from ..services import pagamentos_filas as filas
+from ..services import pagamentos_alertas as alertas
+from ..services import pagamentos_catalogo as catalogo
+from ..services import pagamentos_orcamento as orc
+from ..services import pagamentos_panorama as panorama
+from ..services import pagamentos_previsao as previsao
 from ..services import pagamentos_notificacoes as notif
 from ..services import audit
 from ..services.anexos import AnexoError
@@ -889,6 +904,94 @@ async def fila_autorizacao(_: Usuario = Depends(require_permission("pagamento_au
     return await filas.fila_autorizacao(db, tenant_id=tenant_id)
 
 
+@operacoes_router.get("/panorama", response_model=PanoramaVisaoGeralOut)
+async def panorama_visao_geral(_: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                               tenant_id: int = Depends(require_tenant_id),
+                               db: AsyncSession = Depends(get_db)):
+    """Valor parado por etapa, envelhecimento da fila e ritmo semanal."""
+    return await panorama.montar_panorama(db, tenant_id=tenant_id)
+
+
+@operacoes_router.get("/orcamento/execucao", response_model=ExecucaoOrcamentariaOut)
+async def execucao_orcamentaria(exercicio: int | None = None,
+                                _: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                                tenant_id: int = Depends(require_tenant_id),
+                                db: AsyncSession = Depends(get_db)):
+    """Execução orçamentária do exercício: dotação, créditos, empenhado e
+    disponível, por dotação e consolidado. Só leitura."""
+    return await orc.execucao_orcamentaria(db, tenant_id=tenant_id, exercicio=exercicio)
+
+
+@operacoes_router.get("/orcamento/dotacoes", response_model=list[DotacaoOut])
+async def listar_dotacoes(exercicio: int | None = None,
+                          _: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                          tenant_id: int = Depends(require_tenant_id),
+                          db: AsyncSession = Depends(get_db)):
+    return await orc.listar_dotacoes(db, tenant_id=tenant_id, exercicio=exercicio)
+
+
+@operacoes_router.post("/orcamento/dotacoes", response_model=DotacaoOut,
+                       status_code=status.HTTP_201_CREATED)
+async def criar_dotacao(payload: DotacaoCreate,
+                        _: Usuario = Depends(require_permission("pagamento_cadastro",
+                                                                action="inserir")),
+                        tenant_id: int = Depends(require_tenant_id),
+                        db: AsyncSession = Depends(get_db)):
+    d = await orc.criar_dotacao(db, tenant_id=tenant_id, payload=payload)
+    return (await orc.listar_dotacoes(db, tenant_id=tenant_id, exercicio=d.exercicio))[0]
+
+
+@operacoes_router.post("/orcamento/creditos", response_model=CreditoOut,
+                       status_code=status.HTTP_201_CREATED)
+async def lancar_credito(payload: CreditoCreate,
+                         usuario: Usuario = Depends(require_permission("pagamento_cadastro",
+                                                                       action="inserir")),
+                         tenant_id: int = Depends(require_tenant_id),
+                         db: AsyncSession = Depends(get_db)):
+    """Suplementação, crédito especial/extraordinário ou anulação. Não altera a
+    dotação: a atualizada é derivada dos créditos."""
+    return await orc.lancar_credito(db, tenant_id=tenant_id, usuario_id=usuario.id,
+                                    payload=payload)
+
+
+@operacoes_router.get("/catalogo-indicadores", response_model=list[IndicadorCatalogo])
+async def catalogo_indicadores(_: Usuario = Depends(require_any_permission(*PERMS_LEITURA))):
+    """Catálogo formal dos indicadores (§12). Domínio puro: não toca banco e
+    não depende do tenant — as definições são as mesmas para toda prefeitura."""
+    return catalogo.listar()
+
+
+@operacoes_router.get("/alertas", response_model=AlertasOut)
+async def alertas_gerenciais(_: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                             tenant_id: int = Depends(require_tenant_id),
+                             db: AsyncSession = Depends(get_db)):
+    """Central de alertas: o que precisa de atenção, com impacto, origem e ação.
+    Só leitura — nenhum alerta executa nada por conta própria."""
+    return await alertas.montar_alertas(db, tenant_id=tenant_id)
+
+
+@operacoes_router.get("/previsao", response_model=PrevisaoFinanceiraOut)
+async def previsao_financeira(_: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                              tenant_id: int = Depends(require_tenant_id),
+                              db: AsyncSession = Depends(get_db)):
+    """Projeção de saída de caixa em 7/15/30/60/90 dias. Só leitura.
+
+    Leitura ampla (mesmo conjunto do painel): saber se o caixa aguenta os
+    próximos vencimentos interessa a quem solicita, valida, autoriza e paga —
+    não só a quem decide."""
+    return await previsao.montar_previsao(db, tenant_id=tenant_id)
+
+
+@operacoes_router.get("/autorizacao/impacto", response_model=ImpactoAutorizacoesOut)
+async def impacto_autorizacoes(_: Usuario = Depends(require_permission("pagamento_autorizar")),
+                               tenant_id: int = Depends(require_tenant_id),
+                               db: AsyncSession = Depends(get_db)):
+    """Impacto no caixa das despesas que aguardam autorização. Somente leitura:
+    nada é autorizado nem reservado aqui — o gate é o mesmo da fila, porque
+    quem vê o impacto é quem vai decidir."""
+    return await filas.impacto_autorizacoes(db, tenant_id=tenant_id)
+
+
 @operacoes_router.get("/fontes/{fonte_id}/contas-elegiveis", response_model=list[ContaElegivelOut])
 async def contas_elegiveis(fonte_id: int,
                            _: Usuario = Depends(require_permission("pagamento_autorizar")),
@@ -960,10 +1063,21 @@ async def revogar_liberacao(parcela_id: int, payload: JustificativaIn, request: 
 
 @operacoes_router.get("/dashboard", response_model=DashboardOut)
 async def dashboard(meses: int = 12,
+                    unidade: int | None = None,
+                    fornecedor: int | None = None,
+                    contrato: int | None = None,
+                    natureza: int | None = None,
+                    fonte: int | None = None,
                     _: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
                     tenant_id: int = Depends(require_tenant_id),
                     db: AsyncSession = Depends(get_db)):
-    return await dash.montar_dashboard(db, tenant_id=tenant_id, meses=meses)
+    """Painel executivo. Os parâmetros de dimensão recortam as agregações de
+    despesa paga; os KPIs de saldo seguem consolidados, porque saldo é da conta
+    bancária e não se recorta por secretaria ou fornecedor."""
+    return await dash.montar_dashboard(
+        db, tenant_id=tenant_id, meses=meses,
+        filtros={"unidade": unidade, "fornecedor": fornecedor, "contrato": contrato,
+                 "natureza": natureza, "fonte": fonte})
 
 
 @operacoes_router.get("/minha-fila", response_model=MinhaFilaOut)

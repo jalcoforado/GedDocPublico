@@ -310,6 +310,16 @@ async def atualizar_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
                 payload={"campos_alterados": sorted(alterados), "versao": d.versao})
     data_liquidacao_mudou = ("data_liquidacao" in dados
                              and dados["data_liquidacao"] != d.data_liquidacao)
+    # O retorno do sistema financeiro deixa de valer quando o débito muda por
+    # baixo dele (0144): mexer no valor ou no número do empenho derruba o
+    # `revisado`, para a divergência com a origem aparecer na tela em vez de
+    # ficar com cara de conferido. Os VALORES não são apagados — apagá-los
+    # perderia o que a origem disse; o que cai é a marca de conferência.
+    if d.revisado and any(
+        campo in dados and dados[campo] != getattr(d, campo)
+        for campo in ("valor_total", "numero_ne")
+    ):
+        d.revisado = False
     for k, v in dados.items():
         setattr(d, k, v)
     if parcelas_novas is not None:
@@ -726,8 +736,45 @@ async def cancelar(db: AsyncSession, *, tenant_id: int, debito_id: int, usuario_
     return d
 
 
+async def registrar_empenho(db: AsyncSession, *, tenant_id: int, debito_id: int,
+                            usuario_id: int, valor_empenhado: Decimal,
+                            numero_ne: str | None = None,
+                            ip: str | None = None) -> Debito:
+    """Grava o retorno do sistema financeiro sobre o empenho (migration 0144).
+
+    Não é ato de rito: não muda nenhuma das três dimensões, não valida etapa e
+    não mexe em saldo. O comprometido continua sendo do solicitado e autorizado
+    (`pagamentos_caixa.comprometido_conta`) — empenho aqui é informação de
+    conferência, decisão do Jorge em 2026-11-24.
+
+    Idempotente por valor: regravar o MESMO valor (e mesmo número) é no-op e não
+    polui a trilha. Valor diferente sobrescreve — "se mudar na conciliação vai
+    vir o novo falar e a gente atualiza" — e deixa linha de histórico dizendo de
+    quanto para quanto.
+    """
+    d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+    if valor_empenhado is None or valor_empenhado < 0:
+        raise PagamentoDebitoError("Valor empenhado deve ser maior ou igual a zero.",
+                                   status.HTTP_422_UNPROCESSABLE_ENTITY)
+    numero_novo = numero_ne if numero_ne is not None else d.numero_ne
+    if d.valor_empenhado == valor_empenhado and d.numero_ne == numero_novo and d.revisado:
+        return d
+    anterior = d.valor_empenhado
+    d.valor_empenhado = valor_empenhado
+    d.numero_ne = numero_novo
+    d.revisado = True
+    de = "—" if anterior is None else f"{anterior}"
+    _registrar_transicao(
+        db, debito=d, acao="EMPENHO_REGISTRADO", usuario_id=usuario_id,
+        justificativa=f"Empenho do sistema financeiro: {de} → {valor_empenhado}", ip=ip)
+    d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
+    return d
+
+
 async def confirmar_liquidacao(db: AsyncSession, *, tenant_id: int, debito_id: int,
-                               usuario_id: int, data_liquidacao=None, ip: str | None = None) -> Debito:
+                               usuario_id: int, data_liquidacao=None,
+                               valor_liquidado: Decimal | None = None,
+                               ip: str | None = None) -> Debito:
     """Confirma a liquidação (recebimento/atesto) — pré-requisito para validar/autorizar
     (RF-VAL-02/RN-01). Permitido nas etapas pré-validação; não muda o status.
 
@@ -757,12 +804,24 @@ async def confirmar_liquidacao(db: AsyncSession, *, tenant_id: int, debito_id: i
             "de liquidação, use a edição material do débito (fluxo de ajuste).",
             status.HTTP_409_CONFLICT)
 
+    if valor_liquidado is not None and valor_liquidado < 0:
+        raise PagamentoDebitoError("Valor liquidado deve ser maior ou igual a zero.",
+                                   status.HTTP_422_UNPROCESSABLE_ENTITY)
+
     d.liquidacao_confirmada = True
     d.data_liquidacao = data_liquidacao
+    # Retorno do sistema financeiro (0144): só escreve quando veio valor —
+    # liquidar sem valor continua valendo e não apaga o que já estava lá.
+    sufixo_valor = ""
+    if valor_liquidado is not None:
+        d.valor_liquidado = valor_liquidado
+        d.revisado = True
+        sufixo_valor = f"; valor liquidado {valor_liquidado}"
     await cron.registrar_na_fila(db, tenant_id=tenant_id, debito=d, data_liquidacao=data_liquidacao)
     _registrar_transicao(db, debito=d, acao="LIQUIDADO", usuario_id=usuario_id,
                          fila=est.REGISTRADA,
-                         justificativa=f"Liquidação em {d.data_liquidacao.isoformat()}", ip=ip)
+                         justificativa=(f"Liquidação em {d.data_liquidacao.isoformat()}"
+                                        f"{sufixo_valor}"), ip=ip)
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
     return d
 
@@ -785,6 +844,8 @@ def debito_out(d: Debito, *, nome_fornecedor: str) -> dict:
         "id_gestor_decisor": d.id_gestor_decisor, "id_validador": d.id_validador,
         "id_usuario_solicitante": d.id_usuario_solicitante,
         "liquidacao_confirmada": d.liquidacao_confirmada, "data_liquidacao": d.data_liquidacao,
+        "valor_empenhado": d.valor_empenhado, "valor_liquidado": d.valor_liquidado,
+        "revisado": d.revisado,
         "categoria": d.categoria,
         "criado_em": d.criado_em, "atualizado_em": d.atualizado_em,
     }

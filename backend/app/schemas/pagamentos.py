@@ -315,6 +315,38 @@ class SaldoConta(BaseModel):
     disponivel_projetado: Decimal = Decimal("0")
 
 
+class ContaDisponibilidadeItem(BaseModel):
+    """Uma conta na barra empilhada de disponibilidade (painel executivo).
+
+    As três parcelas são **mutuamente exclusivas** e somam o saldo bancário:
+    `disponivel + comprometido + bloqueado = saldo_atual`. Empilhar valores
+    que se sobrepõem (autorizado + empenhado + liquidado, por exemplo) daria
+    uma barra maior que o dinheiro que existe.
+
+    `insuficiencia` é o caso em que comprometido + bloqueado passa do saldo:
+    aí `disponivel` é negativo e a barra fica MAIOR que o saldo, de propósito
+    — é assim que a falta aparece em vez de ser arredondada para zero.
+    """
+    id_conta: int; nome: str; banco: str; grupo_despesa: str
+    # Destinação do recurso: sem ela, "disponível" se lê como dinheiro livre.
+    fonte_codigo: str | None = None
+    fonte_descricao: str | None = None
+    # NULO quando a prefeitura ainda não classificou a fonte. Vazio é
+    # informação: sem isto o painel NÃO sabe separar recurso livre de
+    # vinculado, e a tela precisa dizer isso em vez de insinuar que o
+    # "disponível" é dinheiro de livre aplicação.
+    fonte_vinculacao: str | None = None
+    finalidade: str | None = None
+    saldo_atual: Decimal
+    # Pode ser NEGATIVO — ver `insuficiencia`.
+    disponivel: Decimal
+    comprometido: Decimal
+    bloqueado: Decimal
+    # max(0, -disponivel): quanto das obrigações não tem lastro na conta.
+    insuficiencia: Decimal = Decimal("0")
+    abaixo_minimo: bool = False
+
+
 class ContaSaldoPainel(BaseModel):
     id_conta: int; nome: str; banco: str; grupo_despesa: str
     saldo_inicial: Decimal; total_entradas: Decimal; total_saidas: Decimal
@@ -425,8 +457,32 @@ class DebitoOut(BaseModel):
     id_validador: int | None = None
     id_usuario_solicitante: int
     liquidacao_confirmada: bool = False; data_liquidacao: date | None = None
+    # Retorno do sistema financeiro (0144). None = ainda não voltou (≠ zero).
+    valor_empenhado: Decimal | None = None
+    valor_liquidado: Decimal | None = None
+    revisado: bool = False
     categoria: CategoriaLit | None = None
     criado_em: datetime; atualizado_em: datetime | None
+
+
+class EmpenhoIn(BaseModel):
+    """Retorno do sistema financeiro sobre o empenho (`POST /debitos/{id}/empenho`).
+
+    `numero_ne` é opcional: quando vem, atualiza o número junto com o valor;
+    quando não vem, o número que já estava no débito é preservado.
+    """
+    valor_empenhado: Decimal = Field(ge=0)
+    numero_ne: str | None = Field(default=None, max_length=30)
+
+
+class LiquidarIn(BaseModel):
+    """Corpo opcional de `POST /debitos/{id}/liquidar` na porta M2M.
+
+    Sem corpo, a rota continua se comportando como antes da 0144 — confirma a
+    liquidação e não escreve valor nenhum.
+    """
+    valor_liquidado: Decimal | None = Field(default=None, ge=0)
+    data_liquidacao: date | None = None
 
 
 class DebitoHistoricoOut(BaseModel):
@@ -735,6 +791,258 @@ class MarcarChecklistIn(BaseModel):
     observacao: str | None = Field(default=None, max_length=255)
 
 
+# ---------- panorama da Visão geral ----------
+class EtapaValorItem(BaseModel):
+    """Uma etapa do rito com QUANTIDADE e VALOR.
+
+    O valor é o que a contagem não diz: cinco despesas de R$ 2 mil e cinco de
+    R$ 2 milhões dão o mesmo número e pedem urgências opostas.
+    """
+    chave: str; rotulo: str; qtd: int; valor: Decimal
+
+
+class EnvelhecimentoItem(BaseModel):
+    faixa: str; qtd: int; valor: Decimal
+
+
+class FluxoSemanalItem(BaseModel):
+    semana: str; rotulo: str; entraram: int; autorizadas: int
+
+
+class PanoramaVisaoGeralOut(BaseModel):
+    etapas: list[EtapaValorItem] = []
+    envelhecimento: list[EnvelhecimentoItem] = []
+    fluxo_semanal: list[FluxoSemanalItem] = []
+    em_curso_qtd: int = 0
+    em_curso_valor: Decimal = Decimal("0")
+    mais_antigo_dias: int = 0
+    apurado_em: datetime | None = None
+
+
+# ---------- orçamento (O1, migration 0146) ----------
+class DotacaoCreate(BaseModel):
+    exercicio: int = Field(ge=2000, le=2100)
+    id_unidade: int
+    funcao: str = Field(min_length=1, max_length=10)
+    subfuncao: str = Field(min_length=1, max_length=10)
+    programa: str = Field(min_length=1, max_length=20)
+    acao: str = Field(min_length=1, max_length=20)
+    natureza_codigo: str = Field(min_length=1, max_length=20)
+    grupo_despesa: str = Field(min_length=1, max_length=20)
+    id_fonte_recursos: int
+    descricao: str = Field(min_length=1, max_length=255)
+    valor_inicial: Decimal = Field(ge=0)
+
+
+class DotacaoOut(BaseModel):
+    id: int; exercicio: int
+    id_unidade: int; nome_unidade: str
+    funcao: str; subfuncao: str; programa: str; acao: str
+    natureza_codigo: str; grupo_despesa: str
+    id_fonte_recursos: int; codigo_fonte: str
+    descricao: str; valor_inicial: Decimal; ativa: bool
+
+
+class CreditoCreate(BaseModel):
+    """Crédito adicional ou anulação.
+
+    `valor` é sempre positivo: quem decide o sinal é o `tipo`. Valor negativo
+    viraria suplementação que diminui a dotação, e ninguém confere duas vezes
+    um número positivo numa soma.
+    """
+    id_dotacao: int
+    tipo: Literal["SUPLEMENTAR", "ESPECIAL", "EXTRAORDINARIO", "ANULACAO"]
+    valor: Decimal = Field(ge=0)
+    data: date
+    ato: str = Field(min_length=1, max_length=120)
+    justificativa: str | None = Field(default=None, max_length=255)
+
+
+class CreditoOut(BaseModel):
+    id: int; id_dotacao: int; tipo: str; valor: Decimal
+    data: date; ato: str; justificativa: str | None = None
+    criado_em: datetime
+
+
+class PosicaoDotacaoItem(BaseModel):
+    """Uma dotação com a execução dela.
+
+    `despesas_sem_retorno` não é detalhe técnico: execução baixa pode
+    significar "gastou pouco" ou "o retorno do sistema financeiro não chegou",
+    e as duas leituras pedem ações opostas.
+    """
+    id_dotacao: int; exercicio: int; descricao: str
+    nome_unidade: str; funcao: str; programa: str
+    natureza_codigo: str; codigo_fonte: str
+    valor_inicial: Decimal
+    creditos: Decimal
+    dotacao_atualizada: Decimal
+    empenhado: Decimal
+    disponivel: Decimal
+    execucao_pct: float
+    despesas_com_retorno: int
+    despesas_sem_retorno: int
+    estourada: bool
+
+
+class ExecucaoOrcamentariaOut(BaseModel):
+    exercicio: int | None = None
+    qtd_dotacoes: int = 0
+    dotacao_inicial: Decimal = Decimal("0")
+    creditos: Decimal = Decimal("0")
+    dotacao_atualizada: Decimal = Decimal("0")
+    empenhado: Decimal = Decimal("0")
+    disponivel: Decimal = Decimal("0")
+    execucao_pct: float = 0.0
+    dotacoes_estouradas: int = 0
+    despesas_sem_retorno: int = 0
+    # Despesa paga sem dotação vinculada: explica a diferença entre o que o
+    # município gastou e o que o orçamento registra. Contada, nunca rateada.
+    despesas_sem_dotacao_qtd: int = 0
+    despesas_sem_dotacao_valor: Decimal = Decimal("0")
+    itens: list[PosicaoDotacaoItem] = []
+    apurado_em: datetime | None = None
+
+
+class IndicadorCatalogo(BaseModel):
+    """Uma ficha do catálogo de indicadores (§12 do brief).
+
+    `disponivel=False` é tão informativo quanto o resto: diz que o conceito
+    existe na gestão pública, que o brief o pede, e que o sistema NÃO o tem —
+    com o motivo em `restricoes`. Omitir a ficha faria o leitor concluir que
+    esqueceram; mostrá-la diz o que falta para ele existir.
+    """
+    codigo: str
+    nome: str
+    grupo: str
+    definicao: str
+    formula: str
+    fonte: str
+    granularidade: str
+    periodicidade: str
+    restricoes: str
+    # O par que mais gera discussão em reunião — "isto não é aquilo".
+    nao_confundir: str
+    disponivel: bool = True
+
+
+SeveridadeAlerta = Literal["CRITICO", "ALTO", "MEDIO", "INFORMATIVO"]
+
+
+class AlertaItem(BaseModel):
+    """Um alerta gerencial, com tudo que o §11 do brief exige de um.
+
+    Cada campo existe para responder uma pergunta que o gestor faz ao ler:
+    `titulo`/`descricao` → o que aconteceu; `impacto_valor`/`impacto_qtd` →
+    quanto custa; `escopo` → onde (conta, fonte, unidade); `origem` → de onde
+    saiu o número, para quem quiser conferir; `acao` → o que dá para fazer;
+    `href` → por onde ir ver.
+
+    Alerta sem `acao` não deveria existir: é barulho que o gestor aprende a
+    ignorar, e aí ele ignora junto os que importam.
+    """
+    codigo: str
+    severidade: SeveridadeAlerta
+    titulo: str
+    descricao: str
+    impacto_valor: Decimal | None = None
+    impacto_qtd: int | None = None
+    escopo: str | None = None
+    origem: str
+    acao: str
+    href: str | None = None
+
+
+class AlertasOut(BaseModel):
+    itens: list[AlertaItem] = []
+    criticos: int = 0
+    altos: int = 0
+    medios: int = 0
+    informativos: int = 0
+    apurado_em: datetime | None = None
+
+
+class PrevisaoHorizonteItem(BaseModel):
+    """Uma janela da previsão. Cumulativa: 30 dias inclui o que vence em 7."""
+    dias: int
+    ate: date
+    # Tudo que vence até `ate`, incluindo o já vencido e não pago.
+    vence_acumulado: Decimal
+    # Só o que entra NESTA janela (acumulado menos o da janela anterior).
+    vence_na_janela: Decimal
+    qtd_parcelas: int
+    saldo_projetado: Decimal
+    suficiente: bool
+
+
+class PrevisaoContaRisco(BaseModel):
+    id_conta: int; nome: str
+    saldo_atual: Decimal
+    vence_no_horizonte: Decimal
+    qtd_parcelas: int
+    saldo_projetado: Decimal
+    falta: Decimal
+
+
+class PrevisaoFinanceiraOut(BaseModel):
+    """Projeção de SAÍDA de caixa (§10 do brief).
+
+    `base_projecao` = saldo bancário − bloqueado. Parte do SALDO, não do
+    `disponivel`: o disponível já desconta o comprometido, que é a soma das
+    mesmas parcelas que a projeção percorre — partir dele contaria cada
+    obrigação duas vezes.
+
+    `considera_receita` é sempre `False` nesta fatia e existe para a tela ser
+    obrigada a dizer: não há módulo de receita, então nenhuma entrada futura
+    entra nesta conta.
+    """
+    saldo_atual: Decimal
+    bloqueado: Decimal
+    base_projecao: Decimal
+    vencidas_valor: Decimal
+    vencidas_qtd: int
+    horizontes: list[PrevisaoHorizonteItem] = []
+    contas_em_risco: list[PrevisaoContaRisco] = []
+    considera_receita: bool = False
+    apurado_em: datetime | None = None
+
+
+class ImpactoFonteItem(BaseModel):
+    """O que as pendências de UMA fonte fazem com o caixa dela."""
+    id_fonte: int; codigo: str; descricao: str
+    qtd_debitos: int
+    pendente: Decimal
+    disponivel_antes: Decimal
+    disponivel_depois: Decimal
+    suficiente: bool
+    # Quanto falta, quando não cabe. Zero quando cabe.
+    falta: Decimal = Decimal("0")
+
+
+class ImpactoUnidadeItem(BaseModel):
+    sigla: str; nome: str; valor: Decimal; qtd_debitos: int
+
+
+class ImpactoAutorizacoesOut(BaseModel):
+    """Impacto financeiro das despesas que esperam autorização (§8 do brief).
+
+    **O número que decide é o POR FONTE, não o total.** Um débito só pode ser
+    pago por conta da sua própria fonte (RN-02/05): somar o caixa inteiro
+    contra as pendências inteiras responde uma pergunta que ninguém faz e
+    esconde a única que importa — "esta fonte aguenta o que está parado nela?".
+    O consolidado existe para dimensionar, não para decidir, e é por isso que
+    `fontes_insuficientes` vem separado.
+    """
+    qtd_debitos: int
+    total_pendente: Decimal
+    disponivel_total: Decimal
+    disponivel_total_depois: Decimal
+    fontes: list[ImpactoFonteItem] = []
+    fontes_insuficientes: int = 0
+    por_unidade: list[ImpactoUnidadeItem] = []
+    apurado_em: datetime | None = None
+
+
 class SimulacaoAutorizacaoIn(BaseModel):
     """Simulação do impacto de um pagamento numa conta (RF-PNL-05). Informe
     `debito_ids` (soma os valores) ou um `valor` direto."""
@@ -826,6 +1134,10 @@ class FluxoMensalItem(BaseModel):
 
 class ComposicaoItem(BaseModel):
     codigo: str; descricao: str; valor: Decimal
+    # Id da dimensão, para a barra virar filtro ao ser clicada. NULO na linha
+    # agregada ("Outras"): ela junta várias dimensões, e clicar nela não seria
+    # um recorte, seriam vários ao mesmo tempo.
+    id: int | None = None
 
 
 class DebitoResumoItem(BaseModel):
@@ -863,8 +1175,24 @@ class DashboardOut(BaseModel):
     fluxo_mensal: list[FluxoMensalItem]
     por_natureza: list[ComposicaoItem]
     por_fonte: list[ComposicaoItem]
+    # Painel executivo (fatia 2): as três dimensões que o prefeito pergunta e
+    # que o painel não respondia — secretaria, fornecedor e contrato. Default
+    # vazio para não quebrar consumidor que ainda não conhece os campos.
+    por_secretaria: list[ComposicaoItem] = []
+    top_fornecedores: list[ComposicaoItem] = []
+    top_contratos: list[ComposicaoItem] = []
+    # Onde o dinheiro está e quanto dele está livre, conta a conta (fatia 3).
+    disponibilidade_contas: list[ContaDisponibilidadeItem] = []
     maiores_debitos: list[DebitoResumoItem]
     alertas: DashboardAlertas
+    # Procedência do número mostrado: de quando é, e desde quando conta.
+    periodo_inicio: date | None = None
+    apurado_em: datetime | None = None
+    # Recorte ativo (dimensão → id) e o total pago dentro dele. Os KPIs de
+    # SALDO continuam consolidados: saldo é da conta bancária e não se recorta
+    # por secretaria ou fornecedor. A tela usa este campo para dizer isso.
+    filtros_ativos: dict[str, int] = {}
+    total_filtrado: Decimal | None = None
 
 
 # ---------- export contábil (C2.1) ----------

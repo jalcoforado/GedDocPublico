@@ -27,6 +27,12 @@ CAMPOS_MATERIAIS: frozenset[str] = frozenset({
     "id_fornecedor", "valor_total", "numero_nf", "numero_ne",
     "id_fonte_recursos", "id_contrato", "descricao", "data_liquidacao",
     "id_unidade", "categoria",
+    # Orçamento (0146): trocar a dotação muda qual crédito orçamentário banca
+    # a despesa, e o exercício muda a qual orçamento ela pertence. As duas
+    # coisas alteram a execução de duas dotações ao mesmo tempo (sai de uma,
+    # entra noutra) — é alteração material, e a versão tem de guardar de onde
+    # saiu.
+    "id_dotacao", "exercicio",
 })
 
 CAMPOS_NAO_MATERIAIS: frozenset[str] = frozenset({
@@ -42,6 +48,12 @@ CAMPOS_CONTROLE: frozenset[str] = frozenset({
     "situacao_pagamento", "versao", "lock_version", "id_gestor_decisor",
     "id_validador", "id_usuario_solicitante", "criado_em", "atualizado_em",
     "excluido",
+    # Retorno do sistema financeiro (0144): escritos pela porta M2M
+    # (`registrar_empenho`/`confirmar_liquidacao`), nunca pelo payload de
+    # edição — não há campo de tela para eles, de propósito. Materiais eles
+    # não são: o que é material é o `valor_total` que a prefeitura pediu, e
+    # mexer nele já derruba `revisado` em `atualizar_debito`.
+    "valor_empenhado", "valor_liquidado", "revisado",
 })
 
 

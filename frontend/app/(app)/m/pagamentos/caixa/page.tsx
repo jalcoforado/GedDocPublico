@@ -2,7 +2,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Lock, Plus, ReceiptText, Trash2, Wallet } from "lucide-react";
-import { useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 
 import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
@@ -90,6 +91,22 @@ export default function CaixaPage() {
     queryKey: ["pag-caixa-painel"],
     queryFn: () => api.pagamentos.caixa.painel(),
   });
+
+  // Chegou do painel executivo por "?conta=123": abre direto naquela conta.
+  // Um clique numa conta específica que aterrissasse na lista inteira faria a
+  // pessoa procurar de novo o que ela acabou de apontar.
+  // `useSearchParams()` devolve null fora de um contexto de navegação
+  // (é o caso em teste de unidade): o encadeamento opcional mantém a
+  // tela funcionando sem o parâmetro, que é exatamente o caso normal.
+  const contaDaUrl = useSearchParams()?.get("conta") ?? null;
+  const painelItens = painelQ.data ?? [];
+  useEffect(() => {
+    if (!contaDaUrl || selecionada !== null) return;
+    const alvo = painelItens.find((c) => String(c.id_conta) === contaDaUrl);
+    if (alvo) setSelecionada(alvo);
+    // `painelItens` entra como dependência pela identidade da resposta: o
+    // efeito precisa rodar de novo quando o painel chega do servidor.
+  }, [contaDaUrl, painelItens, selecionada]);
   const contasQ = useQuery({
     queryKey: ["pag-contas-select"],
     queryFn: () => api.pagamentos.cadastros.contas.list(),

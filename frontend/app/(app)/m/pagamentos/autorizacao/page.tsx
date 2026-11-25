@@ -22,6 +22,7 @@ import {
   somar,
 } from "@/components/pagamentos/autorizacao-partes";
 import { fmtCompetencia, fmtData, fmtDataCurta, fmtMoeda } from "@/components/pagamentos/format";
+import { ImpactoAutorizacoes } from "@/components/pagamentos/ImpactoAutorizacoes";
 import { RitoPagamento } from "@/components/pagamentos/RitoPagamento";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -279,6 +280,10 @@ function TabDespesa() {
           intent={urgentes > 0 ? "danger" : "default"}
         />
       </div>
+
+      {/* O impacto vem ANTES da fila: quem decide precisa saber o que a
+          decisão faz com o caixa antes de marcar a primeira caixinha. */}
+      <ImpactoAutorizacoes />
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-foreground-muted">

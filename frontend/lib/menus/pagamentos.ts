@@ -1,6 +1,7 @@
 import {
   BarChart3,
   Banknote,
+  CalendarClock,
   BookOpen,
   Building2,
   CheckCircle,
@@ -18,6 +19,7 @@ import {
   Shield,
   ShieldAlert,
   ShieldCheck,
+  Target,
   UserCircle,
   Wallet,
   Workflow,
@@ -46,7 +48,7 @@ export const menuPagamentos: MenuModulo = {
   raiz: "/m/pagamentos",
   grupos: [
     {
-      title: "Pagamentos",
+      title: "Despesa",
       defaultOpen: false,
       items: [
         { label: "Visão geral", href: "/m/pagamentos", icon: Inbox,
@@ -104,6 +106,23 @@ export const menuPagamentos: MenuModulo = {
         // (`pagamentos_caixa.py`) exige `pagamento_cadastro`.
         { label: "Caixa", href: "/m/pagamentos/caixa", icon: Wallet,
           perm: "pagamento_cadastro", lugar: "hub" },
+        // Projeção de saída 7/15/30/60/90. Leitura ampla, como o router
+        // (`require_any_permission(*PERMS_LEITURA)`): se o caixa aguenta os
+        // próximos vencimentos interessa a quem pede, valida, autoriza e paga.
+        { label: "Previsão financeira", href: "/m/pagamentos/previsao", icon: CalendarClock,
+          anyOf: PERMS_LEITURA_PAGAMENTOS, lugar: "hub" },
+        // Central de alertas (§11). Mesma leitura ampla do router: o que precisa
+        // de atenção não é informação exclusiva de quem decide.
+        { label: "Alertas", href: "/m/pagamentos/alertas", icon: ShieldAlert,
+          anyOf: PERMS_LEITURA_PAGAMENTOS, lugar: "hub" },
+        // Catálogo de indicadores (§12): definições, fórmulas e o que o
+        // sistema NÃO tem. Leitura ampla — quem lê um número do painel
+        // precisa poder conferir o que ele significa.
+        { label: "Catálogo de indicadores", href: "/m/pagamentos/catalogo", icon: BookOpen,
+          anyOf: PERMS_LEITURA_PAGAMENTOS, lugar: "hub" },
+        // Execução orçamentária (O1): dotação, créditos e empenhado.
+        { label: "Execução orçamentária", href: "/m/pagamentos/orcamento", icon: Target,
+          anyOf: PERMS_LEITURA_PAGAMENTOS, lugar: "hub" },
         // Relatório de exceções: leitura ampla de propósito no router — quem
         // audita não é necessariamente quem autoriza ou paga.
         { label: "Exceções", href: "/m/pagamentos/excecoes", icon: ShieldAlert,

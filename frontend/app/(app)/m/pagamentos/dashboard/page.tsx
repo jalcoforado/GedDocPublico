@@ -12,6 +12,8 @@ import {
   ShieldAlert,
   ShieldCheck,
   Wallet,
+  Filter,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { type ComponentType, useState } from "react";
@@ -34,7 +36,14 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { KpiCard } from "@/components/ui/kpi-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
-import { api, type ComposicaoItem } from "@/lib/api";
+import {
+  api,
+  type ComposicaoItem,
+  type DimensaoDespesa,
+  type FiltrosDespesa,
+} from "@/lib/api";
+import { DisponibilidadeContas } from "@/components/pagamentos/DisponibilidadeContas";
+import { GraficoCard } from "@/components/ui/grafico-card";
 import { NavVisaoFinanceiro } from "@/components/pagamentos/NavVisaoFinanceiro";
 import { PAGAMENTO_ROTULO, TRAMITACAO_ROTULO } from "@/components/pagamentos/situacoes";
 import { EIXO, GRAFICO } from "@/lib/chart-theme";
@@ -87,6 +96,13 @@ function fmtData(iso: string): string {
   return d.toLocaleDateString("pt-BR");
 }
 
+function fmtDataHora(iso: string): string {
+  // O backend manda naive UTC (datetime.utcnow); o "Z" evita que o navegador
+  // leia como hora local e mostre um horário que nunca existiu.
+  const d = new Date(iso.endsWith("Z") ? iso : `${iso}Z`);
+  return d.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+}
+
 function topSeisOutras(itens: ComposicaoItem[]): ComposicaoItem[] {
   // Backend já dobra em top 6 + "Outras"; mantemos ordenação por valor desc
   // para leitura das barras horizontais de cima pra baixo.
@@ -120,27 +136,70 @@ function TooltipBRL({
   );
 }
 
-function ComposicaoChart({ titulo, itens }: { titulo: string; itens: ComposicaoItem[] }) {
+/** Concentração do topo: "X responde por Y% do período". Só diz algo quando
+ *  há mais de um item — com um só, a frase seria "100%", que não informa. */
+function concentracao(itens: ComposicaoItem[]): string | null {
+  if (itens.length < 2) return null;
+  const total = itens.reduce((acc, i) => acc + Number(i.valor), 0);
+  if (total <= 0) return null;
+  const maior = [...itens].sort((a, b) => Number(b.valor) - Number(a.valor))[0];
+  const pct = (Number(maior.valor) / total) * 100;
+  return `${maior.descricao} responde por ${pct.toLocaleString("pt-BR", {
+    maximumFractionDigits: 1,
+  })}% do pago no período.`;
+}
+
+/** Quanto do pago no período não passou por contrato. É a leitura que mais
+ *  costuma surpreender quem abre o painel — e some de qualquer ranking que
+ *  liste só contratos de verdade. */
+function semContrato(itens: ComposicaoItem[]): string | null {
+  const total = itens.reduce((acc, i) => acc + Number(i.valor), 0);
+  const avulsa = itens.find((i) => i.codigo === "Sem contrato");
+  if (!avulsa || total <= 0) return null;
+  const pct = (Number(avulsa.valor) / total) * 100;
+  return `${pct.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% do pago no período não está vinculado a contrato.`;
+}
+
+function ComposicaoChart({
+  titulo,
+  itens,
+  subtitulo,
+  insight,
+  dimensao,
+  onFiltrar,
+}: {
+  titulo: string;
+  itens: ComposicaoItem[];
+  subtitulo?: string;
+  insight?: React.ReactNode;
+  /** Quando informada, as barras com `id` viram filtro ao clique. */
+  dimensao?: DimensaoDespesa;
+  onFiltrar?: (dimensao: DimensaoDespesa, id: number, rotulo: string) => void;
+}) {
   const dados = topSeisOutras(itens).map((it) => ({
     nome: it.descricao,
     valor: Number(it.valor),
+    id: it.id ?? null,
   }));
+  const clicavel = Boolean(dimensao && onFiltrar);
+  const aoClicar = (payload: { id: number | null; nome: string }) => {
+    // A linha agregada não tem id: clicar nela seria aplicar vários recortes
+    // ao mesmo tempo, o que não é um recorte.
+    if (!clicavel || payload.id == null) return;
+    onFiltrar!(dimensao!, payload.id, payload.nome);
+  };
   const alturaLinha = 32;
   const altura = Math.max(180, dados.length * alturaLinha + 40);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{titulo}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        {dados.length === 0 ? (
-          <EmptyState
-            icon={BarChart3}
-            title="Sem dados no período"
-            description="Nenhum débito lançado nesta categoria."
-          />
-        ) : (
+    <GraficoCard
+      titulo={titulo}
+      subtitulo={subtitulo}
+      insight={insight ?? concentracao(itens)}
+      vazio={dados.length === 0}
+      vazioDescricao="Nenhum pagamento lançado nesta categoria."
+    >
+      <>
           <div style={{ height: altura }}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
@@ -160,7 +219,14 @@ function ComposicaoChart({ titulo, itens }: { titulo: string; itens: ComposicaoI
                   tickLine={false}
                 />
                 <Tooltip content={<TooltipBRL />} cursor={{ fill: GRAFICO.cursor }} />
-                <Bar dataKey="valor" fill={COR_BRAND} radius={[0, 4, 4, 0]} barSize={16}>
+                <Bar
+                  dataKey="valor"
+                  fill={COR_BRAND}
+                  radius={[0, 4, 4, 0]}
+                  barSize={16}
+                  cursor={clicavel ? "pointer" : undefined}
+                  onClick={(p: unknown) => aoClicar(p as { id: number | null; nome: string })}
+                >
                   {/* Rótulo direto (BRL compacto) — texto em token de texto, não na cor da série. */}
                   <LabelList
                     dataKey="valor"
@@ -172,32 +238,70 @@ function ComposicaoChart({ titulo, itens }: { titulo: string; itens: ComposicaoI
               </BarChart>
             </ResponsiveContainer>
           </div>
-        )}
-        {dados.length > 0 && (
-          <ul className="mt-2 space-y-1">
-            {dados.map((d) => (
-              <li
-                key={d.nome}
-                className="flex items-center justify-between text-xs text-foreground-muted"
-              >
-                <span className="truncate">{d.nome}</span>
-                <span className="tabular-nums text-foreground">{fmtBRL(d.valor)}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </CardContent>
-    </Card>
+          {dados.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {dados.map((d) => (
+                <li key={d.nome} className="text-xs text-foreground-muted">
+                  {clicavel && d.id != null ? (
+                    <button
+                      type="button"
+                      onClick={() => aoClicar(d)}
+                      className="flex w-full items-center justify-between gap-2 rounded px-1 py-0.5 text-left transition-colors duration-fast hover:bg-surface-2"
+                      aria-label={`Filtrar por ${d.nome}`}
+                    >
+                      <span className="truncate">{d.nome}</span>
+                      <span className="tabular-nums text-foreground">{fmtBRL(d.valor)}</span>
+                    </button>
+                  ) : (
+                    <span className="flex items-center justify-between gap-2 px-1 py-0.5">
+                      <span className="truncate">{d.nome}</span>
+                      <span className="tabular-nums text-foreground">{fmtBRL(d.valor)}</span>
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+      </>
+    </GraficoCard>
   );
 }
 
+/** Rótulo do recorte ativo, para a pessoa saber o que está vendo. */
+type RotuloFiltro = { dimensao: DimensaoDespesa; id: number; rotulo: string };
+
+const NOME_DIMENSAO: Record<DimensaoDespesa, string> = {
+  unidade: "Secretaria",
+  fornecedor: "Fornecedor",
+  contrato: "Contrato",
+  natureza: "Natureza",
+  fonte: "Fonte",
+};
+
 export default function PagamentosDashboardPage() {
   const [meses, setMeses] = useState(12);
+  const [filtros, setFiltros] = useState<RotuloFiltro[]>([]);
+
+  const filtrosQuery: FiltrosDespesa = Object.fromEntries(
+    filtros.map((f) => [f.dimensao, f.id]),
+  );
 
   const q = useQuery({
-    queryKey: ["pag-dashboard", meses],
-    queryFn: () => api.pagamentos.dashboard(meses),
+    queryKey: ["pag-dashboard", meses, filtrosQuery],
+    queryFn: () => api.pagamentos.dashboard(meses, filtrosQuery),
+    // Mantém o painel anterior enquanto o recorte recarrega: a tela piscar
+    // inteira a cada clique faz perder o contexto do que se estava olhando.
+    placeholderData: (anterior) => anterior,
   });
+
+  /** Um recorte por dimensão: clicar noutra secretaria TROCA a secretaria,
+   *  em vez de empilhar duas — duas secretarias ao mesmo tempo seria um
+   *  "ou" que o backend não faz e que o leitor não esperaria. */
+  const aplicarFiltro = (dimensao: DimensaoDespesa, id: number, rotulo: string) => {
+    setFiltros((cur) => [...cur.filter((f) => f.dimensao !== dimensao), { dimensao, id, rotulo }]);
+  };
+  const removerFiltro = (dimensao: DimensaoDespesa) =>
+    setFiltros((cur) => cur.filter((f) => f.dimensao !== dimensao));
 
   if (q.isLoading) {
     return (
@@ -242,7 +346,15 @@ export default function PagamentosDashboardPage() {
   }
 
   const d = q.data;
-  const { kpis, fluxo_mensal, por_natureza, por_fonte, maiores_debitos, alertas } = d;
+  const {
+    kpis, fluxo_mensal, por_natureza, por_fonte, maiores_debitos, alertas,
+  } = d;
+  // Campos do painel executivo: a resposta pode não trazê-los (backend antigo
+  // ou período sem pagamento), e lista vazia é o estado correto nos dois casos.
+  const por_secretaria = d.por_secretaria ?? [];
+  const top_fornecedores = d.top_fornecedores ?? [];
+  const top_contratos = d.top_contratos ?? [];
+  const disponibilidade_contas = d.disponibilidade_contas ?? [];
 
   const fluxo = fluxo_mensal.map((f) => ({
     mes: fmtMesLabel(f.mes),
@@ -260,7 +372,11 @@ export default function PagamentosDashboardPage() {
       <PageHeader
         icon={BarChart3}
         title="Indicadores financeiros"
-        description="Visão consolidada de caixa, despesas e alertas do módulo de pagamentos."
+        description={
+          d.apurado_em
+            ? `Visão consolidada de caixa, despesas e alertas. Apurado em ${fmtDataHora(d.apurado_em)}${d.periodo_inicio ? ` · gráficos desde ${fmtData(d.periodo_inicio)}` : ""}.`
+            : "Visão consolidada de caixa, despesas e alertas do módulo de Despesa."
+        }
         actions={
           <Select
             value={meses}
@@ -278,26 +394,74 @@ export default function PagamentosDashboardPage() {
       />
       <NavVisaoFinanceiro />
 
-      {/* Linha 1 — KPIs */}
+      {filtros.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-card border border-brand/30 bg-brand/5 px-3 py-2">
+          <Filter className="h-4 w-4 shrink-0 text-brand" aria-hidden="true" />
+          <span className="text-xs font-medium text-foreground">Recorte ativo:</span>
+          {filtros.map((f) => (
+            <button
+              key={f.dimensao}
+              type="button"
+              onClick={() => removerFiltro(f.dimensao)}
+              className="inline-flex items-center gap-1 rounded-badge bg-surface-1 px-2 py-0.5 text-xs text-foreground shadow-card transition-colors duration-fast hover:bg-surface-2"
+              aria-label={`Remover filtro ${NOME_DIMENSAO[f.dimensao]}: ${f.rotulo}`}
+            >
+              <span className="text-foreground-subtle">{NOME_DIMENSAO[f.dimensao]}:</span>
+              <span className="max-w-[14rem] truncate font-medium">{f.rotulo}</span>
+              <X className="h-3 w-3" aria-hidden="true" />
+            </button>
+          ))}
+          <Button variant="ghost" size="sm" onClick={() => setFiltros([])}>
+            Ver tudo
+          </Button>
+          {d.total_filtrado != null && (
+            <span className="ml-auto text-xs text-foreground-muted">
+              Pago no recorte:{" "}
+              <strong className="font-semibold tabular-nums text-foreground">
+                {fmtBRL(d.total_filtrado)}
+              </strong>
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Linha 1 — KPIs. NÃO são recortados: saldo é da conta bancária, não da
+          secretaria. Dizer isso é obrigatório — um filtro que silenciosamente
+          não se aplica a alguns números é pior que não ter filtro. */}
+      {filtros.length > 0 && (
+        <p className="-mb-3 text-xs text-foreground-subtle">
+          Os indicadores de saldo abaixo seguem consolidados: saldo, disponível e comprometido são
+          da conta bancária e não se recortam por secretaria, fornecedor ou contrato. O recorte
+          vale para os gráficos de despesa paga.
+        </p>
+      )}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiCard label="Saldo total" value={fmtBRL(kpis.saldo_total)} icon={Wallet} />
+        <KpiCard
+          label="Saldo total"
+          value={fmtBRL(kpis.saldo_total)}
+          icon={Wallet}
+          definicao="Soma do saldo bancário de todas as contas ativas. Origem: saldo inicial da conta mais as movimentações lançadas (pagamentos.movimentacao_conta)."
+        />
         <KpiCard
           label="Disponível"
           value={fmtBRL(kpis.disponivel_total)}
           icon={BadgeDollarSign}
           intent="success"
+          definicao="Saldo bancário menos o comprometido e menos os bloqueios administrativos vigentes hoje. É o que sobra para novas despesas, respeitando a vinculação de cada fonte."
         />
         <KpiCard
           label="Comprometido"
           value={fmtBRL(kpis.comprometido_total)}
           icon={Lock}
           intent="warning"
+          definicao="Parcelas ainda em aberto de despesas já autorizadas, reservadas na conta pagadora. Não soma autorizado com empenhado nem com liquidado: conta o saldo que falta pagar de cada parcela, uma vez só."
         />
         <KpiCard
           label="A vencer 30 dias"
           value={fmtBRL(kpis.a_pagar_30d)}
           hint="parcelas em aberto, prospectivo"
           icon={Clock}
+          definicao="Parcelas em aberto de despesas autorizadas que vencem de hoje até 30 dias. Não inclui as já vencidas, que têm indicador próprio."
         />
         <KpiCard
           label="Vencidas"
@@ -305,8 +469,15 @@ export default function PagamentosDashboardPage() {
           hint={kpis.vencidas_qtd === 1 ? "1 parcela" : `${kpis.vencidas_qtd} parcelas`}
           icon={AlertCircle}
           intent={kpis.vencidas_qtd > 0 ? "danger" : "default"}
+          definicao="Parcelas de despesas autorizadas cuja data de vencimento já passou e que continuam em aberto."
         />
-        <KpiCard label="Pago no mês" value={fmtBRL(kpis.pago_no_mes)} icon={Landmark} intent="success" />
+        <KpiCard
+          label="Pago no mês"
+          value={fmtBRL(kpis.pago_no_mes)}
+          icon={Landmark}
+          intent="success"
+          definicao="Saídas de conta com origem PAGAMENTO no mês corrente. É a mesma medida usada nos gráficos de despesa por secretaria, natureza, fonte, fornecedor e contrato."
+        />
         {/* rounded-card faz o outline do :focus-visible global acompanhar o raio do card */}
         <Link
           href="/m/pagamentos"
@@ -368,10 +539,59 @@ export default function PagamentosDashboardPage() {
         </CardContent>
       </Card>
 
-      {/* Linha 3 — composição por natureza e fonte */}
+      {/* Onde o dinheiro ESTÁ, antes de onde ele foi: a pergunta nº 1 do
+          gestor ("quanto temos e quanto é nosso para usar") vem antes da
+          nº 10 ("quem gastou mais"). */}
+      <DisponibilidadeContas itens={disponibilidade_contas} />
+
+      {/* Linha 3 — onde o dinheiro foi gasto: a secretaria primeiro, porque é
+          a pergunta que o gestor faz antes de qualquer outra ("quem está
+          gastando mais?"). Ocupa a largura inteira: dividir com outro gráfico
+          truncava nomes de secretaria, que são longos por natureza. */}
+      <ComposicaoChart
+        titulo="Despesa por secretaria"
+        subtitulo="Pago no período · clique numa barra para recortar o painel"
+        itens={por_secretaria}
+        dimensao="unidade"
+        onFiltrar={aplicarFiltro}
+      />
+
       <div className="grid gap-4 lg:grid-cols-2">
-        <ComposicaoChart titulo="Despesa por natureza (top 6)" itens={por_natureza} />
-        <ComposicaoChart titulo="Despesa por fonte de recursos (top 6)" itens={por_fonte} />
+        <ComposicaoChart
+          titulo="Despesa por natureza"
+          subtitulo="Top 6 no período · clique para recortar"
+          itens={por_natureza}
+          dimensao="natureza"
+          onFiltrar={aplicarFiltro}
+        />
+        <ComposicaoChart
+          titulo="Despesa por fonte de recursos"
+          subtitulo="Top 6 no período · clique para recortar"
+          itens={por_fonte}
+          dimensao="fonte"
+          onFiltrar={aplicarFiltro}
+        />
+      </div>
+
+      {/* Linha 4 — com quem e por qual contrato. "Sem contrato" aparece no
+          ranking de contratos de propósito: é despesa real, e escondê-la faria
+          as barras somarem menos que o total pago sem explicar por quê. */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <ComposicaoChart
+          titulo="Maiores fornecedores"
+          subtitulo="Top 10 por valor pago · clique para recortar"
+          itens={top_fornecedores}
+          dimensao="fornecedor"
+          onFiltrar={aplicarFiltro}
+        />
+        <ComposicaoChart
+          titulo="Maiores contratos"
+          subtitulo="Top 10 por valor pago; inclui a despesa sem contrato"
+          itens={top_contratos}
+          insight={semContrato(top_contratos)}
+          dimensao="contrato"
+          onFiltrar={aplicarFiltro}
+        />
       </div>
 
       {/* Linha 4 — maiores débitos + alertas. A lista leva 2/3 da largura e

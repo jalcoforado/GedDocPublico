@@ -146,7 +146,7 @@ describe("o que precisa de você hoje", () => {
     await abrir();
     await screen.findByRole("region", { name: "Protocolo" });
     expect(screen.getByRole("region", { name: "Frota" })).toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "Pagamentos" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Despesa" })).toBeNull();
     expect(screen.queryByRole("region", { name: "Transporte Regulado" })).toBeNull();
     expect(dashboardMock).not.toHaveBeenCalled();
     expect(alvarasKpisMock).not.toHaveBeenCalled();
@@ -180,8 +180,8 @@ describe("o que precisa de você hoje", () => {
     });
     await abrir();
     expect(await (await cartao("Frota")).findByRole("link", { name: /aguardando aprovação: 2/ })).toBeInTheDocument();
-    expect(await (await cartao("Pagamentos")).findByRole("link", { name: /Aguardando aprovação: 5/ })).toBeInTheDocument();
-    expect((await cartao("Pagamentos")).getByRole("link", { name: /Parcelas vencidas: 1/ })).toBeInTheDocument();
+    expect(await (await cartao("Despesa")).findByRole("link", { name: /Aguardando aprovação: 5/ })).toBeInTheDocument();
+    expect((await cartao("Despesa")).getByRole("link", { name: /Parcelas vencidas: 1/ })).toBeInTheDocument();
     expect(await (await cartao("Transporte Regulado")).findByRole("link", { name: /Alvarás vencidos: 1/ })).toBeInTheDocument();
   });
 

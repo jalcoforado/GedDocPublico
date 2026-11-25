@@ -221,6 +221,10 @@ ENDPOINTS_TRANSVERSAIS: set[tuple[str, str]] = {
     # (`require_escopo_leitura/escrita`) é a "permissão" deste realm.
     ("POST", "/api/v2/integracao/pagamentos/debitos"),
     ("POST", "/api/v2/integracao/pagamentos/debitos/{debito_id}/liquidar"),
+    # Retorno do sistema financeiro (0144) — mesmo realm, mesma razão: a chave
+    # de API com escopo de escrita é a credencial, e `_exigir_modulo_pagamentos`
+    # é o gate de módulo.
+    ("POST", "/api/v2/integracao/pagamentos/debitos/{debito_id}/empenho"),
     ("GET", "/api/v2/integracao/pagamentos/debitos"),
     ("GET", "/api/v2/integracao/pagamentos/ordens"),
     ("GET", "/api/v2/integracao/pagamentos/baixas"),
