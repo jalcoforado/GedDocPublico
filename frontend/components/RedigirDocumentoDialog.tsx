@@ -1,53 +1,37 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, FileText } from "lucide-react";
+import { ExternalLink, FileText, LayoutTemplate, Printer, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { EscolhaSegmentada } from "@/components/ui/escolha-segmentada";
-import { FormField, GradeCampos } from "@/components/ui/form-field";
-import { Label } from "@/components/ui/label";
+import { FormField } from "@/components/ui/form-field";
+import { imprimirDocumento } from "@/components/ui/editor-documento";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { GoogleConnectDialog } from "@/components/GoogleConnectDialog";
 import { PreVisualizacaoDocumento } from "@/components/PreVisualizacaoDocumento";
-import { api } from "@/lib/api";
+import { ModelosDeDocumentoDialog } from "@/components/protocolo/ModelosDeDocumentoDialog";
+import { Badge } from "@/components/ui/badge";
+import { api, type Minuta } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-type Modo = "editar" | "lado" | "previa";
+/** `{{campo}}` que sobrou: sai literal no PDF (mesma regra da pré-visualização). */
+const CAMPO_PENDENTE = /\{\{\s*[\w.]+\s*\}\}/g;
 
-const MODOS: { valor: Modo; rotulo: string }[] = [
-  { valor: "editar", rotulo: "Editar" },
-  { valor: "lado", rotulo: "Lado a lado" },
-  { valor: "previa", rotulo: "Pré-visualizar" },
-];
+function escaparHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+}
 
-/** Escolha entre só o editor, editor + documento, ou só o documento (SI-30). */
-function ModoDeVisualizacao({ modo, onChange }: { modo: Modo; onChange: (m: Modo) => void }) {
-  return (
-    <div role="group" aria-label="Visualização" className="inline-flex rounded-md border border-border p-0.5">
-      {MODOS.map((m) => (
-        <button
-          key={m.valor}
-          type="button"
-          aria-pressed={modo === m.valor}
-          onClick={() => onChange(m.valor)}
-          className={cn(
-            "rounded px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            modo === m.valor
-              ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground",
-          )}
-        >
-          {m.rotulo}
-        </button>
-      ))}
-    </div>
-  );
+/** O que está gravado no servidor — para saber se há alteração não salva. */
+interface Salvo {
+  titulo: string;
+  destinatario: string;
+  corpo: string;
 }
 
 interface Props {
@@ -90,8 +74,14 @@ export function RedigirDocumentoDialog({
   const [corpo, setCorpo] = useState("");
   const [versao, setVersao] = useState<number | undefined>(undefined);
   const [showGoogleConnect, setShowGoogleConnect] = useState(false);
-  // Abre lado a lado: ver o documento enquanto escreve é o ponto (SI-30).
-  const [modo, setModo] = useState<Modo>("lado");
+  // SI-67 — a folha do editor já é o documento (timbre, tipografia do PDF);
+  // a pré-visualização do PDF (SI-30) fica a um clique, em Ver.
+  const [previaAberta, setPreviaAberta] = useState(false);
+  const [salvo, setSalvo] = useState<Salvo>({ titulo: "", destinatario: "", corpo: "" });
+  const [modeloAtualId, setModeloAtualId] = useState<number | null | undefined>(undefined);
+  const [modelosAberto, setModelosAberto] = useState(false);
+  const [trocaPendente, setTrocaPendente] = useState<{ id: number | null; nome: string } | null>(null);
+  const [confirmarFechar, setConfirmarFechar] = useState(false);
   // SI-53 — a pré-seleção do modelo padrão acontece UMA vez por abertura: se a
   // pessoa trocar para "Documento em branco", um refetch da lista não desfaz.
   const padraoAplicado = useRef(false);
@@ -115,9 +105,25 @@ export function RedigirDocumentoDialog({
       setTemplateId("");
       setCorpo("");
       setVersao(undefined);
+      setSalvo({ titulo: "", destinatario: "", corpo: "" });
+      setModeloAtualId(undefined);
+      setModelosAberto(false);
+      setTrocaPendente(null);
+      setConfirmarFechar(false);
       padraoAplicado.current = false;
     }
   }, [open, minutaId]);
+
+  /** Tela e "salvo" passam a refletir o que o servidor devolveu. */
+  function sincronizarCom(m: Minuta) {
+    const corpoSalvo = m.corpo_html ?? "";
+    setTitulo(m.titulo);
+    setDestinatario(m.destinatario ?? "");
+    setCorpo(corpoSalvo);
+    setVersao(m.versao);
+    setModeloAtualId(m.id_template_origem);
+    setSalvo({ titulo: m.titulo, destinatario: m.destinatario ?? "", corpo: corpoSalvo });
+  }
 
   const templatesQ = useQuery({
     queryKey: ["templates-documento", "ativos"],
@@ -150,10 +156,7 @@ export function RedigirDocumentoDialog({
     const m = minutaQ.data;
     if (!open || !m || m.id !== minutaAtualId) return;
     if (minutaId !== undefined && m.id !== minutaId) return;
-    setTitulo(m.titulo);
-    setDestinatario(m.destinatario ?? "");
-    setCorpo(m.corpo_html ?? "");
-    setVersao(m.versao);
+    sincronizarCom(m);
   }, [open, minutaQ.data, minutaAtualId, minutaId]);
 
   const criarM = useMutation({
@@ -171,8 +174,7 @@ export function RedigirDocumentoDialog({
         criarGoogleM.mutate(m.id);
       } else {
         setMinutaAtualId(m.id);
-        setCorpo(m.corpo_html ?? "");
-        setVersao(m.versao);
+        sincronizarCom(m);
         qc.invalidateQueries({ queryKey: ["minutas", processoId] });
         onSaved?.();
         toast.success("Rascunho criado.");
@@ -218,42 +220,114 @@ export function RedigirDocumentoDialog({
     onError: (e: Error) => toast.error(e.message),
   });
 
+  /** Grava o que está na tela; devolve a minuta e o que foi enviado. */
+  async function gravarTela(): Promise<{ m: Minuta; enviado: Salvo }> {
+    const enviado = { titulo, destinatario, corpo };
+    const m = await api.minutas.update(minutaAtualId as number, {
+      titulo: titulo.trim(),
+      destinatario: destinatario.trim() || null,
+      corpo_html: corpo,
+      versao,
+    });
+    return { m, enviado };
+  }
+
+  function depoisDeGravar({ m, enviado }: { m: Minuta; enviado: Salvo }) {
+    setVersao(m.versao);
+    // O que foi ENVIADO é o que está salvo — se a pessoa digitou durante o
+    // envio, isso continua aparecendo como alteração não salva.
+    setSalvo(enviado);
+    qc.invalidateQueries({ queryKey: ["minutas", processoId] });
+    qc.invalidateQueries({ queryKey: ["minuta", m.id] });
+  }
+
   const salvarM = useMutation({
-    mutationFn: () =>
-      api.minutas.update(minutaAtualId as number, {
-        titulo: titulo.trim(),
-        destinatario: destinatario.trim() || null,
-        corpo_html: corpo,
-        versao,
-      }),
-    onSuccess: (m) => {
-      setVersao(m.versao);
-      qc.invalidateQueries({ queryKey: ["minutas", processoId] });
-      qc.invalidateQueries({ queryKey: ["minuta", m.id] });
+    mutationFn: gravarTela,
+    onSuccess: (r) => {
+      depoisDeGravar(r);
       onSaved?.();
-      toast.success(`Rascunho salvo (v${m.versao}).`);
+      toast.success(`Rascunho salvo (v${r.m.versao}).`);
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
   // SI-62 — salva o que está na tela e passa ao passo de assinar.
   const concluirM = useMutation({
-    mutationFn: () =>
-      api.minutas.update(minutaAtualId as number, {
-        titulo: titulo.trim(),
-        destinatario: destinatario.trim() || null,
-        corpo_html: corpo,
-        versao,
-      }),
-    onSuccess: (m) => {
-      setVersao(m.versao);
-      qc.invalidateQueries({ queryKey: ["minutas", processoId] });
-      qc.invalidateQueries({ queryKey: ["minuta", m.id] });
-      onConcluirDespacho?.(m.id);
+    mutationFn: gravarTela,
+    onSuccess: (r) => {
+      depoisDeGravar(r);
+      onConcluirDespacho?.(r.m.id);
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  // SI-67 — trocar de modelo no meio. Se há alteração não salva, ela é
+  // gravada ANTES: assim o texto que vai ser substituído fica no histórico
+  // da minuta, e "o anterior não se perde" vale também para o que não foi
+  // salvo à mão.
+  const aplicarModeloM = useMutation({
+    mutationFn: async (modelo: { id: number | null; nome: string }) => {
+      let versaoAtual = versao;
+      if (alterado) versaoAtual = (await gravarTela()).m.versao;
+      const m = await api.minutas.aplicarModelo(minutaAtualId as number, {
+        id_template: modelo.id,
+        destinatario: destinatario.trim() || null,
+        versao: versaoAtual,
+      });
+      return { m, modelo };
+    },
+    onSuccess: ({ m, modelo }) => {
+      // Título e destinatário ficam como estão na tela (o destinatário foi
+      // junto); o corpo e a versão vêm do servidor.
+      const corpoNovo = m.corpo_html ?? "";
+      setCorpo(corpoNovo);
+      setVersao(m.versao);
+      setModeloAtualId(m.id_template_origem);
+      setSalvo((s) => ({ ...s, destinatario, corpo: corpoNovo }));
+      qc.setQueryData(["minuta", m.id], m);
+      qc.invalidateQueries({ queryKey: ["minutas", processoId] });
+      onSaved?.();
+      toast.success(
+        modelo.id === null
+          ? "Documento em branco. O texto anterior ficou no histórico."
+          : `Modelo "${modelo.nome}" aplicado. O texto anterior ficou no histórico.`,
+      );
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const textoVazio = corpo.replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim() === "";
+  const alterado =
+    titulo !== salvo.titulo || destinatario !== salvo.destinatario || corpo !== salvo.corpo;
+  const camposPendentes = Array.from(new Set(corpo.match(CAMPO_PENDENTE) ?? []));
+
+  const estiloQ = useQuery({
+    queryKey: ["templates-documento", "estilo-impressao"],
+    queryFn: () => api.templatesDocumento.estiloImpressao(),
+    staleTime: Infinity,
+    enabled: open && minutaAtualId !== undefined,
+    throwOnError: false,
+  });
+
+  function escolherModelo(modelo: { id: number | null; nome: string }) {
+    setModelosAberto(false);
+    // Nada a perder: aplica direto. Com texto, avisa que ele será substituído.
+    if (textoVazio && !alterado) aplicarModeloM.mutate(modelo);
+    else setTrocaPendente(modelo);
+  }
+
+  function imprimir() {
+    const e = estiloQ.data;
+    if (!e) return;
+    imprimirDocumento({
+      css: e.css,
+      cabecalhoHtml: e.cabecalho_html ?? "",
+      rodapeHtml: e.rodape_html ?? "",
+      conteudoHtml:
+        (titulo.trim() ? `<h1 class="doc-titulo">${escaparHtml(titulo.trim())}</h1>` : "") + corpo,
+      titulo: titulo.trim() || "Documento",
+    });
+  }
 
   const emEdicao = minutaAtualId !== undefined;
   const carregando = emEdicao && minutaQ.isLoading;
@@ -300,27 +374,8 @@ export function RedigirDocumentoDialog({
       </Button>
     </div>
   ) : emEdicao ? (
-    <div className="flex justify-end gap-2">
-      <Button variant="ghost" onClick={onClose}>
-        Fechar
-      </Button>
-      <Button
-        variant={despacho ? "secondary" : "primary"}
-        onClick={() => salvarM.mutate()}
-        disabled={salvarM.isPending || carregando || concluirM.isPending}
-      >
-        {salvarM.isPending ? "Salvando…" : "Salvar rascunho"}
-      </Button>
-      {despacho && (
-        <Button
-          onClick={() => concluirM.mutate()}
-          disabled={carregando || salvarM.isPending || textoVazio}
-          loading={concluirM.isPending}
-        >
-          Concluir e assinar…
-        </Button>
-      )}
-    </div>
+    // SI-67 — no editor, as ações ficam no topo, como no Suite.
+    undefined
   ) : (
     <div className="flex justify-end gap-2">
       <Button variant="ghost" onClick={onClose}>
@@ -336,11 +391,31 @@ export function RedigirDocumentoDialog({
     </div>
   );
 
+  const noEditor = emEdicao && !ehGoogle;
+  const ocupado =
+    carregando || salvarM.isPending || concluirM.isPending || aplicarModeloM.isPending;
+
+  /** Fechar o editor com alteração não salva pergunta antes. */
+  function pedirFechar() {
+    if (noEditor && alterado && !carregando) setConfirmarFechar(true);
+    else onClose();
+  }
+
+  const statusSalvo = carregando
+    ? ""
+    : salvarM.isPending || concluirM.isPending
+      ? "Salvando…"
+      : aplicarModeloM.isPending
+        ? "Aplicando o modelo…"
+        : alterado
+          ? "Alterações não salvas"
+          : `Tudo salvo · versão ${versao ?? 1}`;
+
   return (
     <>
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={pedirFechar}
       title={
         despacho
           ? "Registrar despacho"
@@ -351,7 +426,8 @@ export function RedigirDocumentoDialog({
           ? "O processo continua nesta unidade. Até ser assinado, o despacho é um rascunho que só você vê."
           : undefined
       }
-      size={emEdicao && !ehGoogle && modo === "lado" ? "2xl" : "xl"}
+      size={noEditor ? "tela" : "xl"}
+      semCabecalho={noEditor}
       footer={footer}
     >
       {!emEdicao ? (
@@ -467,7 +543,7 @@ export function RedigirDocumentoDialog({
           )}
         </div>
       ) : carregando ? (
-        <p className="text-sm text-muted-foreground">Carregando rascunho…</p>
+        <p className="p-5 text-sm text-muted-foreground">Carregando rascunho…</p>
       ) : ehGoogle ? (
         <div className="space-y-3">
           <p className="text-sm text-foreground">
@@ -501,56 +577,234 @@ export function RedigirDocumentoDialog({
           )}
         </div>
       ) : (
-        <div className="space-y-4">
-          <GradeCampos>
-            <FormField label="Título" required>
-              <Input
+        <>
+          {/* Topo, como no Google Docs (e a imagem 1 do Suite): o nome do
+              documento à esquerda — os menus vêm logo abaixo, no editor — e
+              "Modelos de documentos", "Salvar" e fechar à direita. */}
+          <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 bg-card px-3 pt-2">
+            <FileText className="h-7 w-7 shrink-0 text-brand" aria-hidden="true" />
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+              <input
                 id="minuta-titulo-edit"
+                aria-label="Título do documento"
                 value={titulo}
                 onChange={(e) => setTitulo(e.target.value)}
+                placeholder="Documento sem título"
+                className={cn(
+                  "min-w-[12rem] max-w-[32rem] flex-1 truncate rounded border border-transparent bg-transparent px-1.5 py-0.5",
+                  "text-lg text-foreground transition-colors duration-fast hover:border-border",
+                  "focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/30",
+                  titulo.trim() === "" && "border-danger/60",
+                )}
               />
-            </FormField>
-            <FormField label="Destinatário" opcional>
-              <Input
-                id="minuta-destinatario-edit"
-                value={destinatario}
-                onChange={(e) => setDestinatario(e.target.value)}
-                placeholder="Ex.: Secretaria de Obras"
-              />
-            </FormField>
-          </GradeCampos>
-          <div className="space-y-1.5">
-            <div className="flex flex-wrap items-end justify-between gap-2">
-              <Label>Conteúdo</Label>
-              <ModoDeVisualizacao modo={modo} onChange={setModo} />
-            </div>
-            <div className={cn("grid gap-4", modo === "lado" && "lg:grid-cols-2")}>
-              {modo !== "previa" && (
-                <RichTextEditor
-                  value={corpo}
-                  onChange={setCorpo}
-                  minHeight={320}
-                  ariaLabel="Editor do documento"
-                  onUploadImage={async (file) => {
-                    const { url } = await api.editorImagens.upload(file);
-                    return url;
-                  }}
-                />
+              {despacho && (
+                <Badge intent="warning" title="O processo continua nesta unidade. Até ser assinado, o despacho é um rascunho que só você vê.">
+                  Despacho · só você vê até assinar
+                </Badge>
               )}
-              {modo !== "editar" && (
-                <PreVisualizacaoDocumento
-                  titulo={titulo}
-                  corpoHtml={corpo}
-                  className={modo === "previa" ? "min-h-[60vh]" : undefined}
-                />
-              )}
+              <span
+                role="status"
+                className={
+                  alterado && !ocupado
+                    ? "text-xs font-medium text-warning-soft-foreground"
+                    : "text-xs text-foreground-muted"
+                }
+              >
+                {statusSalvo}
+              </span>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Versão atual: v{versao}. Cada "Salvar rascunho" registra uma nova versão.
-            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-1.5 text-xs text-foreground-muted">
+                Destinatário
+                <Input
+                  id="minuta-destinatario-edit"
+                  value={destinatario}
+                  onChange={(e) => setDestinatario(e.target.value)}
+                  placeholder="Ex.: Secretaria de Obras"
+                  className="h-9 w-48 text-sm"
+                />
+              </label>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setModelosAberto(true)}
+                disabled={ocupado}
+              >
+                <LayoutTemplate className="h-4 w-4" aria-hidden="true" />
+                Modelos de documentos
+              </Button>
+              <Button
+                variant={despacho ? "secondary" : "primary"}
+                size="sm"
+                onClick={() => salvarM.mutate()}
+                disabled={ocupado}
+              >
+                {salvarM.isPending ? "Salvando…" : "Salvar rascunho"}
+              </Button>
+              {despacho && (
+                <Button
+                  size="sm"
+                  onClick={() => concluirM.mutate()}
+                  disabled={carregando || salvarM.isPending || aplicarModeloM.isPending || textoVazio}
+                  loading={concluirM.isPending}
+                >
+                  Concluir e assinar…
+                </Button>
+              )}
+              <button
+                type="button"
+                onClick={pedirFechar}
+                aria-label="Fechar"
+                title="Fechar"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <X className="h-5 w-5" aria-hidden="true" />
+              </button>
+            </div>
           </div>
-        </div>
+          <RichTextEditor
+            variante="documento"
+            value={corpo}
+            onChange={setCorpo}
+            placeholder="Escreva o documento aqui, ou escolha um modelo em “Modelos de documentos”."
+            ariaLabel="Editor do documento"
+            onUploadImage={async (file) => {
+              const { url } = await api.editorImagens.upload(file);
+              return url;
+            }}
+            documento={{
+              css: estiloQ.data?.css,
+              cabecalho: (
+                <>
+                  {estiloQ.data?.cabecalho_html && (
+                    <div dangerouslySetInnerHTML={{ __html: estiloQ.data.cabecalho_html }} />
+                  )}
+                  {/* O título sai assim no PDF; edita-se no campo "Título". */}
+                  <h1
+                    className="doc-titulo"
+                    title="Para mudar o título, use o campo Título acima"
+                    onClick={() => document.getElementById("minuta-titulo-edit")?.focus()}
+                  >
+                    {titulo.trim() || "Sem título"}
+                  </h1>
+                </>
+              ),
+              rodape: estiloQ.data?.rodape_html ? (
+                <div className="mt-6" dangerouslySetInnerHTML={{ __html: estiloQ.data.rodape_html }} />
+              ) : undefined,
+              menuArquivo: [
+                { label: "Salvar rascunho (Ctrl+S)", onClick: () => salvarM.mutate(), disabled: ocupado },
+                { label: "Modelos de documentos…", icon: LayoutTemplate, onClick: () => setModelosAberto(true), disabled: ocupado },
+                ...(despacho
+                  ? [{ label: "Concluir e assinar…", onClick: () => concluirM.mutate(), disabled: ocupado || textoVazio }]
+                  : []),
+                { label: "Imprimir", icon: Printer, onClick: imprimir, disabled: !estiloQ.data },
+                { label: "Fechar", onClick: pedirFechar },
+              ],
+              onSalvar: () => {
+                if (!ocupado) salvarM.mutate();
+              },
+              onImprimir: estiloQ.data ? imprimir : undefined,
+              previaAberta,
+              onAlternarPrevia: () => setPreviaAberta((v) => !v),
+              previa: <PreVisualizacaoDocumento titulo={titulo} corpoHtml={corpo} className="h-full" />,
+              aviso:
+                camposPendentes.length > 0 ? (
+                  <p
+                    role="status"
+                    className="rounded-md bg-warning-soft px-3 py-2 text-xs text-warning-soft-foreground"
+                  >
+                    {camposPendentes.length === 1
+                      ? "Um campo automático não foi preenchido"
+                      : `${camposPendentes.length} campos automáticos não foram preenchidos`}{" "}
+                    e {camposPendentes.length === 1 ? "vai" : "vão"} sair assim no PDF:{" "}
+                    {camposPendentes.join(", ")}
+                  </p>
+                ) : undefined,
+            }}
+          />
+        </>
       )}
+    </Dialog>
+
+    {/* SI-67 — "Modelos de documentos" a qualquer momento. */}
+    <ModelosDeDocumentoDialog
+      open={modelosAberto}
+      onClose={() => setModelosAberto(false)}
+      onEscolher={escolherModelo}
+      modeloAtualId={modeloAtualId}
+    />
+
+    <Dialog
+      open={trocaPendente !== null}
+      onClose={() => setTrocaPendente(null)}
+      title="Trocar o modelo?"
+      size="sm"
+      footer={
+        <>
+          <Button variant="ghost" onClick={() => setTrocaPendente(null)}>
+            Cancelar
+          </Button>
+          <Button
+            onClick={() => {
+              const m = trocaPendente;
+              setTrocaPendente(null);
+              if (m) aplicarModeloM.mutate(m);
+            }}
+          >
+            Substituir o texto
+          </Button>
+        </>
+      }
+    >
+      <p className="text-sm text-foreground">
+        O texto atual será substituído
+        {trocaPendente?.id === null ? " por um documento em branco" : ` pelo modelo "${trocaPendente?.nome}"`}.
+      </p>
+      <p className="mt-2 text-sm text-foreground-muted">
+        Nada se perde: o texto de agora fica guardado no histórico do documento
+        {alterado ? ", inclusive o que ainda não foi salvo" : ""}.
+      </p>
+    </Dialog>
+
+    <Dialog
+      open={confirmarFechar}
+      onClose={() => setConfirmarFechar(false)}
+      title="Sair sem salvar?"
+      size="sm"
+      footer={
+        <>
+          <Button variant="ghost" onClick={() => setConfirmarFechar(false)}>
+            Continuar editando
+          </Button>
+          <Button
+            variant="danger-outline"
+            onClick={() => {
+              setConfirmarFechar(false);
+              onClose();
+            }}
+          >
+            Sair sem salvar
+          </Button>
+          <Button
+            loading={salvarM.isPending}
+            onClick={() =>
+              salvarM.mutate(undefined, {
+                onSuccess: () => {
+                  setConfirmarFechar(false);
+                  onClose();
+                },
+              })
+            }
+          >
+            Salvar e fechar
+          </Button>
+        </>
+      }
+    >
+      <p className="text-sm text-foreground">
+        Há alterações neste documento que ainda não foram salvas.
+      </p>
     </Dialog>
 
     {/* Google Connect Dialog */}

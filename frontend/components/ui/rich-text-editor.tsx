@@ -38,6 +38,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { MolduraDocumento, type OpcoesDocumento } from "@/components/ui/editor-documento";
+import { Recuo } from "@/components/ui/extensao-recuo";
 import { cn } from "@/lib/utils";
 
 interface ToolbarButtonProps {
@@ -91,6 +93,14 @@ interface RichTextEditorProps {
   onUploadImage?: (file: File) => Promise<string>;
   /** Campos automáticos (`{{chave}}`) que a barra oferece para inserir no cursor. */
   campos?: { chave: string; descricao: string }[];
+  /**
+   * "campo" (padrão): caixa com barra de formatação, para formulários.
+   * "documento" (SI-67): a tela do Google Docs — menus, régua e a folha A4
+   * com o papel timbrado (`components/ui/editor-documento.tsx`).
+   */
+  variante?: "campo" | "documento";
+  /** Só na variante "documento": timbre, CSS do PDF, menu Arquivo, prévia. */
+  documento?: OpcoesDocumento;
 }
 
 export function RichTextEditor({
@@ -103,12 +113,19 @@ export function RichTextEditor({
   id,
   onUploadImage,
   campos,
+  variante = "campo",
+  documento,
 }: RichTextEditorProps) {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const ehDocumento = variante === "documento";
 
   const editor = useEditor({
     immediatelyRender: false,
+    // Na folha, a barra mostra o estado do cursor (negrito ligado, estilo do
+    // parágrafo, desfazer disponível): precisa repintar a cada transação,
+    // inclusive só mover o cursor.
+    shouldRerenderOnTransaction: ehDocumento,
     extensions: [
       StarterKit.configure({
         heading: { levels: [2, 3] },
@@ -123,19 +140,38 @@ export function RichTextEditor({
       Placeholder.configure({ placeholder }),
       Underline,
       TextAlign.configure({ types: ["heading", "paragraph"] }),
-      Image.configure({ inline: true, HTMLAttributes: { class: "max-w-full" } }),
+      Image.configure({
+        inline: true,
+        HTMLAttributes: { class: "max-w-full" },
+        // SI-67 — na folha, a imagem se redimensiona arrastando o canto, como no
+        // Google Docs; o tamanho vai no `width` do <img>, que o PDF respeita.
+        resize: ehDocumento
+          ? {
+              enabled: true,
+              directions: ["top-left", "top-right", "bottom-left", "bottom-right"],
+              minWidth: 32,
+              minHeight: 16,
+              alwaysPreserveAspectRatio: true,
+            }
+          : false,
+      }),
       Table.configure({ resizable: false }),
       TableRow,
       TableHeader,
       TableCell,
+      ...(ehDocumento ? [Recuo] : []),
     ],
     content: value || "",
     editorProps: {
       attributes: {
-        class: cn(
-          "prose-tiptap focus:outline-none",
-          "px-3 py-2.5 text-sm leading-relaxed text-foreground",
-        ),
+        // Na folha, a tipografia é a do PDF (CSS escopado em `.folha-doc`),
+        // não a da aplicação.
+        class: ehDocumento
+          ? "focus:outline-none"
+          : cn(
+              "prose-tiptap focus:outline-none",
+              "px-3 py-2.5 text-sm leading-relaxed text-foreground",
+            ),
         role: "textbox",
         "aria-multiline": "true",
         // `<label for>` não nomeia div editável (não é controle "rotulável"):
@@ -143,7 +179,7 @@ export function RichTextEditor({
         // formulário rolar e focar o editor.
         ...(id ? { id } : {}),
         "aria-label": ariaLabel ?? "Editor de texto",
-        style: `min-height:${minHeight}px`,
+        ...(ehDocumento ? {} : { style: `min-height:${minHeight}px` }),
       },
     },
     onUpdate({ editor }) {
@@ -219,6 +255,31 @@ export function RichTextEditor({
   }
 
   const emTabela = editor.isActive("table");
+
+  if (ehDocumento) {
+    return (
+      <>
+        {onUploadImage && (
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            className="hidden"
+            onChange={handleFileSelected}
+          />
+        )}
+        <MolduraDocumento
+          editor={editor}
+          opcoes={documento ?? {}}
+          conteudo={<EditorContent editor={editor} />}
+          uploading={uploading}
+          onInserirImagem={() => insertImage(editor)}
+          onLink={() => promptLink(editor)}
+          className={className}
+        />
+      </>
+    );
+  }
 
   return (
     <div

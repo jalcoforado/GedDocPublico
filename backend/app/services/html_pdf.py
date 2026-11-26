@@ -189,4 +189,9 @@ def html_to_pdf_bytes(
         "<!DOCTYPE html><html><head><meta charset='utf-8'>"
         f"<style>{_CSS}</style></head><body>{cabecalho}{corpo_html}</body></html>"
     )
-    return HTML(string=documento, url_fetcher=_raise_no_remote).write_pdf()
+    # `presentational_hints`: respeita o `width` do <img> (SI-67, imagem
+    # redimensionada no editor). O sanitizador só deixa passar width/height de
+    # img e colspan/rowspan de célula, então nada mais muda.
+    return HTML(string=documento, url_fetcher=_raise_no_remote).write_pdf(
+        presentational_hints=True
+    )

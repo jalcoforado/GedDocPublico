@@ -35,6 +35,9 @@ interface ActionsMenuProps {
   semSeta?: boolean;
   /** className extra no wrapper. */
   className?: string;
+  /** Onde o painel abre; default "bottom-end". A barra de menus do editor
+   * (Arquivo, Editar…) abre para a direita, "bottom-start". */
+  placement?: "bottom-start" | "bottom-end";
 }
 
 /**
@@ -55,6 +58,7 @@ export function ActionsMenu({
   size = "sm",
   semSeta = false,
   className,
+  placement = "bottom-end",
 }: ActionsMenuProps) {
   const [open, setOpen] = React.useState(false);
   const [focusIdx, setFocusIdx] = React.useState<number>(-1);
@@ -162,7 +166,7 @@ export function ActionsMenu({
         open={open}
         anchorRef={triggerRef}
         onClose={() => close(true)}
-        placement="bottom-end"
+        placement={placement}
         className="min-w-[12rem] py-1"
       >
         <ul role="menu" onKeyDown={onKeyDown} className="focus:outline-none">

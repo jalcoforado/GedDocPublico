@@ -4,81 +4,28 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, FileText, Pause, Pencil, Plus, Star, Trash2 } from "lucide-react";
 import { useState } from "react";
 
-import { EditorDeModelo, type ModoEdicao } from "@/components/protocolo/EditorDeModelo";
+import { FormularioModeloDialog } from "@/components/protocolo/FormularioModeloDialog";
 import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Carregando } from "@/components/ui/carregando";
-import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ui/confirm";
-import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Input } from "@/components/ui/input";
-import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { PageHeader } from "@/components/ui/page-header";
-import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { api, protocoloApi, type TemplateDocumento } from "@/lib/api";
-import { blocosParaHtml, htmlParaBlocos, type Bloco } from "@/lib/template-blocos";
-
-async function enviarImagem(file: File): Promise<string> {
-  const { url } = await api.editorImagens.upload(file);
-  return url;
-}
-
-interface FormState {
-  nome: string;
-  id_especie_documental: number | null;
-  id_unidade_trabalho: number | null;
-  descricao: string;
-  corpo_html: string;
-  ativo: boolean;
-  padrao: boolean;
-}
-
-const EMPTY: FormState = {
-  nome: "",
-  id_especie_documental: null,
-  id_unidade_trabalho: null,
-  descricao: "",
-  corpo_html: "",
-  ativo: true,
-  padrao: false,
-};
 
 export default function TemplatesDocumentoPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const confirm = useConfirm();
 
-  const [open, setOpen] = useState(false);
-  const [editId, setEditId] = useState<number | null>(null);
-  const [form, setForm] = useState<FormState>(EMPTY);
-  const [modo, setModo] = useState<ModoEdicao>("blocos");
-  const [blocos, setBlocos] = useState<Bloco[]>([]);
-
-  // Em modo blocos o HTML gravado é sempre o dos blocos: uma fonte só.
-  function mudarBlocos(nova: Bloco[]) {
-    setBlocos(nova);
-    setForm((f) => ({ ...f, corpo_html: blocosParaHtml(nova) }));
-  }
-
-  function trocarModo(novo: ModoEdicao) {
-    if (novo === modo) return;
-    // Voltar do editor livre relê o HTML: o que ainda tem marca de bloco volta
-    // a ser bloco, o resto vira bloco de Texto.
-    if (novo === "blocos") setBlocos(htmlParaBlocos(form.corpo_html));
-    setModo(novo);
-  }
+  // Modelo aberto no formulário: `null` = novo; ausente = fechado.
+  const [aberto, setAberto] = useState<{ id: number | null } | null>(null);
 
   const listQ = useQuery({
     queryKey: ["templates-documento"],
     queryFn: () => api.templatesDocumento.list(),
-  });
-  const placeholdersQ = useQuery({
-    queryKey: ["templates-documento", "placeholders"],
-    queryFn: () => api.templatesDocumento.placeholders(),
-    enabled: open,
   });
   const especiesQ = useQuery({
     queryKey: ["especies-documentais"],
@@ -93,75 +40,13 @@ export default function TemplatesDocumentoPage() {
     (unidadesQ.data?.items ?? []).map((u) => [u.id, u.unidade_trabalho]),
   );
 
-  // Erro sob o campo só depois de tentar salvar; o botão não fica cinza.
-  const [tentou, setTentou] = useState(false);
-  const faltaNome = form.nome.trim().length === 0;
-  const faltaCorpo = form.corpo_html.trim().length === 0;
-
-  function salvar() {
-    setTentou(true);
-    if (faltaNome) {
-      document.getElementById("tpl-nome")?.focus();
-      return;
-    }
-    if (faltaCorpo) {
-      document.querySelector<HTMLElement>('[aria-label="Conteúdo do template"]')?.focus();
-      return;
-    }
-    saveM.mutate();
-  }
-
   function abrirNovo() {
-    setTentou(false);
-    setEditId(null);
-    setForm(EMPTY);
-    setBlocos([]);
-    setModo("blocos");
-    setOpen(true);
+    setAberto({ id: null });
   }
 
-  async function abrirEdicao(id: number) {
-    const t = await api.templatesDocumento.get(id);
-    setTentou(false);
-    setEditId(id);
-    setForm({
-      nome: t.nome,
-      id_especie_documental: t.id_especie_documental,
-      id_unidade_trabalho: t.id_unidade_trabalho,
-      descricao: t.descricao ?? "",
-      corpo_html: t.corpo_html,
-      ativo: t.ativo,
-      padrao: t.padrao,
-    });
-    // Modelo antigo (sem marca de bloco) abre como um bloco de Texto: nada se perde.
-    setBlocos(htmlParaBlocos(t.corpo_html));
-    setModo("blocos");
-    setOpen(true);
+  function abrirEdicao(id: number) {
+    setAberto({ id });
   }
-
-  const saveM = useMutation({
-    mutationFn: () => {
-      const payload = {
-        nome: form.nome.trim(),
-        id_especie_documental: form.id_especie_documental,
-        id_unidade_trabalho: form.id_unidade_trabalho,
-        descricao: form.descricao.trim() || null,
-        corpo_html: form.corpo_html,
-        ativo: form.ativo,
-        // Inativo não pode ser padrão (o backend recusa): desativar desmarca.
-        padrao: form.ativo && form.padrao,
-      };
-      return editId === null
-        ? api.templatesDocumento.create(payload)
-        : api.templatesDocumento.update(editId, payload);
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["templates-documento"] });
-      setOpen(false);
-      toast.success(editId === null ? "Template criado." : "Template atualizado.");
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
 
   const removeM = useMutation({
     mutationFn: (id: number) => api.templatesDocumento.remove(id),
@@ -283,150 +168,11 @@ export default function TemplatesDocumentoPage() {
         </ul>
       )}
 
-      <Dialog
-        open={open}
-        onClose={() => setOpen(false)}
-        title={editId === null ? "Novo modelo de documento" : "Editar modelo de documento"}
-        size="2xl"
-        footer={
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setOpen(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={salvar} loading={saveM.isPending}>
-              {saveM.isPending
-                ? "Salvando…"
-                : editId === null
-                  ? "Criar modelo"
-                  : "Salvar alterações"}
-            </Button>
-          </div>
-        }
-      >
-        <div className="space-y-4">
-          <GradeCampos>
-            <FormField
-              label="Nome"
-              required
-              error={tentou && faltaNome ? "Dê um nome ao modelo, ex.: Despacho de encaminhamento." : undefined}
-            >
-              <Input
-                id="tpl-nome"
-                value={form.nome}
-                onChange={(e) => setForm({ ...form, nome: e.target.value })}
-                placeholder="Ex.: Despacho de encaminhamento"
-              />
-            </FormField>
-            <FormField label="Espécie documental" opcional>
-              <Select
-                id="tpl-especie"
-                value={form.id_especie_documental ?? ""}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    id_especie_documental: e.target.value ? Number(e.target.value) : null,
-                  })
-                }
-              >
-                <option value="">Sem espécie</option>
-                {(especiesQ.data ?? []).map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.nome}
-                  </option>
-                ))}
-              </Select>
-            </FormField>
-          </GradeCampos>
-          <FormField
-            label="Setor administrador"
-            opcional
-            hint="Só define quem administra o modelo; todos continuam podendo usá-lo."
-          >
-            <Select
-              id="tpl-unidade"
-              value={form.id_unidade_trabalho ?? ""}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  id_unidade_trabalho: e.target.value ? Number(e.target.value) : null,
-                })
-              }
-            >
-              <option value="">Nenhum setor específico</option>
-              {(unidadesQ.data?.items ?? []).map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.unidade_trabalho}
-                </option>
-              ))}
-            </Select>
-          </FormField>
-          <FormField
-            label="Descrição"
-            opcional
-            hint="Aparece ao escolher o modelo, para ajudar a achar o certo."
-          >
-            <Input
-              id="tpl-desc"
-              value={form.descricao}
-              onChange={(e) => setForm({ ...form, descricao: e.target.value })}
-              placeholder="Ex.: Para encaminhar processos entre secretarias."
-            />
-          </FormField>
-
-          <FormField
-            label="Conteúdo do modelo"
-            required
-            error={tentou && faltaCorpo ? "Escreva o texto do modelo." : undefined}
-          >
-            <div>
-              <EditorDeModelo
-                modo={modo}
-                onTrocarModo={trocarModo}
-                blocos={blocos}
-                onBlocos={mudarBlocos}
-                corpoHtml={form.corpo_html}
-                onCorpoHtml={(html) => setForm({ ...form, corpo_html: html })}
-                campos={placeholdersQ.data ?? []}
-                onUploadImage={enviarImagem}
-              />
-            </div>
-          </FormField>
-
-          <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-border bg-surface-1 px-3 py-2.5 transition-colors duration-fast hover:bg-surface-2">
-            <Checkbox
-              checked={form.ativo}
-              onChange={(e) => setForm({ ...form, ativo: e.target.checked })}
-              className="mt-0.5 h-4 w-4"
-            />
-            <span className="text-sm">
-              <span className="block font-medium text-foreground">Ativo</span>
-              <span className="block text-xs text-foreground-muted">
-                Aparece na lista de modelos ao redigir um documento.
-              </span>
-            </span>
-          </label>
-
-          <label
-            className={`flex items-start gap-2.5 rounded-md border border-border bg-surface-1 px-3 py-2.5 transition-colors duration-fast ${
-              form.ativo ? "cursor-pointer hover:bg-surface-2" : "cursor-not-allowed opacity-60"
-            }`}
-          >
-            <Checkbox
-              checked={form.ativo && form.padrao}
-              disabled={!form.ativo}
-              onChange={(e) => setForm({ ...form, padrao: e.target.checked })}
-              className="mt-0.5 h-4 w-4"
-            />
-            <span className="text-sm">
-              <span className="block font-medium text-foreground">Usar como padrão</span>
-              <span className="block text-xs text-foreground-muted">
-                Já vem selecionado ao redigir um documento, para todos da prefeitura. Só um
-                modelo pode ser o padrão: marcar este desmarca o anterior.
-              </span>
-            </span>
-          </label>
-        </div>
-      </Dialog>
+      <FormularioModeloDialog
+        open={aberto !== null}
+        onClose={() => setAberto(null)}
+        modeloId={aberto?.id ?? null}
+      />
     </div>
   );
 }

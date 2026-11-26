@@ -14,7 +14,10 @@ interface DialogProps {
   description?: string;
   children: React.ReactNode;
   footer?: React.ReactNode;
-  size?: "sm" | "md" | "lg" | "xl" | "2xl";
+  size?: "sm" | "md" | "lg" | "xl" | "2xl" | "tela";
+  /** Sem o topo do diálogo (título e X): o conteúdo traz o próprio, como o
+   * editor de documento. O título continua nomeando o diálogo (sr-only). */
+  semCabecalho?: boolean;
 }
 
 const SIZES = {
@@ -25,12 +28,32 @@ const SIZES = {
   // Editor e pré-visualização lado a lado (SI-30): duas colunas que precisam
   // de largura de verdade cada uma.
   "2xl": "max-w-[min(96rem,calc(100vw-2rem))]",
+  // SI-67 — o editor de documento ocupa a tela inteira, como o Google Docs:
+  // o conteúdo é quem rola (a folha), não o diálogo.
+  tela: "flex h-[100dvh] max-w-none flex-col",
 };
+
+/**
+ * Diálogos abertos, do mais antigo ao mais novo. Só o de cima responde a
+ * Escape e prende o Tab: com um diálogo aberto sobre outro (o editor e, por
+ * cima, a lista de modelos ou a confirmação), os dois escutavam a mesma tecla
+ * na `window` e o Escape fechava os dois de uma vez.
+ */
+const pilhaDeDialogos: symbol[] = [];
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-export function Dialog({ open, onClose, title, description, children, footer, size = "md" }: DialogProps) {
+export function Dialog({
+  open,
+  onClose,
+  title,
+  description,
+  children,
+  footer,
+  size = "md",
+  semCabecalho = false,
+}: DialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
@@ -100,8 +123,15 @@ export function Dialog({ open, onClose, title, description, children, footer, si
       alvo?.focus();
     }
 
+    const eu = Symbol("dialog");
+    pilhaDeDialogos.push(eu);
+
     function onKey(e: KeyboardEvent) {
+      if (pilhaDeDialogos[pilhaDeDialogos.length - 1] !== eu) return;
       if (e.key === "Escape") {
+        // Um menu aberto dentro do diálogo (Popover em portal) já tratou o
+        // Escape para fechar a si mesmo: não é pedido para fechar o diálogo.
+        if (e.defaultPrevented) return;
         e.stopPropagation();
         onCloseRef.current();
         return;
@@ -127,6 +157,8 @@ export function Dialog({ open, onClose, title, description, children, footer, si
 
     return () => {
       window.removeEventListener("keydown", onKey);
+      const i = pilhaDeDialogos.indexOf(eu);
+      if (i >= 0) pilhaDeDialogos.splice(i, 1);
       document.body.style.overflow = prevOverflow;
       // Lido no CLEANUP (não no corpo do efeito): a captura pode acontecer
       // depois do efeito rodar (evento de foco do autoFocus/StrictMode).
@@ -144,7 +176,11 @@ export function Dialog({ open, onClose, title, description, children, footer, si
   // ficavam acesos). No body, o diálogo cobre a janela venha de onde vier.
   const conteudo = (
     <div
-      className="fixed inset-0 z-modal flex items-end justify-center bg-black/55 p-0 backdrop-blur-[2px] animate-fade-in sm:items-center sm:p-4"
+      className={cn(
+        "fixed inset-0 z-modal flex justify-center bg-black/55 p-0 backdrop-blur-[2px] animate-fade-in",
+        // "tela" cobre a janela inteira: nada da página aparece por trás.
+        size === "tela" ? "items-stretch" : "items-end sm:items-center sm:p-4",
+      )}
       onMouseDown={(e) => {
         mousedownNoOverlay.current = e.target === e.currentTarget;
       }}
@@ -163,12 +199,22 @@ export function Dialog({ open, onClose, title, description, children, footer, si
         aria-describedby={description ? descriptionId : undefined}
         onFocus={capturaRetorno}
         className={cn(
-          "w-full rounded-t-dialog bg-card text-card-foreground shadow-dialog animate-slide-up",
-          "sm:rounded-dialog sm:animate-scale-in",
+          "w-full bg-card text-card-foreground shadow-dialog",
+          size === "tela"
+            ? "animate-fade-in"
+            : "rounded-t-dialog animate-slide-up sm:rounded-dialog sm:animate-scale-in",
           SIZES[size],
         )}
         onClick={(e) => e.stopPropagation()}
       >
+        {semCabecalho ? (
+          // O conteúdo traz o próprio topo (o editor de documento): o título
+          // continua nomeando o diálogo para leitor de tela.
+          <div className="sr-only">
+            <h2 id={titleId}>{title}</h2>
+            {description && <p id={descriptionId}>{description}</p>}
+          </div>
+        ) : (
         <header className="flex items-center justify-between gap-3 border-b border-border px-5 py-3">
           <div className="min-w-0">
             <h2 id={titleId} className="font-display text-lg font-semibold tracking-tight text-titulo">
@@ -190,7 +236,16 @@ export function Dialog({ open, onClose, title, description, children, footer, si
             <X className="h-5 w-5" aria-hidden="true" />
           </button>
         </header>
-        <div className="max-h-[70vh] overflow-y-auto p-5">{children}</div>
+        )}
+        <div
+          className={
+            size === "tela"
+              ? "flex min-h-0 flex-1 flex-col overflow-hidden"
+              : "max-h-[70vh] overflow-y-auto p-5"
+          }
+        >
+          {children}
+        </div>
         {footer && (
           <footer className="flex flex-wrap justify-end gap-2 border-t border-border px-5 py-3 pb-safe">
             {footer}

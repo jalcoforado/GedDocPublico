@@ -725,3 +725,171 @@
     transform: none;
   }
 }
+
+/* ------------------------------------------------------------------------
+   SI-67 — editor de documento com cara de Google Docs
+   (`components/ui/editor-documento.tsx`). A folha é o DOCUMENTO: papel
+   branco e texto escuro em qualquer tema, como a pré-visualização (SI-30).
+   Tipografia do texto vem do CSS do PDF (`estilo-impressao`), aplicado só
+   dentro de `.folha-doc`; aqui fica só a moldura.
+   ------------------------------------------------------------------------ */
+.editor-doc-folha {
+  box-sizing: border-box;
+  width: 21cm;
+  min-height: 29.7cm;
+  margin: 0 auto;
+  padding: 2.5cm 2cm;
+  background: #fff;
+  color: #1a1a1a;
+  box-shadow: 0 1px 3px rgba(60, 64, 67, 0.3), 0 4px 8px 3px rgba(60, 64, 67, 0.15);
+  display: flex;
+  flex-direction: column;
+}
+.editor-doc-folha > .editor-doc-miolo {
+  flex: 1 0 auto;
+}
+.editor-doc-folha > footer.timbre-rodape {
+  margin-top: 24px;
+}
+.editor-doc-folha .ProseMirror {
+  outline: none;
+  min-height: 14cm;
+  caret-color: #1a1a1a;
+}
+.editor-doc-folha .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: #9aa0a6;
+  pointer-events: none;
+  height: 0;
+}
+.editor-doc-folha .ProseMirror ul {
+  list-style: disc;
+}
+.editor-doc-folha .ProseMirror ol {
+  list-style: decimal;
+}
+.editor-doc-folha .ProseMirror li > p {
+  margin: 0;
+}
+.editor-doc-folha .ProseMirror img.ProseMirror-selectednode {
+  outline: 2px solid #1a73e8;
+}
+.editor-doc-folha .ProseMirror .selectedCell {
+  background: rgba(26, 115, 232, 0.12);
+}
+.editor-doc-folha h1.doc-titulo {
+  cursor: text;
+}
+
+/* Régua em centímetros, alinhada à folha: traço fino a cada 0,25 cm, traço
+   maior a cada centímetro, margens (2 cm) sombreadas. */
+.editor-doc-regua {
+  position: relative;
+  width: 21cm;
+  height: 20px;
+  margin: 0 auto;
+  background:
+    repeating-linear-gradient(90deg, #9aa0a6 0 1px, transparent 1px 0.25cm) left bottom / 100% 4px no-repeat,
+    repeating-linear-gradient(90deg, #5f6368 0 1px, transparent 1px 1cm) left bottom / 100% 7px no-repeat,
+    #fff;
+  border-bottom: 1px solid #dadce0;
+  font: 10px/1 Arial, sans-serif;
+  color: #5f6368;
+  user-select: none;
+}
+.editor-doc-regua-margem {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2cm;
+  background: rgba(60, 64, 67, 0.08);
+}
+.editor-doc-regua-numero {
+  position: absolute;
+  top: 2px;
+  transform: translateX(-50%);
+}
+/* Títulos dentro da folha seguem a fonte do DOCUMENTO (a do PDF), não a de
+   display da aplicação, que o `h1/h2/h3` global aplica. */
+.editor-doc-folha h1,
+.editor-doc-folha h2,
+.editor-doc-folha h3 {
+  font-family: inherit;
+  font-weight: 700;
+  letter-spacing: normal;
+}
+
+/* Recuos na régua (SI-67), no desenho do Google Docs: triângulo embaixo =
+   recuo esquerdo/direito, barrinha em cima = recuo da primeira linha. */
+.editor-doc-marcador {
+  position: absolute;
+  transform: translateX(-50%);
+  width: 12px;
+  padding: 0;
+  border: 0;
+  background: #1a73e8;
+  cursor: ew-resize;
+  z-index: 1;
+}
+.editor-doc-marcador:focus-visible {
+  outline: 2px solid #1a73e8;
+  outline-offset: 2px;
+}
+.editor-doc-marcador-esquerdo,
+.editor-doc-marcador-direito {
+  bottom: 0;
+  height: 9px;
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+.editor-doc-marcador-primeira {
+  top: 0;
+  height: 5px;
+  border-radius: 1px;
+}
+.editor-doc-regua-dica {
+  position: absolute;
+  top: 24px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #3c4043;
+  color: #fff;
+  font: 11px/1.4 Arial, sans-serif;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Imagem redimensionável na folha (TipTap ResizableNodeView): alças nos
+   cantos, visíveis ao passar o mouse ou com a imagem selecionada. */
+.editor-doc-folha [data-resize-container] {
+  max-width: 100%;
+}
+.editor-doc-folha [data-resize-handle] {
+  width: 10px;
+  height: 10px;
+  margin: -5px;
+  background: #1a73e8;
+  border: 1px solid #fff;
+  border-radius: 2px;
+  opacity: 0;
+  transition: opacity 120ms;
+  z-index: 1;
+}
+.editor-doc-folha [data-resize-handle="top-left"],
+.editor-doc-folha [data-resize-handle="bottom-right"] {
+  cursor: nwse-resize;
+}
+.editor-doc-folha [data-resize-handle="top-right"],
+.editor-doc-folha [data-resize-handle="bottom-left"] {
+  cursor: nesw-resize;
+}
+.editor-doc-folha [data-resize-container]:hover [data-resize-handle],
+.editor-doc-folha .ProseMirror-selectednode [data-resize-handle],
+.editor-doc-folha [data-resize-state="true"] [data-resize-handle] {
+  opacity: 1;
+}
+.editor-doc-folha [data-resize-container]:hover [data-resize-wrapper] {
+  outline: 1px solid #1a73e8;
+}
