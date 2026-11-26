@@ -810,3 +810,12 @@
   top: 2px;
   transform: translateX(-50%);
 }
+/* Títulos dentro da folha seguem a fonte do DOCUMENTO (a do PDF), não a de
+   display da aplicação, que o `h1/h2/h3` global aplica. */
+.editor-doc-folha h1,
+.editor-doc-folha h2,
+.editor-doc-folha h3 {
+  font-family: inherit;
+  font-weight: 700;
+  letter-spacing: normal;
+}

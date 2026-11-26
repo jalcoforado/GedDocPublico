@@ -61,11 +61,20 @@ async def cen(admin_engine):
 
     await app_engine.dispose()
     for pref in (a, b):
-        async with _sm(admin_engine)() as s:
-            await s.execute(text("DELETE FROM protocolos.template_documento WHERE tenant_id=:t"),
-                            {"t": pref["tenant"].id})
-            await s.commit()
-        await _limpar(admin_engine, pref["tenant"].id)
+        await _limpar_com_modelos(admin_engine, pref["tenant"].id)
+
+
+async def _limpar_com_modelos(admin_engine, tenant_id: int) -> None:
+    # A minuta aponta para o modelo (id_template_origem): ela sai primeiro.
+    async with _sm(admin_engine)() as s:
+        for stmt in (
+            "DELETE FROM protocolos.minuta_historico WHERE tenant_id=:t",
+            "DELETE FROM protocolos.minuta WHERE tenant_id=:t",
+            "DELETE FROM protocolos.template_documento WHERE tenant_id=:t",
+        ):
+            await s.execute(text(stmt), {"t": tenant_id})
+        await s.commit()
+    await _limpar(admin_engine, tenant_id)
 
 
 async def _minuta(admin_engine, minuta_id: int) -> Minuta:

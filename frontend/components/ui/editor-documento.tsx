@@ -213,7 +213,7 @@ export interface OpcoesDocumento {
   cabecalho?: React.ReactNode;
   /** Dentro da folha, no pé: o rodapé do timbre. */
   rodape?: React.ReactNode;
-  /** Itens do menu Arquivo que dependem da tela (salvar, modelos, fechar…). */
+  /** Itens do menu Arquivo (salvar, modelos, imprimir, fechar…): são da tela. */
   menuArquivo?: ActionsMenuItem[];
   /** Ctrl+S. */
   onSalvar?: () => void;
@@ -254,10 +254,7 @@ export function MolduraDocumento({
   const menus: { rotulo: string; itens: ActionsMenuItem[] }[] = [
     {
       rotulo: "Arquivo",
-      itens: [
-        ...(opcoes.menuArquivo ?? []),
-        ...(opcoes.onImprimir ? [{ label: "Imprimir", icon: Printer, onClick: opcoes.onImprimir }] : []),
-      ],
+      itens: opcoes.menuArquivo ?? [],
     },
     {
       rotulo: "Editar",
@@ -432,7 +429,7 @@ export function MolduraDocumento({
       </div>
 
       <div className={cn("flex min-h-0 flex-1", opcoes.previaAberta && opcoes.previa && "gap-0")}>
-        <div className="min-h-0 min-w-0 flex-1 overflow-auto">
+        <div className="min-h-0 min-w-0 flex-1 overflow-auto bg-muted">
           {opcoes.aviso && <div className="mx-auto max-w-[21cm] px-4 pt-3">{opcoes.aviso}</div>}
           <div className="px-4 pb-10 pt-3" style={{ zoom: zoom / 100 }}>
             {regua && (

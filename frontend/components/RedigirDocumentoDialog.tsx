@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, FileText, LayoutTemplate } from "lucide-react";
+import { ExternalLink, FileText, LayoutTemplate, Printer } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -668,6 +668,7 @@ export function RedigirDocumentoDialog({
                 ...(despacho
                   ? [{ label: "Concluir e assinar…", onClick: () => concluirM.mutate(), disabled: ocupado || textoVazio }]
                   : []),
+                { label: "Imprimir", icon: Printer, onClick: imprimir, disabled: !estiloQ.data },
                 { label: "Fechar", onClick: pedirFechar },
               ],
               onSalvar: () => {
