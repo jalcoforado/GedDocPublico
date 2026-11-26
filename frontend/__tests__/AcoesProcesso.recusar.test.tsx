@@ -1,0 +1,135 @@
+/**
+ * Recusar encaminhamento, no detalhe do processo: só com encaminhamento
+ * pendente, e só com motivo.
+ */
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const recusarMock = vi.fn((_id: number, _motivo: string) => Promise.resolve({}));
+
+vi.mock("@/lib/api", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      processos: {
+        ...actual.api.processos,
+        recusarEncaminhamento: (id: number, motivo: string) => recusarMock(id, motivo),
+      },
+    },
+  };
+});
+
+vi.mock("@/components/ArquivarDialog", () => ({ ArquivarDialog: () => null }));
+// A barra de tramitação consulta `can` desde o SI-60 (botão Desarquivar).
+vi.mock("@/lib/auth", () => ({ useAuth: () => ({ can: () => true }) }));
+
+import { AcoesProcesso } from "@/components/AcoesProcesso";
+import type { ProcessoDetail } from "@/lib/api";
+
+function processo(pendente: boolean, extra: Partial<ProcessoDetail> = {}): ProcessoDetail {
+  return {
+    ...extra,
+    id: 77,
+    numero_processo: "2026/000077",
+    ativo: true,
+    movimentacoes: [
+      {
+        id: 1,
+        acao_flag: "ENCAMINHAMENTO",
+        encaminhamento: {
+          id: 9, unidade_origem: "Secretaria de Obras", unidade_destino: "Procuradoria",
+          prioridade: "Normal", quantidade_folhas: 0, data_prazo: null,
+          recebido: !pendente, data_hora_recebimento: null, cancelado: false,
+        },
+      },
+    ],
+  } as unknown as ProcessoDetail;
+}
+
+function abrir(pendente = true, extra: Partial<ProcessoDetail> = {}) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <AcoesProcesso processo={processo(pendente, extra)} />
+    </QueryClientProvider>,
+  );
+}
+
+beforeEach(() => recusarMock.mockClear());
+afterEach(cleanup);
+
+describe("recusar encaminhamento", () => {
+  it("quem não é do destino não recebe nem recusa, e a tela diz de quem é a vez", () => {
+    abrir(true, { pode_receber_encaminhamento: false, pode_cancelar_encaminhamento: true });
+    expect(screen.getByRole("button", { name: "Receber" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Recusar" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancelar encaminhamento" })).toBeEnabled();
+    expect(screen.getByText("Receber ou recusar cabe a quem é de Procuradoria.")).toBeInTheDocument();
+  });
+
+  it("quem é do destino não cancela o que a origem enviou", () => {
+    abrir(true, { pode_receber_encaminhamento: true, pode_cancelar_encaminhamento: false });
+    expect(screen.getByRole("button", { name: "Recusar" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Cancelar encaminhamento" })).toBeDisabled();
+    expect(screen.queryByText(/cabe a quem é de/)).toBeNull();
+  });
+
+  it("sem encaminhamento pendente não há o que recusar", () => {
+    abrir(false);
+    expect(screen.getByRole("button", { name: "Recusar" })).toBeDisabled();
+  });
+
+  // Padrão de formulário: o botão não fica desabilitado esperando o motivo;
+  // clicar sem motivo válido mostra o erro sob o campo e não envia.
+  it("exige motivo: só espaço ou texto curto não envia e diz o que falta", () => {
+    abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Recusar" }));
+
+    const confirmar = screen.getByRole("button", { name: "Confirmar recusa" });
+    // Diz para onde o processo volta.
+    expect(screen.getByText("Secretaria de Obras")).toBeInTheDocument();
+    // Ao abrir, sem erro.
+    expect(screen.queryByText(/pelo menos 5 letras/)).toBeNull();
+
+    const motivo = screen.getByLabelText(/Motivo da recusa/);
+    fireEvent.change(motivo, { target: { value: "      " } });
+    fireEvent.click(confirmar);
+    expect(screen.getByText(/pelo menos 5 letras/)).toBeInTheDocument();
+    expect(motivo).toHaveAttribute("aria-invalid", "true");
+    expect(motivo).toHaveFocus();
+    fireEvent.change(motivo, { target: { value: "não" } });
+    fireEvent.click(confirmar);
+    expect(screen.getByText(/pelo menos 5 letras/)).toBeInTheDocument();
+    expect(recusarMock).not.toHaveBeenCalled();
+  });
+
+  it("envia o motivo sem espaços nas pontas e fecha", async () => {
+    abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Recusar" }));
+    fireEvent.change(screen.getByLabelText(/Motivo da recusa/), {
+      target: { value: "  Não é da competência desta unidade.  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar recusa" }));
+
+    await waitFor(() =>
+      expect(recusarMock).toHaveBeenCalledWith(77, "Não é da competência desta unidade."),
+    );
+    await waitFor(() => expect(screen.queryByLabelText(/Motivo da recusa/)).toBeNull());
+  });
+
+  it("erro do servidor aparece no diálogo, que continua aberto", async () => {
+    recusarMock.mockRejectedValueOnce(new Error("Nenhum encaminhamento pendente para este processo"));
+    abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Recusar" }));
+    fireEvent.change(screen.getByLabelText(/Motivo da recusa/), {
+      target: { value: "Faltam os documentos." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar recusa" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Nenhum encaminhamento pendente");
+    expect(screen.getByLabelText(/Motivo da recusa/)).toBeInTheDocument();
+  });
+});

@@ -1,15 +1,22 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fuel, Gauge, Inbox, Plus } from "lucide-react";
+import { Calculator, Droplets, Fuel, Inbox, Pencil, Plus, Trash2, Wallet } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { fmtKm, hojeLocal, numeroOuNulo, rotuloVeiculo, useErrosDoFormulario } from "@/components/frota/formulario";
+import { COMBUSTIVEIS, fmtLitros } from "@/components/frota/rotulos";
+import { fmtData, fmtMoeda } from "@/components/pagamentos/format";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
+import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { CampoComUnidade } from "@/components/ui/campo-com-unidade";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { KpiCard } from "@/components/ui/kpi-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
@@ -17,8 +24,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { api, type VeiculoAbastecimento } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-
-const COMBUSTIVEIS = ["gasolina", "etanol", "flex", "diesel", "gnv", "eletrico", "hibrido"];
 
 interface AbastForm {
   id_veiculo: number | null;
@@ -48,22 +53,31 @@ function nullify(v: string): string | null {
   const t = v.trim();
   return t === "" ? null : t;
 }
-function fmtData(d: string | null): string {
-  if (!d) return "—";
-  return new Date(`${d}T00:00:00`).toLocaleDateString("pt-BR");
-}
-function fmtMoeda(v: number | null): string {
-  if (v == null) return "—";
-  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
 
-function StatCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border bg-surface-1 p-4">
-      <p className="text-sm text-foreground-muted">{label}</p>
-      <p className="mt-1 text-xl font-semibold tabular-nums text-foreground">{value}</p>
-    </div>
-  );
+// Mesmas exigências do backend (veículo na criação; km ≥ 0 inteiro; litros
+// > 0; valor ≥ 0), cada uma sob o seu campo.
+function validar(form: AbastForm, novo: boolean): Record<string, string | undefined> {
+  return {
+    veiculo: novo && form.id_veiculo == null ? "Escolha o veículo." : undefined,
+    km:
+      form.km_atual == null
+        ? "Informe a quilometragem do painel."
+        : !Number.isInteger(form.km_atual) || form.km_atual < 0
+          ? "Use só números inteiros, sem ponto nem vírgula."
+          : undefined,
+    litros:
+      form.litros == null
+        ? "Informe quantos litros foram abastecidos."
+        : form.litros <= 0
+          ? "Os litros precisam ser maiores que zero."
+          : undefined,
+    valor:
+      form.valor_total == null
+        ? "Informe o valor pago."
+        : form.valor_total < 0
+          ? "O valor não pode ser negativo."
+          : undefined,
+  };
 }
 
 export default function AbastecimentosPage() {
@@ -79,6 +93,9 @@ export default function AbastecimentosPage() {
   const [editing, setEditing] = useState<VeiculoAbastecimento | null>(null);
   const [form, setForm] = useState<AbastForm>(EMPTY);
   const [err, setErr] = useState<string | null>(null);
+  // O combustível foi preenchido pelo cadastro do veículo (e não por quem digita)?
+  const [combustivelDoVeiculo, setCombustivelDoVeiculo] = useState(false);
+  const campos = useErrosDoFormulario(validar(form, editing == null));
 
   const veiculosQ = useQuery({ queryKey: ["frota-veiculos"], queryFn: () => api.frota.listAll() });
   const motoristasQ = useQuery({ queryKey: ["frota-motoristas"], queryFn: () => api.motoristas.listAll() });
@@ -123,8 +140,10 @@ export default function AbastecimentosPage() {
   }
   function openNew() {
     setEditing(null);
-    setForm(EMPTY);
+    setForm({ ...EMPTY, data_abastecimento: hojeLocal() });
     setErr(null);
+    setCombustivelDoVeiculo(false);
+    campos.limpar();
     setDialogOpen(true);
   }
   function openEdit(a: VeiculoAbastecimento) {
@@ -141,6 +160,8 @@ export default function AbastecimentosPage() {
       observacoes: a.observacoes ?? "",
     });
     setErr(null);
+    setCombustivelDoVeiculo(false);
+    campos.limpar();
     setDialogOpen(true);
   }
   function closeDialog() {
@@ -148,20 +169,20 @@ export default function AbastecimentosPage() {
     setEditing(null);
     setForm(EMPTY);
   }
+  function escolherVeiculo(id: number | null) {
+    set("id_veiculo", id);
+    // O combustível do cadastro do veículo é o palpite certo — menos para flex
+    // e híbrido, em que quem abastece escolhe na bomba.
+    const doVeiculo = (veiculosQ.data ?? []).find((x) => x.id === id)?.tipo_combustivel ?? "";
+    const definido = doVeiculo !== "" && doVeiculo !== "flex" && doVeiculo !== "hibrido";
+    if (form.tipo_combustivel === "" || combustivelDoVeiculo) {
+      set("tipo_combustivel", definido ? doVeiculo : "");
+      setCombustivelDoVeiculo(definido);
+    }
+  }
   function salvar() {
     setErr(null);
-    if (!editing && form.id_veiculo == null) {
-      setErr("Selecione o veículo.");
-      return;
-    }
-    if (form.km_atual == null || form.litros == null || form.valor_total == null) {
-      setErr("Km, litros e valor total são obrigatórios.");
-      return;
-    }
-    if (form.litros <= 0) {
-      setErr("Litros deve ser maior que zero.");
-      return;
-    }
+    if (!campos.podeEnviar()) return;
     const comum = {
       id_motorista: form.id_motorista ?? null,
       data_abastecimento: nullify(form.data_abastecimento),
@@ -174,6 +195,16 @@ export default function AbastecimentosPage() {
     };
     saveM.mutate(editing ? comum : { id_veiculo: form.id_veiculo, ...comum });
   }
+
+  const kmVeiculo = editing
+    ? null
+    : ((veiculosQ.data ?? []).find((x) => x.id === form.id_veiculo)?.quilometragem_atual ?? null);
+  // R$/litro ao vivo: confere o cupom antes de salvar (um zero a mais nos
+  // litros aparece como um preço absurdo).
+  const precoLitro =
+    form.litros != null && form.litros > 0 && form.valor_total != null && form.valor_total > 0
+      ? form.valor_total / form.litros
+      : null;
 
   const r = resumoQ.data;
   return (
@@ -194,20 +225,20 @@ export default function AbastecimentosPage() {
       />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="Abastecimentos" value={String(r?.total_abastecimentos ?? 0)} />
-        <StatCard label="Litros (total)" value={(r?.total_litros ?? 0).toLocaleString("pt-BR")} />
-        <StatCard label="Custo total" value={fmtMoeda(r?.total_valor ?? 0)} />
-        <StatCard
-          label="Média R$/litro"
+        <KpiCard
+          label="Abastecimentos"
+          value={r?.total_abastecimentos ?? 0}
+          icon={Fuel}
+          hint={r?.ultimo_abastecimento ? `Último em ${fmtData(r.ultimo_abastecimento)}` : undefined}
+        />
+        <KpiCard label="Litros (total)" value={fmtLitros(r?.total_litros ?? 0)} icon={Droplets} />
+        <KpiCard label="Custo total" value={fmtMoeda(r?.total_valor ?? 0)} icon={Wallet} />
+        <KpiCard
+          label="Média por litro"
           value={r?.media_valor_litro != null ? fmtMoeda(r.media_valor_litro) : "—"}
+          icon={Calculator}
         />
       </div>
-      {r?.ultimo_abastecimento && (
-        <p className="text-sm text-foreground-muted">
-          <Gauge className="mr-1 inline h-4 w-4" />
-          Último abastecimento: {fmtData(r.ultimo_abastecimento)}
-        </p>
-      )}
 
       {!abastQ.isLoading && (abastQ.data?.length ?? 0) === 0 ? (
         <EmptyState
@@ -249,22 +280,25 @@ export default function AbastecimentosPage() {
                 <TD className="tabular-nums">{fmtData(a.data_abastecimento)}</TD>
                 <TD className="font-mono">{placaDe.get(a.id_veiculo) ?? `#${a.id_veiculo}`}</TD>
                 <TD className="text-right tabular-nums">{a.km_atual.toLocaleString("pt-BR")}</TD>
-                <TD className="text-right tabular-nums">{a.litros.toLocaleString("pt-BR")}</TD>
+                <TD className="text-right tabular-nums">{fmtLitros(a.litros)}</TD>
                 <TD className="text-right tabular-nums">{fmtMoeda(a.valor_total)}</TD>
                 <TD className="text-muted-foreground">{a.posto ?? "—"}</TD>
                 <TD className="text-right">
-                  <div className="inline-flex gap-2">
-                    {canEdit && (
-                      <Button variant="secondary" size="sm" onClick={() => openEdit(a)}>
-                        Editar
-                      </Button>
-                    )}
-                    {canDelete && (
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        disabled={deleteM.isPending}
-                        onClick={async () => {
+                  <AcoesDaLinha
+                    acoes={[
+                      {
+                        label: "Editar",
+                        icon: Pencil,
+                        oculta: !canEdit,
+                        onClick: () => openEdit(a),
+                      },
+                      {
+                        label: "Excluir",
+                        icon: Trash2,
+                        perigo: true,
+                        oculta: !canDelete,
+                        disabled: deleteM.isPending,
+                        onClick: async () => {
                           const ok = await confirm({
                             title: "Excluir abastecimento",
                             message: "Excluir este abastecimento? Esta ação não pode ser desfeita.",
@@ -272,12 +306,10 @@ export default function AbastecimentosPage() {
                             intent: "danger",
                           });
                           if (ok) deleteM.mutate(a.id);
-                        }}
-                      >
-                        Excluir
-                      </Button>
-                    )}
-                  </div>
+                        },
+                      },
+                    ]}
+                  />
                 </TD>
               </TR>
             ))}
@@ -289,129 +321,179 @@ export default function AbastecimentosPage() {
         open={dialogOpen}
         onClose={closeDialog}
         title={editing ? "Editar abastecimento" : "Novo abastecimento"}
+        description={
+          editing
+            ? `${placaDe.get(editing.id_veiculo) ?? `Veículo #${editing.id_veiculo}`} · ${fmtData(editing.data_abastecimento)}`
+            : "Os dados do cupom do posto."
+        }
         size="lg"
         footer={
           <>
-            <Button variant="secondary" onClick={closeDialog}>
+            <Button variant="ghost" onClick={closeDialog}>
               Cancelar
             </Button>
-            <Button onClick={salvar} disabled={saveM.isPending}>
-              {saveM.isPending ? "Salvando..." : "Salvar"}
+            <Button type="submit" form="form-abastecimento" loading={saveM.isPending}>
+              {editing ? "Salvar alterações" : "Registrar abastecimento"}
             </Button>
           </>
         }
       >
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <form
+          id="form-abastecimento"
+          noValidate
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            salvar();
+          }}
+        >
           {!editing && (
-            <div className="sm:col-span-2">
-              <Label htmlFor="veiculo" required>
-                Veículo
-              </Label>
+            <FormField label="Veículo" required error={campos.erro("veiculo")}>
               <Select
                 id="veiculo"
                 value={form.id_veiculo ?? ""}
-                onChange={(e) => set("id_veiculo", e.target.value ? Number(e.target.value) : null)}
+                onChange={(e) => escolherVeiculo(e.target.value ? Number(e.target.value) : null)}
+                onBlur={campos.tocar("veiculo")}
               >
-                <option value="">Selecione...</option>
+                <option value="">Selecione o veículo</option>
                 {(veiculosQ.data ?? []).map((v) => (
                   <option key={v.id} value={v.id}>
-                    {v.placa} {v.marca ? `— ${v.marca}` : ""}
+                    {rotuloVeiculo(v)}
                   </option>
                 ))}
               </Select>
-            </div>
+            </FormField>
           )}
-          <div>
-            <Label htmlFor="motorista">Motorista</Label>
-            <Select
-              id="motorista"
-              value={form.id_motorista ?? ""}
-              onChange={(e) => set("id_motorista", e.target.value ? Number(e.target.value) : null)}
+          <GradeCampos>
+            <FormField
+              label="Data"
+              hint={!editing && form.data_abastecimento === hojeLocal() ? "Já vem com a data de hoje." : undefined}
             >
-              <option value="">—</option>
-              {(motoristasQ.data ?? []).map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.nome}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="data">Data</Label>
-            <Input
-              id="data"
-              type="date"
-              value={form.data_abastecimento}
-              onChange={(e) => set("data_abastecimento", e.target.value)}
-            />
-          </div>
-          <div>
-            <Label htmlFor="km" required>
-              Km atual
-            </Label>
-            <Input
-              id="km"
-              type="number"
-              min={0}
-              value={form.km_atual ?? ""}
-              onChange={(e) => set("km_atual", e.target.value ? Number(e.target.value) : null)}
-            />
-          </div>
-          <div>
-            <Label htmlFor="combustivel">Combustível</Label>
-            <Select
-              id="combustivel"
-              value={form.tipo_combustivel}
-              onChange={(e) => set("tipo_combustivel", e.target.value)}
+              <Input
+                id="data"
+                type="date"
+                value={form.data_abastecimento}
+                onChange={(e) => set("data_abastecimento", e.target.value)}
+              />
+            </FormField>
+            <FormField label="Motorista" opcional hint="Quem abasteceu.">
+              <Select
+                id="motorista"
+                value={form.id_motorista ?? ""}
+                onChange={(e) => set("id_motorista", e.target.value ? Number(e.target.value) : null)}
+              >
+                <option value="">Não informado</option>
+                {(motoristasQ.data ?? []).map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.nome}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          </GradeCampos>
+          <GradeCampos>
+            <FormField
+              label="Quilometragem"
+              required
+              hint={
+                kmVeiculo != null
+                  ? `O que marca o painel. Último registro do veículo: ${fmtKm(kmVeiculo)}.`
+                  : "O que marca o painel no abastecimento."
+              }
+              error={campos.erro("km")}
             >
-              <option value="">—</option>
-              {COMBUSTIVEIS.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="litros" required>
-              Litros
-            </Label>
+              <CampoComUnidade
+                id="km"
+                type="number"
+                inputMode="numeric"
+                min={0}
+                sufixo="km"
+                value={form.km_atual ?? ""}
+                onChange={(e) => set("km_atual", numeroOuNulo(e.target.value))}
+                onBlur={campos.tocar("km")}
+              />
+            </FormField>
+            <FormField
+              label="Combustível"
+              opcional
+              hint={combustivelDoVeiculo ? "Veio do cadastro do veículo; troque se for outro." : undefined}
+            >
+              <Select
+                id="combustivel"
+                value={form.tipo_combustivel}
+                onChange={(e) => {
+                  setCombustivelDoVeiculo(false);
+                  set("tipo_combustivel", e.target.value);
+                }}
+              >
+                <option value="">Não informado</option>
+                {COMBUSTIVEIS.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          </GradeCampos>
+          <GradeCampos>
+            <FormField label="Litros" required error={campos.erro("litros")}>
+              <CampoComUnidade
+                id="litros"
+                type="number"
+                inputMode="decimal"
+                min={0}
+                step="0.001"
+                sufixo="L"
+                value={form.litros ?? ""}
+                onChange={(e) => set("litros", numeroOuNulo(e.target.value))}
+                onBlur={campos.tocar("litros")}
+                placeholder="Ex.: 40"
+              />
+            </FormField>
+            <FormField
+              label="Valor total"
+              required
+              hint={precoLitro != null ? `${fmtMoeda(precoLitro)} por litro.` : "O total pago, do cupom."}
+              error={campos.erro("valor")}
+            >
+              <CampoComUnidade
+                id="valor"
+                type="number"
+                inputMode="decimal"
+                min={0}
+                step="0.01"
+                prefixo="R$"
+                value={form.valor_total ?? ""}
+                onChange={(e) => set("valor_total", numeroOuNulo(e.target.value))}
+                onBlur={campos.tocar("valor")}
+                placeholder="Ex.: 250"
+              />
+            </FormField>
+          </GradeCampos>
+          <FormField label="Posto" opcional>
             <Input
-              id="litros"
-              type="number"
-              min={0}
-              step="0.001"
-              value={form.litros ?? ""}
-              onChange={(e) => set("litros", e.target.value ? Number(e.target.value) : null)}
+              id="posto"
+              value={form.posto}
+              onChange={(e) => set("posto", e.target.value)}
+              placeholder="Ex.: Posto Central"
+              maxLength={150}
             />
-          </div>
-          <div>
-            <Label htmlFor="valor" required>
-              Valor total (R$)
-            </Label>
-            <Input
-              id="valor"
-              type="number"
-              min={0}
-              step="0.01"
-              value={form.valor_total ?? ""}
-              onChange={(e) => set("valor_total", e.target.value ? Number(e.target.value) : null)}
+          </FormField>
+          <FormField label="Observações" opcional>
+            <Textarea
+              id="obs"
+              rows={2}
+              value={form.observacoes}
+              onChange={(e) => set("observacoes", e.target.value)}
+              placeholder="Ex.: nota fiscal nº 1234"
             />
-          </div>
-          <div>
-            <Label htmlFor="posto">Posto</Label>
-            <Input id="posto" value={form.posto} onChange={(e) => set("posto", e.target.value)} />
-          </div>
-          <div className="sm:col-span-2">
-            <Label htmlFor="obs">Observações</Label>
-            <Textarea id="obs" rows={2} value={form.observacoes} onChange={(e) => set("observacoes", e.target.value)} />
-          </div>
+          </FormField>
           {err && (
-            <div role="alert" className="sm:col-span-2 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground">
+            <Alert intent="danger" title="Não foi possível salvar">
               {err}
-            </div>
+            </Alert>
           )}
-        </div>
+        </form>
       </Dialog>
     </div>
   );

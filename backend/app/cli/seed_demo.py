@@ -1284,7 +1284,36 @@ async def _apply(args: argparse.Namespace) -> int:
 
         await db.commit()
 
+    # Tramitação de demonstração: um processo em cada caixa de trabalho. Fica
+    # depois do commit porque passa pelos serviços, que abrem e fecham as
+    # próprias transações (`seed_demo_caixas`).
+    from . import seed_demo_caixas
+
+    contagens.update(await seed_demo_caixas.aplicar(tenant_id))
+
     _print_resumo("APPLY", args.tenant, tenant_id, contagens)
+    return 0
+
+
+async def _caixas(args: argparse.Namespace) -> int:
+    """Só a tramitação de demonstração das caixas, sem tocar no resto. É o que
+    se roda num tenant que já tem a demonstração — o `apply` completo
+    recriaria ali a unidade "Protocolo Geral" que o `seed_itaitinga` renomeou."""
+    _guard_tenant_slug(args.tenant, args.allow_non_demo)
+    from . import seed_demo_caixas
+
+    async with SessionLocal() as db:
+        tenant = (
+            await db.execute(select(Tenant).where(Tenant.slug == args.tenant))
+        ).scalar_one_or_none()
+    if tenant is None:
+        print(f"[ERRO] tenant '{args.tenant}' não existe.")
+        return 1
+    contagens = await seed_demo_caixas.aplicar(tenant.id)
+    print()
+    print(f"SEED DEMO CAIXAS — tenant '{args.tenant}' (id={tenant.id})")
+    for k, v in contagens.items():
+        print(f"  {k}: {v}")
     return 0
 
 
@@ -1328,6 +1357,13 @@ async def _reset(args: argparse.Namespace) -> int:
         ]
 
         if proc_ids:
+            # Tramitação de demonstração (assinaturas, encaminhamentos,
+            # despachos, arquivamento) sai antes: aponta para os anexos e as
+            # movimentações que as linhas abaixo apagam.
+            from . import seed_demo_caixas
+
+            await seed_demo_caixas.limpar_tramitacao(db, proc_ids)
+
             # Anexos do processo demo
             anexo_ids = [
                 r
@@ -1565,6 +1601,13 @@ def main(argv: list[str] | None = None) -> int:
     p_apply = sub.add_parser("apply", help="Cria/atualiza dados demo (idempotente)")
     _add_tenant_args(p_apply)
     p_apply.set_defaults(fn=_apply)
+
+    p_caixas = sub.add_parser(
+        "caixas",
+        help="Só a tramitação de demonstração das caixas de trabalho (idempotente)",
+    )
+    _add_tenant_args(p_caixas)
+    p_caixas.set_defaults(fn=_caixas)
 
     p_reset = sub.add_parser("reset", help="Remove dados demo do tenant alvo")
     _add_tenant_args(p_reset)

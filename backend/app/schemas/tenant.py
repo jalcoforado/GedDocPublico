@@ -1,4 +1,15 @@
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
+
+COR_HEX = r"^#[0-9A-Fa-f]{6}$"
+
+# Fontes de título que o município pode escolher. Lista FECHADA: cada chave é
+# um arquivo hospedado no frontend (`frontend/app/fonts/`). Tem de casar com o
+# CHECK da migration 0132 e com `FONTES` em `frontend/lib/tema-cores.ts` —
+# fonte nova pede migration nova.
+FonteDeTitulo = Literal["montserrat", "inter", "roboto_slab", "nunito"]
+FONTES_DE_TITULO: tuple[str, ...] = ("montserrat", "inter", "roboto_slab", "nunito")
 
 
 class TenantMeResponse(BaseModel):
@@ -9,6 +20,10 @@ class TenantMeResponse(BaseModel):
     nome: str
     plano: str
     cor_primaria: str | None = None
+    cor_destaque: str | None = None
+    cor_lateral: str | None = None
+    cor_titulos: str | None = None
+    fonte_titulos: str | None = None
     logo_url: str | None = None
     # Fase P2 — NUP federal
     codigo_orgao_nup: str | None = None
@@ -54,7 +69,14 @@ class TenantInstitucionalUpdate(BaseModel):
     horario_atendimento: str | None = Field(default=None, max_length=255)
     texto_boas_vindas_portal: str | None = None
     logo_url: str | None = Field(default=None, max_length=500)
-    cor_primaria: str | None = Field(default=None, max_length=7)
+    # Tema do município. `#RRGGBB` e nada além: o valor vira CSS no navegador
+    # de todo usuário do tenant.
+    cor_primaria: str | None = Field(default=None, pattern=COR_HEX)
+    cor_destaque: str | None = Field(default=None, pattern=COR_HEX)
+    cor_lateral: str | None = Field(default=None, pattern=COR_HEX)
+    cor_titulos: str | None = Field(default=None, pattern=COR_HEX)
+    # Chave da lista, nunca nome de fonte: o valor vira `font-family`.
+    fonte_titulos: FonteDeTitulo | None = None
     id_unidade_padrao: int | None = None
 
 

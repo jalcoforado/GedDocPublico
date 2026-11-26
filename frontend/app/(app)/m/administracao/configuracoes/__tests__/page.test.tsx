@@ -7,6 +7,8 @@ import { api, tenantsApi } from "@/lib/api";
 
 vi.mock("@/lib/api", () => ({
   api: { unidades: { list: vi.fn() } },
+  // "Unidade padrão" é o UnidadePicker, que lê a árvore do organograma.
+  organogramaApi: { tree: vi.fn().mockResolvedValue([]) },
   tenantsApi: {
     me: vi.fn(),
     onboarding: vi.fn(),
@@ -86,6 +88,20 @@ describe("ConfiguracoesPage — PR 3b", () => {
     const email = (await screen.findByLabelText(/E-mail institucional/i)) as HTMLInputElement;
     expect(email).toBeDisabled();
     expect(screen.getByRole("button", { name: /Salvar dados institucionais/i })).toBeDisabled();
+  });
+
+  it("e-mail fora do formato: erro ao sair do campo e o salvar não envia", async () => {
+    canMock.mockReturnValue(true);
+    renderPage();
+    const email = (await screen.findByLabelText(/E-mail institucional/i)) as HTMLInputElement;
+    fireEvent.change(email, { target: { value: "protocolo@" } });
+    expect(screen.queryByText(/Confira o e-mail/i)).not.toBeInTheDocument();
+    fireEvent.blur(email);
+    expect(await screen.findByText(/Confira o e-mail/i)).toBeInTheDocument();
+    expect(email).toHaveAttribute("aria-invalid", "true");
+    fireEvent.click(screen.getByRole("button", { name: /Salvar dados institucionais/i }));
+    expect(updateMock).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(email);
   });
 
   it("checklist exibe itens e deep-link para pendência", async () => {

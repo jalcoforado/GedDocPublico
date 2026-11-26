@@ -14,12 +14,12 @@ export default function TransporteReguladoHubPage() {
         title="Transporte Regulado"
         description="Gestão de permissionários e do transporte público regulado do município."
       />
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {CARDS.map((c) => {
           const Icon = c.icon;
           const content = (
             <>
-              <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-md bg-brand/12 text-brand">
+              <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-lg bg-brand/10 text-brand transition-colors duration-fast group-hover:bg-brand group-hover:text-primary-foreground">
                 <Icon className="h-5 w-5" aria-hidden="true" />
               </div>
               <div className="flex items-center gap-2">
@@ -37,7 +37,7 @@ export default function TransporteReguladoHubPage() {
             <Link
               key={c.title}
               href={c.href}
-              className="group rounded-lg border border-border bg-surface-1 p-4 transition-colors hover:border-brand hover:bg-sidebar-accent"
+              className="group rounded-card border border-border bg-surface-1 p-5 shadow-xs transition-[border-color,box-shadow,transform] duration-base ease-out-expo hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-md motion-reduce:hover:translate-y-0"
             >
               {content}
             </Link>

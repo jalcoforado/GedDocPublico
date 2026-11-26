@@ -97,6 +97,7 @@ async def _cleanup(engine, tenant_id: int) -> None:
             "DELETE FROM utils.grupo_transacao WHERE tenant_id=:t",
             "DELETE FROM utils.usuario_grupo WHERE tenant_id=:t",
             "DELETE FROM utils.grupo WHERE tenant_id=:t",
+            "DELETE FROM aprimora_py.notificacao WHERE tenant_id=:t",
             "DELETE FROM aprimora_py.audit_log WHERE tenant_id=:t",
             "DELETE FROM utils.usuario WHERE tenant_id=:t",
             "DELETE FROM protocolos.tipo_manifestante WHERE tenant_id=:t",

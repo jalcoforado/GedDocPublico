@@ -314,10 +314,10 @@ test.describe.serial("UX-1 smoke (Fase G)", () => {
     await expect(page.getByText(/Solicitar:/i)).toBeVisible({ timeout: 10_000 });
     // Campo principal: textarea de descrição.
     await expect(page.getByLabel(/Descreva sua solicitação/i)).toBeVisible();
-    // Orientação ao cidadão sobre o envio (placeholder + label).
-    await expect(
-      page.getByPlaceholder(/Conte com seus detalhes/i),
-    ).toBeVisible();
+    // Orientação ao cidadão sobre o envio: o placeholder é um exemplo e a
+    // dica embaixo do campo diz o que escrever (padrão de formulário).
+    await expect(page.getByPlaceholder(/^Ex\.:/)).toBeVisible();
+    await expect(page.getByText(/Quanto mais claro, mais rápido/i)).toBeVisible();
 
     await expectSemTermosVetadosCidadao(page);
   });

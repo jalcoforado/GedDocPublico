@@ -17,6 +17,7 @@ from ..models import (
     Acao,
     Anexo,
     AnexoProcesso,
+    AssinaturaAnexo,
     Assunto,
     Despacho,
     Encaminhamento,
@@ -25,29 +26,68 @@ from ..models import (
     Prioridade,
     Processo,
     ProcessoFavorito,
+    SolicitacaoAssinatura,
     TipoAnexo,
     TipoProcesso,
     UnidadeTrabalho,
     Usuario,
+    UsuarioAssinatura,
 )
 from ..schemas.marcador import MarcadorMini
 from ..schemas.processo import (
     AnexoNoProcesso,
+    CaixaProcesso,
+    AguardandoRetorno,
+    CaixasContagem,
     CotaAnexacaoOut,
+    OrdemProcesso,
+    OrdenarProcesso,
+    AnexoDoDespacho,
     DespachoOut,
     EscopoProcesso,
     EncaminhamentoOut,
     MovimentacaoItem,
     PermanenciaNo,
+    PainelUnidade,
     PermanenciaProcesso,
     PrazoInfo,
+    PrazosDaUnidade,
     ProcessoDetail,
     ProcessoListItem,
 )
 from . import cota_anexacao
 from .permanencia import No as NoDaLinha
 from .permanencia import calcular as calcular_permanencia
-from .prazos import calcular_prazo
+from .prazos import calcular_prazo, inicio_do_prazo, prazo_da_caixa
+
+
+# "Tempo na caixa": desde a última movimentação, ou desde a abertura quando o
+# processo não tem nenhuma. `Processo.id_ultima_movimentacao` é mantido por
+# abertura, encaminhar, receber e arquivar — por isso basta um JOIN, sem
+# subconsulta por linha. Alias próprio: `Movimentacao` crua entra nos EXISTS
+# de `_predicado_caixa`, correlacionada, e reusá-la aqui misturaria as duas.
+_UltimaMov = aliased(Movimentacao, name="ultima_movimentacao")
+_PARADO_DESDE = func.coalesce(
+    _UltimaMov.data_hora_movimentacao, Processo.data_hora_abertura
+)
+
+
+# Prazo do encaminhamento VIGENTE: o mais recente que não foi cancelado, esteja
+# pendente (processo em trânsito) ou recebido (processo na mesa de quem o
+# recebeu). Encaminhamento cancelado não obriga ninguém.
+_PRAZO_ENCAMINHAMENTO = (
+    select(Encaminhamento.data_prazo)
+    .where(
+        Encaminhamento.id_processo == Processo.id,
+        Encaminhamento.tenant_id == Processo.tenant_id,
+        Encaminhamento.excluido.is_(False),
+        Encaminhamento.cancelado.is_(False),
+    )
+    .order_by(Encaminhamento.id.desc())
+    .limit(1)
+    .correlate(Processo)
+    .scalar_subquery()
+)
 
 
 def _base_select(tenant_id: int, *, usuario_id: int | None = None):
@@ -74,12 +114,20 @@ def _base_select(tenant_id: int, *, usuario_id: int | None = None):
             Processo,
             Assunto.assunto.label("assunto_nome"),
             TipoProcesso.tipo_processo.label("tipo_processo_nome"),
+            Assunto.id_tipo_processo.label("id_tipo_processo"),
             Manifestante.nome.label("manifestante_nome"),
             Manifestante.cpf_cnpj.label("manifestante_cpf"),
             UnidadeTrabalho.unidade_trabalho.label("unidade_propr"),
             LocalAtual.unidade_trabalho.label("local_atual_nome"),
             Responsavel.nome.label("responsavel_nome"),
             favorito_expr,
+            _PARADO_DESDE.label("parado_desde"),
+            _PRAZO_ENCAMINHAMENTO.label("prazo_encaminhamento"),
+            # Arquivado = há arquivamento EM VIGOR, o mesmo critério de
+            # `_predicado_caixa`. Até o SI-60 isto lia "a última movimentação é
+            # um arquivamento", que discordava das caixas assim que qualquer
+            # ato entrasse depois do arquivamento.
+            condicao_arquivado(tenant_id).label("arquivado"),
         )
         .join(Assunto, Assunto.id == Processo.id_assunto)
         .join(TipoProcesso, TipoProcesso.id == Assunto.id_tipo_processo, isouter=True)
@@ -90,6 +138,14 @@ def _base_select(tenant_id: int, *, usuario_id: int | None = None):
             isouter=True,
         )
         .join(LocalAtual, LocalAtual.id == Processo.id_local_atual, isouter=True)
+        .join(
+            _UltimaMov,
+            and_(
+                _UltimaMov.id == Processo.id_ultima_movimentacao,
+                _UltimaMov.tenant_id == tenant_id,
+            ),
+            isouter=True,
+        )
         .join(
             Responsavel,
             Responsavel.id == Processo.id_usuario_responsavel,
@@ -158,6 +214,300 @@ def _ids_unidade_e_subordinadas(tenant_id: int, raiz: int):
     return select(raiz_cte.c.id)
 
 
+def condicao_encaminhamento_pendente(tenant_id: int):
+    """Encaminhamento do processo ainda não recebido nem desfeito.
+
+    `id_local_atual` só muda no recebimento (`acoes_processo.receber`), então
+    é o encaminhamento, e não o local, que diz que o processo está em trânsito.
+    Para usar dentro de `select(Encaminhamento...)`; correlaciona com
+    `Processo`.
+    """
+    return and_(
+        Encaminhamento.id_processo == Processo.id,
+        Encaminhamento.tenant_id == tenant_id,
+        Encaminhamento.excluido.is_(False),
+        Encaminhamento.recebido.is_(False),
+        Encaminhamento.cancelado.is_(False),
+    )
+
+
+def condicao_em_transito(tenant_id: int):
+    """Condição sobre `Processo`: há encaminhamento pendente."""
+    return select(Encaminhamento.id).where(condicao_encaminhamento_pendente(tenant_id)).exists()
+
+
+def condicao_arquivado(tenant_id: int):
+    """Condição sobre `Processo`: está arquivado AGORA.
+
+    Há uma `Movimentacao` de arquivamento ATIVA — o critério de
+    `acoes_processo.arquivar` e do dashboard. `Processo.ativo` não serve:
+    nenhum caminho o escreve. Caixas de trabalho, lista e relatórios leem
+    daqui — duas cópias divergiriam, e o relatório contaria arquivados que a
+    caixa não mostra.
+
+    Por que `ativo`: desde o SI-60 o processo pode ser desarquivado, e o
+    desarquivamento DESATIVA a movimentação do arquivamento em vez de
+    excluí-la. Ela continua na linha do tempo (que não filtra `ativo`), e
+    deixa de contar como encerramento em todo leitor que filtra.
+    """
+    return (
+        select(Movimentacao.id)
+        .where(
+            Movimentacao.id_processo == Processo.id,
+            Movimentacao.tenant_id == tenant_id,
+            Movimentacao.id_arquivamento.is_not(None),
+            Movimentacao.excluido.is_(False),
+            Movimentacao.ativo.is_(True),
+        )
+        .exists()
+    )
+
+
+def _predicado_caixa(
+    caixa: CaixaProcesso,
+    *,
+    tenant_id: int,
+    id_usuario: int | None,
+    id_unidade: int | None,
+):
+    """Condição SQL, sobre `Processo`, de "está na caixa X de quem consulta".
+
+    Fonte única das definições: a listagem filtra por ela e `contar_caixas`
+    conta por ela. Duas cópias divergiriam, e o sintoma seria o contador da
+    lateral dizer 18 e a lista abrir com 17.
+
+    Contexto ausente devolve NADA, pelo mesmo motivo registrado no bloco de
+    escopo de `list_processos`: `coluna == None` compila para `IS NULL`, e um
+    usuário sem lotação veria na "entrada" tudo o que não tem destino.
+
+    O que cada caixa lê, e por quê:
+
+    - Encaminhamento PENDENTE é `recebido = false AND cancelado = false`. O
+      `id_local_atual` só muda no recebimento (`acoes_processo.receber`), então
+      é o encaminhamento, e não o local, que diz que o processo está em
+      trânsito.
+    - ARQUIVADO é `condicao_arquivado`: movimentação de arquivamento ATIVA
+      (o desarquivamento do SI-60 a desativa). `Processo.ativo` não serve:
+      nenhum caminho o escreve.
+    """
+    pendente = condicao_encaminhamento_pendente(tenant_id)
+    em_transito = condicao_em_transito(tenant_id)
+    arquivado = condicao_arquivado(tenant_id)
+
+    if caixa in (
+        CaixaProcesso.aguardando_assinatura,
+        CaixaProcesso.enviado_para_assinatura,
+    ):
+        if id_usuario is None:
+            return false()
+        # Mesmas condições de `assinaturas.listar_minhas_pendentes`: documento
+        # ainda não assinado, em solicitação viva. Muda só de QUEM é a ponta —
+        # quem assina (aguardando) ou quem pediu (enviado).
+        de_quem = (
+            UsuarioAssinatura.id_assinante == id_usuario
+            if caixa is CaixaProcesso.aguardando_assinatura
+            else SolicitacaoAssinatura.id_solicitante == id_usuario
+        )
+        return (
+            select(AssinaturaAnexo.id)
+            .join(
+                UsuarioAssinatura,
+                UsuarioAssinatura.id == AssinaturaAnexo.id_usuario_assinatura,
+            )
+            .join(
+                SolicitacaoAssinatura,
+                SolicitacaoAssinatura.id == UsuarioAssinatura.id_solicitacao_assinatura,
+            )
+            .where(
+                SolicitacaoAssinatura.id_processo == Processo.id,
+                AssinaturaAnexo.tenant_id == tenant_id,
+                AssinaturaAnexo.assinado.is_not(True),
+                AssinaturaAnexo.excluido.is_(False),
+                SolicitacaoAssinatura.cancelada.is_(False),
+                SolicitacaoAssinatura.excluido.is_(False),
+                de_quem,
+            )
+            .exists()
+        )
+
+    if id_unidade is None:
+        return false()
+    if caixa is CaixaProcesso.entrada:
+        return (
+            select(Encaminhamento.id)
+            .where(pendente, Encaminhamento.id_unidade_destino == id_unidade)
+            .exists()
+        )
+    if caixa is CaixaProcesso.saida:
+        return (
+            select(Encaminhamento.id)
+            .where(pendente, Encaminhamento.id_unidade_origem == id_unidade)
+            .exists()
+        )
+    na_unidade = Processo.id_local_atual == id_unidade
+    if caixa is CaixaProcesso.arquivados:
+        return and_(na_unidade, arquivado)
+    na_mesa = and_(na_unidade, ~em_transito, ~arquivado)
+    if caixa is CaixaProcesso.recusados:
+        # O ÚLTIMO encaminhamento do processo foi recusado, e saiu desta
+        # unidade. "Último" é o que faz o reencaminhamento esvaziar a caixa: o
+        # encaminhamento novo passa a ser o mais recente. Sem `~em_transito`
+        # seria redundante, mas `~arquivado` não — processo recusado e depois
+        # arquivado já teve a sua decisão.
+        ultimo = (
+            select(func.max(Encaminhamento.id))
+            .where(
+                Encaminhamento.id_processo == Processo.id,
+                Encaminhamento.tenant_id == tenant_id,
+                Encaminhamento.excluido.is_(False),
+            )
+            .correlate(Processo)
+            .scalar_subquery()
+        )
+        recusado_na_origem = (
+            select(Encaminhamento.id)
+            .where(
+                Encaminhamento.id == ultimo,
+                Encaminhamento.recusado.is_(True),
+                Encaminhamento.id_unidade_origem == id_unidade,
+            )
+            .exists()
+        )
+        return and_(~arquivado, recusado_na_origem)
+    if caixa is CaixaProcesso.externos:
+        return and_(na_mesa, Processo.externo.is_(True))
+    return na_mesa  # analise
+
+
+async def contar_caixas(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    niveis_permitidos: list[str] | None = None,
+    id_usuario_contexto: int | None = None,
+    id_unidade_contexto: int | None = None,
+) -> CaixasContagem:
+    """Quantidade em cada caixa, numa consulta só (`count(*) FILTER`).
+
+    Respeita o que a listagem respeita sem filtro nenhum — tenant, sigilo e a
+    exclusão de rascunho —, para que o número da lateral seja o mesmo `total`
+    que a lista devolve ao abrir a caixa.
+    """
+    colunas = [
+        func.count()
+        .filter(
+            _predicado_caixa(
+                caixa,
+                tenant_id=tenant_id,
+                id_usuario=id_usuario_contexto,
+                id_unidade=id_unidade_contexto,
+            )
+        )
+        .label(caixa.value)
+        for caixa in CaixaProcesso
+    ]
+    stmt = (
+        select(*colunas)
+        .select_from(Processo)
+        .where(Processo.excluido.is_(False), Processo.situacao != "rascunho")
+    )
+    stmt = tenant_filter(stmt, Processo, tenant_id)
+    if niveis_permitidos is not None:
+        stmt = stmt.where(Processo.nivel_sigilo.in_(niveis_permitidos))
+    linha = (await db.execute(stmt)).one()
+    return CaixasContagem(**{c.value: getattr(linha, c.value) for c in CaixaProcesso})
+
+
+async def painel_unidade(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    niveis_permitidos: list[str] | None = None,
+    id_usuario_contexto: int | None = None,
+    id_unidade_contexto: int | None = None,
+) -> PainelUnidade:
+    """Os números do painel de controle (tela inicial), no mesmo recorte das
+    caixas: as definições vêm de `_predicado_caixa`, e o prazo de cada
+    processo, de `prazo_da_caixa` — o mesmo que pinta a linha na caixa. Duas
+    regras copiadas divergiriam, e o painel diria 5 vencidos com a caixa
+    mostrando 4."""
+    caixas = await contar_caixas(
+        db, tenant_id=tenant_id, niveis_permitidos=niveis_permitidos,
+        id_usuario_contexto=id_usuario_contexto, id_unidade_contexto=id_unidade_contexto,
+    )
+    contexto = {
+        "tenant_id": tenant_id,
+        "id_usuario": id_usuario_contexto,
+        "id_unidade": id_unidade_contexto,
+    }
+
+    def _base(caixa: CaixaProcesso):
+        stmt = (
+            select(
+                Processo.id,
+                Processo.data_hora_abertura,
+                Processo.data_reinicio_prazo,
+                Processo.prazo_servico_dias_snapshot,
+                Processo.id_usuario_responsavel,
+                _PRAZO_ENCAMINHAMENTO.label("prazo_encaminhamento"),
+            )
+            .where(
+                Processo.excluido.is_(False),
+                Processo.situacao != "rascunho",
+                _predicado_caixa(caixa, **contexto),
+            )
+        )
+        stmt = tenant_filter(stmt, Processo, tenant_id)
+        if niveis_permitidos is not None:
+            stmt = stmt.where(Processo.nivel_sigilo.in_(niveis_permitidos))
+        return stmt
+
+    agora = datetime.now()
+    prazos = PrazosDaUnidade()
+    atribuidos = sem_responsavel = 0
+    for r in (await db.execute(_base(CaixaProcesso.analise))).all():
+        if r.id_usuario_responsavel is None:
+            sem_responsavel += 1
+        elif r.id_usuario_responsavel == id_usuario_contexto:
+            atribuidos += 1
+        # Na Análise nada está arquivado: o predicado já exclui.
+        status = prazo_da_caixa(
+            data_abertura=inicio_do_prazo(r.data_hora_abertura, r.data_reinicio_prazo),
+            prazo_snapshot_dias=r.prazo_servico_dias_snapshot,
+            prazo_encaminhamento=r.prazo_encaminhamento,
+            arquivado=False,
+            now=agora,
+        ).status
+        if status == "atrasado":
+            prazos.vencidos += 1
+        elif status == "vencendo":
+            prazos.vencendo += 1
+        elif status == "dentro_do_prazo":
+            prazos.no_prazo += 1
+        else:
+            prazos.sem_prazo += 1
+
+    retorno = AguardandoRetorno()
+    for r in (await db.execute(_base(CaixaProcesso.saida))).all():
+        retorno.total += 1
+        if prazo_da_caixa(
+            data_abertura=inicio_do_prazo(r.data_hora_abertura, r.data_reinicio_prazo),
+            prazo_snapshot_dias=r.prazo_servico_dias_snapshot,
+            prazo_encaminhamento=r.prazo_encaminhamento,
+            arquivado=False,
+            now=agora,
+        ).status == "atrasado":
+            retorno.atrasados += 1
+
+    return PainelUnidade(
+        caixas=caixas,
+        atribuidos_a_mim=atribuidos,
+        sem_responsavel=sem_responsavel,
+        prazos=prazos,
+        aguardando_retorno=retorno,
+    )
+
+
 async def list_processos(
     db: AsyncSession,
     *,
@@ -180,8 +530,24 @@ async def list_processos(
     # E3 — None (default) exclui rascunho, mesmo espírito de apenas_raiz em
     # E2: oculto até pedir. "rascunho" só rascunhos. "todos" sem filtro.
     situacao: str | None = None,
+    caixa: CaixaProcesso | None = None,
+    ordem: OrdemProcesso = OrdemProcesso.recentes,
+    ordenar: OrdenarProcesso | None = None,
+    direcao: str = "asc",
 ) -> tuple[list[ProcessoListItem], int]:
     base = _base_select(tenant_id, usuario_id=id_usuario_contexto)
+
+    # Caixa de trabalho. Soma-se a escopo e sigilo, como eles se somam entre
+    # si: nenhum afrouxa o outro.
+    if caixa is not None:
+        base = base.where(
+            _predicado_caixa(
+                caixa,
+                tenant_id=tenant_id,
+                id_usuario=id_usuario_contexto,
+                id_unidade=id_unidade_contexto,
+            )
+        )
 
     # Sigilo gradual — None = sem restrição (super-usuário); senão filtra pelos
     # níveis que a credencial do servidor alcança.
@@ -276,8 +642,19 @@ async def list_processos(
         )
     if situacao is None:
         base = base.where(Processo.situacao != "rascunho")
-    elif situacao != "todos":
-        base = base.where(Processo.situacao == situacao)
+    else:
+        if situacao != "todos":
+            base = base.where(Processo.situacao == situacao)
+        # Rascunho é de quem o criou (SI-16): os dos outros não aparecem nem
+        # em "Rascunhos" nem em "Todos". Sem usuário de contexto, nenhum.
+        base = base.where(
+            or_(
+                Processo.situacao != "rascunho",
+                Processo.id_usuario == id_usuario_contexto
+                if id_usuario_contexto is not None
+                else false(),
+            )
+        )
     if apenas_ativos:
         base = base.where(Processo.ativo.is_(True))
     if desde:
@@ -290,7 +667,9 @@ async def list_processos(
 
     rows = (
         await db.execute(
-            base.order_by(Processo.data_hora_abertura.desc())
+            # `Processo.id` desempata: sem ele, linhas com a mesma data
+            # trocariam de página entre uma consulta e outra.
+            base.order_by(*_ordenacao(base, ordem, ordenar, direcao))
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
@@ -305,8 +684,44 @@ async def list_processos(
     return items, total
 
 
+def _ordenacao(base, ordem: OrdemProcesso, ordenar: OrdenarProcesso | None, direcao: str):
+    """ORDER BY da listagem. `Processo.id` desempata: sem ele, linhas com o
+    mesmo valor trocariam de página entre uma consulta e outra.
+
+    SI-19 — com `ordenar`, a coluna escolhida na tela. Vazio (rascunho sem
+    número, processo sem responsável) vai para o fim nos dois sentidos: quem
+    ordena por responsável quer ver nomes primeiro.
+    """
+    if ordenar is None:
+        if ordem is OrdemProcesso.parados:
+            return (_PARADO_DESDE.asc(), Processo.id.asc())
+        return (Processo.data_hora_abertura.desc(), Processo.id.desc())
+    # Colunas que só existem como rótulo do SELECT (aliases de `_base_select`).
+    rotulo = base.selected_columns
+    coluna = {
+        OrdenarProcesso.numero: Processo.numero_processo,
+        OrdenarProcesso.abertura: Processo.data_hora_abertura,
+        OrdenarProcesso.manifestante: rotulo.manifestante_nome,
+        OrdenarProcesso.assunto: rotulo.assunto_nome,
+        OrdenarProcesso.local_atual: rotulo.local_atual_nome,
+        OrdenarProcesso.responsavel: rotulo.responsavel_nome,
+        OrdenarProcesso.parado: rotulo.parado_desde,
+    }[ordenar]
+    if direcao == "desc":
+        return (coluna.desc().nulls_last(), Processo.id.desc())
+    return (coluna.asc().nulls_last(), Processo.id.asc())
+
+
 def _row_to_list(r) -> ProcessoListItem:
     p: Processo = r[0]
+    # `datetime.now()` ingênuo, como o resto deste arquivo (ver `calcular_prazo`).
+    prazo = prazo_da_caixa(
+        data_abertura=inicio_do_prazo(p.data_hora_abertura, p.data_reinicio_prazo),
+        prazo_snapshot_dias=p.prazo_servico_dias_snapshot,
+        prazo_encaminhamento=r.prazo_encaminhamento,
+        arquivado=bool(r.arquivado),
+        now=datetime.now(),
+    )
     return ProcessoListItem(
         id=p.id,
         numero_processo=p.numero_processo,
@@ -314,6 +729,11 @@ def _row_to_list(r) -> ProcessoListItem:
         numero_origem=p.numero_origem,
         situacao=p.situacao,
         data_hora_abertura=p.data_hora_abertura,
+        parado_desde=r.parado_desde,
+        prazo_caixa_status=prazo.status,
+        prazo_caixa_vence_em=prazo.vence_em,
+        prazo_caixa_origem=prazo.origem,
+        arquivado=bool(r.arquivado),
         ativo=p.ativo,
         publico=p.publico,
         nivel_sigilo=p.nivel_sigilo,
@@ -331,6 +751,39 @@ def _row_to_list(r) -> ProcessoListItem:
     )
 
 
+async def _competencia_no_pendente(
+    db: AsyncSession, processo_id: int, *, tenant_id: int, usuario_id: int | None,
+) -> tuple[bool | None, bool | None]:
+    """Quem consulta pode receber/recusar e cancelar o encaminhamento pendente?
+    `(None, None)` sem pendente ou sem usuário."""
+    if usuario_id is None:
+        return None, None
+    enc = (
+        await db.execute(
+            select(Encaminhamento)
+            .where(
+                Encaminhamento.id_processo == processo_id,
+                Encaminhamento.tenant_id == tenant_id,
+                Encaminhamento.excluido.is_(False),
+                Encaminhamento.recebido.is_(False),
+                Encaminhamento.cancelado.is_(False),
+            )
+            .order_by(Encaminhamento.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if enc is None:
+        return None, None
+    from .acoes_processo import pode_decidir_encaminhamento
+    from .permissoes import load_permissions
+
+    perms = await load_permissions(db, usuario_id, tenant_id=tenant_id)
+    return await pode_decidir_encaminhamento(
+        db, enc, usuario_id=usuario_id, tenant_id=tenant_id,
+        is_super_usuario=perms.is_super_usuario,
+    )
+
+
 async def get_processo_detail(
     db: AsyncSession,
     processo_id: int,
@@ -344,6 +797,14 @@ async def get_processo_detail(
     # vazar a existência do processo sigiloso.
     if niveis_permitidos is not None:
         stmt = stmt.where(Processo.nivel_sigilo.in_(niveis_permitidos))
+    # Rascunho de outra pessoa também é 404 (SI-16), inclusive para
+    # super-usuário — mesma regra de `sigilo.assert_acesso_processo`.
+    stmt = stmt.where(
+        or_(
+            Processo.situacao != "rascunho",
+            Processo.id_usuario == usuario_id if usuario_id is not None else false(),
+        )
+    )
     row = (await db.execute(stmt)).first()
     if row is None:
         return None
@@ -377,7 +838,7 @@ async def get_processo_detail(
         )
     ).scalar_one_or_none()
     calc = calcular_prazo(
-        data_abertura=p.data_hora_abertura,
+        data_abertura=inicio_do_prazo(p.data_hora_abertura, p.data_reinicio_prazo),
         prazo_snapshot_dias=p.prazo_servico_dias_snapshot,
         data_conclusao=data_conclusao,
         now=datetime.now(),
@@ -392,8 +853,32 @@ async def get_processo_detail(
         origem="servico" if calc.prazo_servico_dias_snapshot is not None else None,
     )
 
+    pode_receber, pode_cancelar = await _competencia_no_pendente(
+        db, processo_id, tenant_id=tenant_id, usuario_id=usuario_id)
+
+    # SI-61 — o último recebimento pode ser desfeito por quem consulta?
+    pode_cancelar_receb: bool | None = None
+    motivo_cancelar_receb: str | None = None
+    if usuario_id is not None:
+        from .acoes_processo import situacao_cancelar_recebimento
+        from .permissoes import load_permissions
+
+        perms = await load_permissions(db, usuario_id, tenant_id=tenant_id)
+        pode_cancelar_receb, motivo_cancelar_receb = await situacao_cancelar_recebimento(
+            db, processo_id, tenant_id=tenant_id, usuario_id=usuario_id,
+            is_super_usuario=perms.is_super_usuario,
+        )
+
     return ProcessoDetail(
         **base_item.model_dump(),
+        pode_receber_encaminhamento=pode_receber,
+        pode_cancelar_encaminhamento=pode_cancelar,
+        pode_cancelar_recebimento=pode_cancelar_receb,
+        motivo_cancelar_recebimento=motivo_cancelar_receb,
+        id_assunto=p.id_assunto,
+        id_tipo_processo=row.id_tipo_processo,
+        id_manifestante=p.id_manifestante,
+        id_unidade_proprietaria=p.id_unidade_proprietaria,
         observacao=p.observacao,
         corpo=p.corpo,
         virtual=p.virtual,
@@ -472,6 +957,33 @@ async def _load_movimentacoes(
         for e, uo, ud, prio in enc_rows:
             encs[e.id_movimentacao] = (e, uo, ud, prio)
 
+    # SI-62 — arquivos que acompanham o despacho: filhos do PDF dele
+    # (`anexo_processo.id_anexo_principal`), não "anexos da movimentação" —
+    # anexo enviado depois do despacho também cairia na movimentação dele.
+    anexos_do_despacho: dict[int, list[AnexoDoDespacho]] = {}
+    pdfs_de_despacho = {d.id_anexo for d in despachos.values() if d.id_anexo}
+    if pdfs_de_despacho:
+        filhos = (
+            await db.execute(
+                select(AnexoProcesso.id_anexo_principal, Anexo.id, Anexo.descricao)
+                .join(Anexo, Anexo.id == AnexoProcesso.id_anexo)
+                .where(
+                    AnexoProcesso.id_processo == processo_id,
+                    AnexoProcesso.tenant_id == tenant_id,
+                    AnexoProcesso.id_anexo_principal.in_(pdfs_de_despacho),
+                    AnexoProcesso.excluido.is_(False),
+                    AnexoProcesso.desentranhado_em.is_(None),
+                    Anexo.excluido.is_(False),
+                    Anexo.ativo.is_(True),
+                )
+                .order_by(AnexoProcesso.ordem.nulls_last(), Anexo.id)
+            )
+        ).all()
+        for principal, id_anexo, descricao in filhos:
+            anexos_do_despacho.setdefault(principal, []).append(
+                AnexoDoDespacho(id=id_anexo, descricao=descricao)
+            )
+
     desp_user_ids = {d.id_usuario for d in despachos.values()}
     users_by_id: dict[int, str] = {}
     if desp_user_ids:
@@ -510,6 +1022,8 @@ async def _load_movimentacoes(
                 id=d.id,
                 despacho=d.despacho,
                 usuario=users_by_id.get(d.id_usuario),
+                id_anexo=d.id_anexo,
+                anexos=anexos_do_despacho.get(d.id_anexo, []) if d.id_anexo else [],
             )
 
         enc_out: EncaminhamentoOut | None = None
@@ -523,6 +1037,9 @@ async def _load_movimentacoes(
                 prioridade=prio.prioridade if prio else None,
                 quantidade_folhas=e.quantidade_folhas,
                 data_prazo=e.data_prazo,
+                recusado=e.recusado,
+                data_hora_recusa=e.data_hora_recusa,
+                motivo_recusa=e.motivo_recusa,
                 recebido=e.recebido,
                 data_hora_recebimento=e.data_hora_recebimento,
                 cancelado=e.cancelado,
@@ -602,6 +1119,7 @@ async def _load_anexos(
                 ordem=ap.ordem,
                 documento_numero=idx,
                 pagina_processo=pagina_processo,
+                id_anexo_principal=ap.id_anexo_principal,
             )
         )
     return resultado

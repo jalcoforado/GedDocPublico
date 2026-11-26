@@ -1,0 +1,33 @@
+# Créditos das imagens de `frontend/public/brand/`
+
+Imagens de identidade dos tenants, servidas em `/brand/`. Toda imagem de
+terceiro entra aqui com origem, autor e licença — e, quando a licença exigir
+atribuição, o crédito também vai em `tenant.imagem_login_credito`, que é o que
+aparece na tela de login.
+
+| Arquivo | O que é | Origem | Autor | Licença |
+|---|---|---|---|---|
+| `itaitinga-brasao.png` | Brasão de Itaitinga (recorte quadrado de `itaitinga-logo.png`) | https://www.itaitinga.ce.gov.br/imagens/logo.png | Prefeitura Municipal de Itaitinga | Símbolo oficial do município |
+| `itaitinga-logo.png` | Marca da Prefeitura de Itaitinga | https://www.itaitinga.ce.gov.br/imagens/logo.png | Prefeitura Municipal de Itaitinga | Símbolo oficial do município |
+| `itaitinga-login.webp` | Arte do login de Itaitinga (pórtico de entrada, Ponta da Serra, Lagoa de Dentro), com o texto "Nossa terra, mais conectada com o futuro". É o painel esquerdo do mockup de login do slide 1 da apresentação `APRIMORA_Itaitinga_Premium_Final.pptx` (2026-10-21), recortado antes do formulário desenhado, 923×992 px | Apresentação para a Prefeitura de Itaitinga | Não informado (veio na apresentação) | Uso pedido pelo responsável do produto em 2026-10-21, sem exigência de crédito |
+| `itaitinga-matriz.webp` | Igreja Matriz de Santo Antônio, recortada para o painel do login e reduzida a 1400 px de largura | https://commons.wikimedia.org/wiki/File:Igreja_Matriz_de_Santo_Ant%C3%B4nio_-_Itaitinga_-_CE.jpg | Lourenco e Silva | [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/) |
+| `itaitinga-serra.jpg` | Serra de Itaitinga, reduzida a 1600 px de largura e recomprimida | https://commons.wikimedia.org/wiki/File:Serra_de_Itaitinga_-_CE.jpg | Lourenco e Silva | [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/) |
+| `aprimora-logo.png` | Marca da Aprimora (o produto), recortada na caixa de tinta | `public/img/logo-aprimora.png` do repositório `jalcoforado/aprimora` | Aprimora | Marca própria |
+| `aprimora-logo-escuro.png` | A mesma marca para o tema escuro: o navy do wordmark trocado por claro, laranja intacto | derivada de `aprimora-logo.png` | Aprimora | Marca própria |
+
+O `itaitinga-brasao.png` tem uma **cópia idêntica em `backend/app/static/brand/`**
+(SI-53): é dela que o backend tira o brasão do papel timbrado dos documentos,
+porque o servidor não enxerga esta pasta. Ao trocar o brasão, troque os dois.
+
+As duas da Aprimora têm só 211×30 px (é o que existia no sistema antigo). Servem
+até ~24 px de altura; para uso maior é preciso o vetor original.
+
+A tela de login exibe a foto em cor e sem véu (até 2026-10-21 havia um véu na cor
+do tenant, aplicado por CSS). Os arquivos em si não são alterados além do recorte,
+do redimensionamento e da recompressão. O painel ocupa ~58% da largura e corta a
+foto para caber, ancorado a 15% da largura: prefira fotos quase quadradas, com o
+assunto à esquerda.
+
+Foto de login pesa na primeira impressão do sistema: a da Serra tinha 385 KB e,
+no link da homologação, levava perto de 30 s. Mantenha as fotos abaixo de ~100 KB
+(WebP, até 1600 px de largura).

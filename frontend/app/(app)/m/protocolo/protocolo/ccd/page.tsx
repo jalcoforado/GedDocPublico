@@ -13,10 +13,11 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { FormField } from "@/components/ui/form-field";
 import { PageHeader } from "@/components/ui/page-header";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
@@ -125,29 +126,28 @@ export default function CcdPage() {
         icon={FolderTree}
         title="CCD — Classificação Documental"
         description="Taxonomia hierárquica de classes documentais. Cada protocolo recebe uma classe que determina o prazo de guarda via tabela de temporalidade (TTD)."
+        actions={
+          canInsert && (
+            <Button
+              onClick={() => {
+                setEditing(null);
+                setCreatingParent(null);
+              }}
+            >
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Nova classe raiz
+            </Button>
+          )
+        }
       />
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex gap-2">
-          <Button size="sm" variant="secondary" onClick={expandAll}>
-            Expandir tudo
-          </Button>
-          <Button size="sm" variant="secondary" onClick={collapseAll}>
-            Recolher
-          </Button>
-        </div>
-        {canInsert && (
-          <Button
-            size="sm"
-            onClick={() => {
-              setEditing(null);
-              setCreatingParent(null);
-            }}
-          >
-            <Plus className="mr-1 h-4 w-4" aria-hidden="true" />
-            Nova classe raiz
-          </Button>
-        )}
+      <div className="flex gap-2">
+        <Button size="sm" variant="secondary" onClick={expandAll}>
+          Expandir tudo
+        </Button>
+        <Button size="sm" variant="secondary" onClick={collapseAll}>
+          Recolher
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
@@ -162,7 +162,7 @@ export default function CcdPage() {
             <EmptyState
               icon={FolderTree}
               title="Nenhuma classe cadastrada"
-              description="Clique em Nova classe para criar a primeira da árvore."
+              description="Use “Nova classe raiz” para criar a primeira da árvore."
               className="border-0 bg-transparent"
             />
           )}
@@ -213,8 +213,8 @@ export default function CcdPage() {
           )}
           {!editing && creatingParent === undefined && (
             <div className="rounded-xl border border-dashed border-border bg-surface-1 p-4 text-xs text-foreground-muted">
-              Clique numa classe pra editar, ou em &ldquo;Nova classe raiz&rdquo;
-              pra criar. Use o + ao lado da linha pra criar subclasse.
+              Use Editar na linha para alterar uma classe, &ldquo;Subclasse&rdquo; para criar
+              uma abaixo dela ou &ldquo;Nova classe raiz&rdquo; no topo.
             </div>
           )}
         </aside>
@@ -285,38 +285,32 @@ function TreeRow({
             kw: {node.palavras_chave}
           </span>
         )}
-        <div className="flex shrink-0 opacity-0 transition-opacity group-hover:opacity-100">
-          {onAddChild && (
-            <button
-              type="button"
-              onClick={() => onAddChild(node.id)}
-              className="rounded p-1 text-foreground-muted hover:bg-surface-3 hover:text-foreground"
-              title="Adicionar subclasse"
-            >
-              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
-          )}
-          {onEdit && (
-            <button
-              type="button"
-              onClick={() => onEdit(classeForCallback)}
-              className="rounded p-1 text-foreground-muted hover:bg-surface-3 hover:text-foreground"
-              title="Editar"
-            >
-              <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
-          )}
-          {onDelete && (
-            <button
-              type="button"
-              onClick={() => onDelete(classeForCallback)}
-              className="rounded p-1 text-foreground-muted hover:bg-danger/10 hover:text-danger"
-              title="Excluir"
-            >
-              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
-          )}
-        </div>
+        {/* Eram ícones que só apareciam no hover: invisíveis no toque e no
+            teclado. */}
+        <AcoesDaLinha
+          className="shrink-0"
+          acoes={[
+            {
+              label: "Subclasse",
+              icon: Plus,
+              oculta: !onAddChild,
+              onClick: () => onAddChild?.(node.id),
+            },
+            {
+              label: "Editar",
+              icon: Pencil,
+              oculta: !onEdit,
+              onClick: () => onEdit?.(classeForCallback),
+            },
+            {
+              label: "Excluir",
+              icon: Trash2,
+              perigo: true,
+              oculta: !onDelete,
+              onClick: () => onDelete?.(classeForCallback),
+            },
+          ]}
+        />
       </div>
       {hasChildren && isOpen && (
         <ul className="divide-y divide-border">
@@ -378,10 +372,16 @@ function ClasseForm({
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // Erro sob o campo só depois de tentar salvar (antes era um toast genérico).
+  const [tentou, setTentou] = useState(false);
+  const faltaCodigo = !codigo.trim();
+  const faltaNome = !nome.trim();
+
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!codigo.trim() || !nome.trim()) {
-      toast.error("Código e nome são obrigatórios.");
+    setTentou(true);
+    if (faltaCodigo || faltaNome) {
+      document.getElementById(faltaCodigo ? "ccd-codigo" : "ccd-nome")?.focus();
       return;
     }
     if (isEditing) {
@@ -410,10 +410,11 @@ function ClasseForm({
   return (
     <form
       onSubmit={submit}
-      className="space-y-3 rounded-xl border border-border bg-card p-4 shadow-xs"
+      noValidate
+      className="space-y-4 rounded-card border border-border bg-card p-4 shadow-card"
     >
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold">
+        <h2 className="text-sm font-semibold text-foreground">
           {isEditing ? "Editar classe" : "Nova classe"}
         </h2>
         <button
@@ -428,41 +429,43 @@ function ClasseForm({
 
       {!isEditing && (
         <p className="text-xs text-foreground-muted">
-          Pai:{" "}
-          <span className="font-mono">
-            {parentLabel ? `${parentLabel.codigo} ${parentLabel.nome}` : "(raiz)"}
+          Dentro de:{" "}
+          <span className="font-mono text-foreground">
+            {parentLabel ? `${parentLabel.codigo} ${parentLabel.nome}` : "raiz do plano"}
           </span>
         </p>
       )}
 
-      <div>
-        <Label htmlFor="ccd-codigo">
-          Código <span className="text-danger">*</span>
-        </Label>
+      <FormField
+        label="Código"
+        required
+        error={tentou && faltaCodigo ? "Informe o código da classe, ex.: 025." : undefined}
+      >
         <Input
           id="ccd-codigo"
           value={codigo}
           onChange={(e) => setCodigo(e.target.value)}
-          placeholder="Ex: 025"
+          placeholder="Ex.: 025"
           maxLength={20}
+          className="font-mono"
         />
-      </div>
+      </FormField>
 
-      <div>
-        <Label htmlFor="ccd-nome">
-          Nome <span className="text-danger">*</span>
-        </Label>
+      <FormField
+        label="Nome"
+        required
+        error={tentou && faltaNome ? "Dê um nome à classe." : undefined}
+      >
         <Input
           id="ccd-nome"
           value={nome}
           onChange={(e) => setNome(e.target.value)}
-          placeholder="Ex: Concursos e seleções"
+          placeholder="Ex.: Concursos e seleções"
           maxLength={200}
         />
-      </div>
+      </FormField>
 
-      <div>
-        <Label htmlFor="ccd-desc">Descrição (opcional)</Label>
+      <FormField label="Descrição" opcional>
         <Textarea
           id="ccd-desc"
           value={descricao}
@@ -470,31 +473,28 @@ function ClasseForm({
           rows={2}
           maxLength={1000}
         />
-      </div>
+      </FormField>
 
-      <div>
-        <Label htmlFor="ccd-kw">
-          Palavras-chave{" "}
-          <span className="text-xs text-foreground-muted">
-            (CSV — ajuda a sugestão automática)
-          </span>
-        </Label>
+      <FormField
+        label="Palavras-chave"
+        opcional
+        hint="Separadas por vírgula. Ajudam a sugerir esta classe no balcão."
+      >
         <Input
           id="ccd-kw"
           value={palavrasChave}
           onChange={(e) => setPalavrasChave(e.target.value)}
-          placeholder="Ex: edital, concurso, vaga"
+          placeholder="Ex.: edital, concurso, vaga"
           maxLength={500}
         />
-      </div>
+      </FormField>
 
       <div className="flex justify-end gap-2 pt-1">
-        <Button type="button" variant="secondary" onClick={onClose}>
+        <Button type="button" variant="ghost" onClick={onClose}>
           Cancelar
         </Button>
-        <Button type="submit" disabled={pending}>
-          {pending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-          {isEditing ? "Salvar" : "Criar"}
+        <Button type="submit" loading={pending}>
+          {isEditing ? "Salvar alterações" : "Criar classe"}
         </Button>
       </div>
     </form>

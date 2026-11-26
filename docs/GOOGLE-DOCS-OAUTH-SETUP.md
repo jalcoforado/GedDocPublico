@@ -1,152 +1,95 @@
-# Google Docs OAuth Setup Guide
+# Google Docs — configurar a conexão (OAuth)
 
-> **Status:** vivo · **Autoridade sobre:** Setup do OAuth do Google Docs para minutas.
-> **Última verificação:** 2026-07-21 (último commit que tocou este arquivo).
+> **Status:** vivo · **Autoridade sobre:** setup do OAuth do Google Docs para minutas.
+> **Última verificação:** 2026-11-13 (SI-32).
 > Índice: [docs/INDEX.md](INDEX.md) · precedência: código > `CLAUDE.md` > este doc.
 
+Para que serve: o servidor redige uma minuta "em Google Docs". Cada usuário
+conecta a própria conta Google uma vez (tela de consentimento do Google) e, a
+partir daí, o Aprimora cria o documento no Drive dele e traz o texto de volta.
 
-## Overview
+Sem a configuração abaixo a integração fica **desligada**: na tela *Redigir
+documento* a opção Google Docs aparece desabilitada com o aviso "ainda não foi
+configurada neste servidor" — não há botão que leve a erro.
 
-This guide covers setting up Google Docs OAuth2 authentication for Aprimora-py. Users can authorize their Google account to create and edit documents directly in Google Docs from the platform.
+## 1. Projeto no Google Cloud (uma vez)
 
-## Prerequisites
+Use um projeto **só do Aprimora** — o nome do app aparece na tela de permissão
+que o servidor da Prefeitura vê ("**Aprimora** quer acessar sua Conta do
+Google"). Não reaproveite projeto de outro produto.
 
-- Google Cloud account (free tier OK)
-- VPS access (for production deployment)
-- Docker Compose (for local development)
+1. [console.cloud.google.com](https://console.cloud.google.com/) → novo projeto `aprimora`.
+2. **APIs e serviços → Biblioteca**: ative **Google Drive API** e **Google Docs API** (o código chama as duas).
+3. **Tela de consentimento OAuth**:
+   - Tipo: **Externo**.
+   - Nome do app: **Aprimora**. E-mail de suporte: uma caixa da equipe, não pessoal.
+   - Escopo: só `https://www.googleapis.com/auth/drive.file` — o Aprimora enxerga apenas os arquivos que ele mesmo criar. É escopo não sensível: não exige a verificação completa do Google.
+   - Status de publicação: **Em produção**. Em "Teste", só os usuários de teste listados conseguem conectar e a autorização expira em 7 dias.
+4. **Credenciais → Criar credenciais → ID do cliente OAuth**:
+   - Tipo: **Aplicativo da Web**. (Não "Desktop": esse tipo não aceita o endereço de retorno do servidor.)
+   - Nome: `Aprimora web`.
+   - **URIs de redirecionamento autorizados** — um por ambiente, ver a seção 2.
+5. Guarde o **Client ID** e o **Client secret**. Eles vão só no `.env` do servidor — nunca em chat aberto, e-mail ou git.
 
-## Local Development Setup
+## 2. O endereço de retorno (redirect URI)
 
-### 1. Create Google Cloud Project
+É o erro mais comum. O valor tem de ser:
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create new project: "aprimora-dev" (or similar)
-3. Wait for project creation
+- o endereço que o **navegador** usa para abrir o Aprimora (o nginx), **não** o backend direto. O callback responde com redirecionamentos relativos (`/minuta-error`, `/m/protocolo/processos/...`) que só existem no frontend; apontado para o `:8000`, o usuário volta do Google para uma página 404;
+- **idêntico**, caractere por caractere, no Google Cloud e no `.env` (`http` × `https`, porta, barra no fim).
 
-### 2. Enable APIs
+| Ambiente | `GOOGLE_OAUTH_REDIRECT_URI` |
+|---|---|
+| Dev (docker compose padrão) | `http://localhost:8090/api/v2/auth/google/callback` |
+| Dev com outra porta no nginx | `http://localhost:<porta>/api/v2/auth/google/callback` |
+| Servidor | `https://<domínio do Aprimora>/api/v2/auth/google/callback` |
 
-1. In Cloud Console, search for "Google Docs API"
-   - Click **ENABLE**
-2. Search for "Google Drive API"
-   - Click **ENABLE**
+⚠️ **O Google não aceita IP como endereço de retorno** (só `localhost`). O
+servidor acessado por `http://103.230.142.69:8090` precisa de um **domínio com
+https** antes de a conexão funcionar lá.
 
-### 3. Create OAuth 2.0 Credentials
-
-1. Go to **APIs & Services** → **Credentials**
-2. Click **+ Create Credentials** → **OAuth client ID**
-3. Choose application type: **Desktop application**
-4. Click **Create**
-5. Download JSON file (save as `backend/keys/google-credentials.json`)
-
-### 4. Configure Redirect URI
-
-1. Go back to Credentials
-2. Click the newly created credential (OAuth 2.0 Client ID)
-3. Under **Authorized redirect URIs**, click **Add URI**
-4. Add: `http://localhost:8000/api/v2/auth/google/callback`
-5. Click **Save**
-
-### 5. Set Environment Variables
-
-Copy `backend/.env.example` → `backend/.env`:
-
-```bash
-# Extract from downloaded JSON:
-GOOGLE_OAUTH_CLIENT_ID=<client_id>.apps.googleusercontent.com
-GOOGLE_OAUTH_CLIENT_SECRET=<client_secret>
-GOOGLE_OAUTH_REDIRECT_URI=http://localhost:8000/api/v2/auth/google/callback
-GOOGLE_CREDENTIALS_FILE=/app/keys/google-credentials.json
-```
-
-### 6. Start Development Containers
+## 3. Variáveis de ambiente (`backend/.env`)
 
 ```bash
-docker compose up -d
+GOOGLE_OAUTH_CLIENT_ID=<client id>.apps.googleusercontent.com
+GOOGLE_OAUTH_CLIENT_SECRET=<client secret>
+GOOGLE_OAUTH_REDIRECT_URI=<ver seção 2>
 ```
 
-### 7. Test OAuth Locally
+A conexão também precisa da `DADOS_SENSIVEIS_ENCRYPTION_KEY` (a mesma que cifra
+dados bancários) — sem ela, o token não teria como ser gravado, e a integração
+conta como desligada.
 
-1. Navigate to: `http://localhost:3100/processos/123?tab=documentos`
-2. Click "Redigir documento"
-3. Select "Google Docs"
-4. Click "Conectar agora"
-5. Authorize in Google consent screen
-6. You should be redirected to Google Docs editor ✓
+Depois de mudar o `.env`: `docker compose up -d backend` (o `restart` não relê o
+`env_file`). Valor vazio, ou o de exemplo (`YOUR_CLIENT_ID…`), deixa a
+integração desligada.
 
-## Production Deployment (VPS)
+Os tokens de cada usuário ficam cifrados no banco (`aprimora_py.google_credencial`)
+com a `DADOS_SENSIVEIS_ENCRYPTION_KEY` — trocar essa chave invalida as conexões existentes
+(cada usuário conecta de novo).
 
-### 1. Create Google Cloud Project for Production
+## 4. Conferir
 
-Use a separate Google Cloud project (lower risk if credentials compromise).
+1. `GET /api/v2/auth/google/status` (logado) → `{"configurado": true, "conectado": false, ...}`.
+2. Num processo: aba **Documentos** → **Redigir documento** → em *Plataforma de redação*, **Conectar agora** → autorizar no Google.
+3. Volta para o mesmo processo; reabrindo *Redigir documento*, a opção **Google Docs** está habilitada. `status` agora diz `"conectado": true`.
+4. Criar um documento em Google Docs abre o documento numa aba nova; **Sincronizar do Google Docs** traz o texto de volta.
 
-### 2. Create OAuth Credentials for Production
+## Erros e o que significam
 
-Follow steps 1-3 above, but name the project "aprimora-prod".
+A tela `/minuta-error` mostra a mensagem e volta para o processo de onde a conexão partiu.
 
-### 3. Add Production Redirect URI
+| Código | Causa provável |
+|---|---|
+| `google_nao_configurado` | Client ID/secret vazios (ou o valor de exemplo), ou sem `DADOS_SENSIVEIS_ENCRYPTION_KEY`, no servidor. |
+| `access_denied` | O usuário clicou em "Cancelar" no Google — ou o app está em "Teste" e ele não é usuário de teste. |
+| `state_expired` | Mais de 5 min na tela do Google, ou o Redis reiniciou no meio. Conectar de novo. |
+| `conta_diferente` | O link de conexão foi aberto numa sessão de outro usuário. Nada é gravado. |
+| `google_api_error` | Troca do código recusada. Quase sempre **redirect URI diferente** do cadastrado, ou credencial do tipo "Desktop". O motivo exato vai para o log do backend (`google_oauth`). |
 
-When creating the OAuth credential, add redirect URI:
-```
-https://aprimora.tld/api/v2/auth/google/callback
-```
-(Replace `aprimora.tld` with your actual domain)
+## Como funciona (referência)
 
-### 4. Deploy to VPS
-
-1. SSH into VPS (103.230.142.69)
-2. Pull latest code from main branch
-3. Update `.env` on VPS:
-   ```bash
-   GOOGLE_OAUTH_CLIENT_ID=<prod_client_id>
-   GOOGLE_OAUTH_CLIENT_SECRET=<prod_client_secret>
-   GOOGLE_OAUTH_REDIRECT_URI=https://aprimora.tld/api/v2/auth/google/callback
-   GOOGLE_CREDENTIALS_FILE=/app/keys/google-credentials.json
-   ```
-4. Place Google credentials JSON at `/app/keys/google-credentials.json`
-5. Restart containers: `docker compose restart`
-
-## Troubleshooting
-
-### "State expired"
-- Error: User took >5 minutes on Google consent screen
-- Solution: Increase Redis TTL in `GoogleOAuthFlow.generate_oauth_url()` if needed
-
-### "Invalid code" / "Google negou"
-- Error: Authorization code invalid or rejected
-- Cause: Redirect URI mismatch or credentials expired
-- Solution: Verify redirect URI in Google Cloud Console matches app config
-
-### "Sessão expirou"
-- Error: State parameter not found in Redis
-- Cause: Redis connection lost or TTL expired
-- Solution: Verify Redis running, check TTL settings
-
-### CORS Errors
-- Error: API call blocked by browser CORS
-- Cause: nginx not properly routing /api/v2/auth/*
-- Solution: Check nginx config allows auth routes (should be transparent proxy)
-
-## API Endpoints (Reference)
-
-**User-facing:**
-- `GET /api/v2/auth/google?minuta_id=X&processo_id=Y` — Initiate OAuth flow
-- `GET /api/v2/auth/google/callback?code=CODE&state=STATE` — Handle callback
-
-**Admin-facing (checking credential status):**
-- `GET /api/v2/users/me/google-credential` — Returns 200 or 404 (credential status)
-
-## Security Notes
-
-- Access tokens are encrypted with Fernet before storage
-- State parameter protected against CSRF (Redis + 5min TTL)
-- Credentials are per-user, per-tenant (RLS policies enforce isolation)
-- Old credentials are revoked when user connects new account
-- All requests require authentication + tenant context
-
-## Support
-
-For issues, check:
-1. Google Cloud Console → APIs & Services → Credentials (valid client ID/secret)
-2. Redirect URI matches exactly (trailing slash matters)
-3. Redis running: `redis-cli ping` should return PONG
-4. Backend logs: `docker logs aprimora-py-backend`
+- `GET /api/v2/auth/google/status` — `{configurado, conectado, conectado_em}` para a tela.
+- `GET /api/v2/auth/google?minuta_id=X&processo_id=Y` — gera o `state` (Redis, 5 min, uso único) e manda para o Google. `minuta_id=0` = só conectar a conta.
+- `GET /api/v2/auth/google/callback` — confere que o `state` é do mesmo usuário/tenant da sessão, troca o código por tokens (PKCE: o `code_verifier` guardado no `state`), cifra e grava; revoga a conexão anterior do usuário.
+- Código: `backend/app/services/google_oauth_flow.py`, rotas em `backend/app/routers/auth.py`, documento em `backend/app/services/google_docs_service.py`.

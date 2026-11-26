@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import { MENUS, menuDoModulo } from "@/lib/menus";
+import { PERMS_LEITURA_PAGAMENTOS } from "@/lib/menus/pagamentos";
 import type { NavItem } from "@/lib/menus/tipos";
 import { moduloDoPathname } from "@/lib/modulos";
 
@@ -31,10 +32,20 @@ const TODOS = Object.values(MENUS).flatMap((m) => hrefs(m.grupos.flatMap((g) => 
  */
 const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> = {
   "/home": {},
+  // Menu por área (2026-11-14): índice de cadastros de todos os módulos. Sem
+  // perm própria — cada cartão dela é podado pela permissão da tela.
+  "/cadastros": {},
+  "/m/protocolo/painel": { perm: "processo" },
+  // "Caixas de trabalho": UM item. As caixas são abas da tela, não itens do
+  // menu (`components/protocolo/AbasCaixas.tsx`).
   "/m/protocolo/processos": { perm: "processo" },
+  "/m/protocolo/fluxo": { perm: "processo" },
   "/m/protocolo/workflow": {},
   "/m/protocolo/relatorios": { perm: "processo" },
   "/m/protocolo/protocolo/balcao": { perm: "processo" },
+  // Tela-índice do menu único: sem poda própria — cada cartão dela é podado
+  // pela permissão do item que leva.
+  "/m/protocolo/cadastros": {},
   "/m/protocolo/protocolo/vencendo-prazo": { perm: "processo" },
   "/m/protocolo/protocolo/ccd": { perm: "catalogo" },
   "/m/protocolo/protocolo/ttd": { perm: "catalogo" },
@@ -52,8 +63,10 @@ const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> 
   "/m/frota/veiculos": { perm: "frota" },
   "/m/frota/motoristas": { perm: "frota" },
   "/m/frota/solicitacoes": { perm: "frota" },
+  "/m/frota/fluxo": { perm: "frota" },
   "/m/frota/mapa": { perm: "frota" },
   "/m/transporte": { perm: "transporte_regulado" },
+  "/m/transporte/fluxo": { perm: "transporte_regulado" },
   "/m/transporte/permissionarios": { perm: "transporte_regulado" },
   "/m/transporte/empresas": { perm: "transporte_regulado" },
   "/m/transporte/veiculos": { perm: "transporte_regulado" },
@@ -65,10 +78,18 @@ const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> 
   "/m/transporte/recadastramento": { perm: "transporte_regulado" },
   "/m/transporte/relatorio": { perm: "transporte_regulado" },
   "/m/pagamentos": {
-    anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar", "pagamento_cadastro"],
+    anyOf: ["pagamento_solicitar", "pagamento_gerir", "pagamento_validar",
+            "pagamento_autorizar", "pagamento_pagar", "pagamento_auditar",
+            "pagamento_cadastro"],
   },
   "/m/pagamentos/solicitacoes": {
     anyOf: ["pagamento_solicitar", "pagamento_gerir", "pagamento_validar", "pagamento_autorizar"],
+  },
+  // Tela-índice do menu único ("Cadastros e controle"): qualquer leitura do módulo.
+  "/m/pagamentos/cadastros": {
+    anyOf: ["pagamento_solicitar", "pagamento_gerir", "pagamento_validar",
+            "pagamento_autorizar", "pagamento_pagar", "pagamento_auditar",
+            "pagamento_cadastro"],
   },
   "/m/pagamentos/solicitacoes/gestor": { perm: "pagamento_gerir" },
   "/m/pagamentos/solicitacoes/validacao": { perm: "pagamento_validar" },
@@ -84,11 +105,35 @@ const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> 
     anyOf: ["pagamento_solicitar", "pagamento_gerir", "pagamento_validar", "pagamento_autorizar"],
   },
   "/m/pagamentos/dashboard": {
-    anyOf: ["pagamento_solicitar", "pagamento_aprovar", "pagamento_autorizar", "pagamento_pagar", "pagamento_cadastro"],
+    anyOf: ["pagamento_solicitar", "pagamento_gerir", "pagamento_validar",
+            "pagamento_autorizar", "pagamento_pagar", "pagamento_auditar",
+            "pagamento_cadastro"],
+  },
+  "/m/pagamentos/fluxo": {
+    anyOf: ["pagamento_solicitar", "pagamento_gerir", "pagamento_validar",
+            "pagamento_autorizar", "pagamento_pagar", "pagamento_auditar",
+            "pagamento_cadastro"],
   },
   "/m/pagamentos/conciliacao": {
     anyOf: ["pagamento_pagar", "pagamento_autorizar", "pagamento_auditar", "pagamento_cadastro"],
   },
+  "/m/pagamentos/caixa": { perm: "pagamento_cadastro" },
+  // Previsão financeira (fatia 5): leitura ampla, espelhando o router
+  // (`require_any_permission(*PERMS_LEITURA)`) — saber se o caixa aguenta os
+  // próximos vencimentos não é privilégio de quem autoriza.
+  "/m/pagamentos/previsao": { anyOf: PERMS_LEITURA_PAGAMENTOS },
+  // Central de alertas (fatia 6): mesma leitura ampla da previsão.
+  "/m/pagamentos/alertas": { anyOf: PERMS_LEITURA_PAGAMENTOS },
+  // Catálogo de indicadores (fatia 7): definições são leitura de todos.
+  "/m/pagamentos/catalogo": { anyOf: PERMS_LEITURA_PAGAMENTOS },
+  // Execução orçamentária (O1): leitura ampla, como as demais visões.
+  "/m/pagamentos/orcamento": { anyOf: PERMS_LEITURA_PAGAMENTOS },
+  "/m/pagamentos/excecoes": {
+    anyOf: ["pagamento_solicitar", "pagamento_gerir", "pagamento_validar",
+            "pagamento_autorizar", "pagamento_pagar", "pagamento_auditar",
+            "pagamento_cadastro"],
+  },
+  "/m/pagamentos/auditoria": { perm: "pagamento_auditar" },
   "/m/pagamentos/contabil": { perm: "pagamento_cadastro" },
   "/m/pagamentos/cadastros/fornecedores": { perm: "pagamento_cadastro" },
   "/m/pagamentos/cadastros/naturezas": { perm: "pagamento_cadastro" },
@@ -103,6 +148,7 @@ const PERMISSOES_ESPERADAS: Record<string, { perm?: string; anyOf?: string[] }> 
   "/m/administracao/organograma": {},
   "/m/administracao/grupos": {},
   "/m/administracao/configuracoes": { perm: "usuario" },
+  "/m/administracao/aparencia": { perm: "usuario" },
   "/m/administracao/auditoria": {},
   "/m/administracao/jobs": {},
 };
@@ -169,10 +215,12 @@ describe("split dos menus", () => {
   it("a ordem dos grupos dentro de cada módulo é a do NAV original", () => {
     const ORDEM_ESPERADA: Record<string, string[]> = {
       comum: ["Geral"],
-      protocolo: ["Processos", "Protocolo", "Cadastros"],
+      // Menu único (2026-11-05): o 1º grupo tem as telas da barra; os demais
+      // são as seções da tela-índice do módulo (`lugar: "hub"`).
+      protocolo: ["Processos", "Fluxo e prazos", "Gestão documental", "Cadastros"],
       frota: ["Frota"],
       transporte: ["Transporte Regulado"],
-      pagamentos: ["Pagamentos"],
+      pagamentos: ["Despesa", "Controle", "Cadastros"],
       administracao: ["Administração"],
     };
     for (const [slug, menu] of Object.entries(MENUS)) {

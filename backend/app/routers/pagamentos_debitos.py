@@ -22,8 +22,19 @@ from datetime import date
 
 from pydantic import BaseModel, Field
 
+from ..schemas.common import Paginated
 from ..schemas.pagamentos import (
-    AnexoDebitoOut, AutorizarLoteIn, ContaElegivelOut, DashboardOut, DebitoCreate, DebitoDetalheOut,
+    PanoramaVisaoGeralOut,
+    CreditoCreate,
+    CreditoOut,
+    DotacaoCreate,
+    DotacaoOut,
+    ExecucaoOrcamentariaOut,
+    IndicadorCatalogo,
+    AlertasOut,
+    PrevisaoFinanceiraOut,
+    ImpactoAutorizacoesOut,
+    AnexoDebitoOut, AutoridadeAprovarIn, AutorizarLoteIn, ContaElegivelOut, DashboardOut, DebitoCreate, DebitoDetalheOut,
     DebitoHistoricoOut, DebitoOut, DebitoUpdate, DecisaoIn, DecisaoJustificadaIn,
     ExcecaoCronologicaIn, ExcecaoCronologicaOut, FichaFonteOut,
     FilaAutorizacaoFonteGrupo, ChecklistDebitoItemOut, FilaLiberacaoGrupo,
@@ -44,6 +55,12 @@ from ..services import pagamentos_estados as est
 from ..services import pagamentos_excecoes as excecoes
 from ..services import pagamentos_export as export
 from ..services import pagamentos_filas as filas
+from ..services import pagamentos_alertas as alertas
+from ..services import pagamentos_catalogo as catalogo
+from ..services import pagamentos_orcamento as orc
+from ..services import pagamentos_panorama as panorama
+from ..services import pagamentos_previsao as previsao
+from ..services import pagamentos_notificacoes as notif
 from ..services import audit
 from ..services.anexos import AnexoError
 from ..services.html_pdf import html_to_pdf_bytes
@@ -116,7 +133,7 @@ async def _out(db, tenant_id: int, debitos) -> list[DebitoOut]:
 
 
 @debitos_router.get("", response_model=list[DebitoOut])
-async def list_debitos(situacao_tramitacao: str | None = None,
+async def list_debitos(situacao_tramitacao: list[str] | None = Query(None),
                        meus: bool = False,
                        id_fonte: int | None = None, id_natureza: int | None = None,
                        id_fornecedor: int | None = None, id_contrato: int | None = None,
@@ -124,17 +141,49 @@ async def list_debitos(situacao_tramitacao: str | None = None,
                        usuario: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
                        tenant_id: int = Depends(require_tenant_id),
                        db: AsyncSession = Depends(get_db)):
+    # `situacao_tramitacao` aceita o parâmetro repetido: as filas por etapa
+    # (gestor, validação, autoridade, concluídas) pedem as situações delas, em
+    # vez de baixar a base inteira e filtrar no navegador.
     rows = await svc.listar_debitos(
-        db, tenant_id=tenant_id, tramitacao_f=situacao_tramitacao,
+        db, tenant_id=tenant_id, tramitacoes=situacao_tramitacao,
         solicitante_id=usuario.id if meus else None, id_fonte=id_fonte, id_natureza=id_natureza,
         id_fornecedor=id_fornecedor, id_contrato=id_contrato, urgente=urgente, competencia=competencia)
     return await _out(db, tenant_id, rows)
 
 
+# As duas rotas abaixo são literais e vêm ANTES de `/{debito_id}`, como
+# `/exportar.csv`: depois dela, "pagina" viraria um id inválido e 422.
+@debitos_router.get("/pagina", response_model=Paginated[DebitoOut])
+async def pagina_debitos(situacao_tramitacao: list[str] | None = Query(None),
+                         q: str | None = Query(None, max_length=120),
+                         page: int = Query(1, ge=1),
+                         page_size: int = Query(25, ge=1, le=100),
+                         usuario: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                         tenant_id: int = Depends(require_tenant_id),
+                         db: AsyncSession = Depends(get_db)):
+    """A listagem de solicitações, paginada no servidor, com busca por texto."""
+    rows, total = await svc.pagina_de_debitos(
+        db, tenant_id=tenant_id, page=page, page_size=page_size,
+        tramitacoes=situacao_tramitacao, q=q)
+    return Paginated(items=await _out(db, tenant_id, rows), total=total,
+                     page=page, page_size=page_size)
+
+
+@debitos_router.get("/contagem-por-situacao", response_model=dict[str, int])
+async def contagem_por_situacao(q: str | None = Query(None, max_length=120),
+                                usuario: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                                tenant_id: int = Depends(require_tenant_id),
+                                db: AsyncSession = Depends(get_db)):
+    """Quantas solicitações há em cada situação, na mesma busca da página. Não
+    recebe filtro de situação de propósito: os cartões por etapa mostram o
+    quadro inteiro, e é clicando neles que se filtra."""
+    return await svc.contar_por_tramitacao(db, tenant_id=tenant_id, q=q)
+
+
 # Onda C (C1.1). Precisa vir ANTES de `/{debito_id}`: registrada depois, a rota
 # dinâmica capturaria "exportar.csv" e devolveria 422 ao tentar convertê-la em int.
 @debitos_router.get("/exportar.csv")
-async def exportar_debitos_csv(meus: bool = False,
+async def exportar_debitos_csv(situacao_tramitacao: str | None = None, meus: bool = False,
                                id_fonte: int | None = None, id_natureza: int | None = None,
                                id_fornecedor: int | None = None, id_contrato: int | None = None,
                                urgente: bool | None = None, competencia: str | None = None,
@@ -148,6 +197,7 @@ async def exportar_debitos_csv(meus: bool = False,
     pt-BR (ver `services/pagamentos_export`).
     """
     filtros = dict(
+        tramitacao_f=situacao_tramitacao,
         solicitante_id=usuario.id if meus else None,
         id_fonte=id_fonte, id_natureza=id_natureza, id_fornecedor=id_fornecedor,
         id_contrato=id_contrato, urgente=urgente, competencia=competencia,
@@ -352,6 +402,18 @@ async def reativar_deprecated(debito_id: int,
 
 # ===== Fluxo completo com etapas de gestor, validação e autoridade (F1, Tarefa 7) =====
 
+async def _out_e_avisa(db: AsyncSession, tenant_id: int, d, usuario: Usuario) -> DebitoOut:
+    """Resposta do ato + aviso de quem passa a ter a vez.
+
+    A resposta é montada ANTES: `notificacoes.enviar` comita, e depois disso os
+    atributos de `d` estão expirados. O aviso nunca levanta (`apos_transicao`).
+    """
+    out = (await _out(db, tenant_id, [d]))[0]
+    await notif.apos_transicao(db, tenant_id=tenant_id, debito=d, ator_id=usuario.id,
+                               nome_fornecedor=out.nome_fornecedor)
+    return out
+
+
 # Endpoints do gestor (5 total)
 @debitos_router.post("/{debito_id}/enviar-gestor", response_model=DebitoOut)
 async def enviar_gestor(debito_id: int, payload: DecisaoIn, request: Request,
@@ -362,7 +424,7 @@ async def enviar_gestor(debito_id: int, payload: DecisaoIn, request: Request,
     d = await svc.enviar_para_gestor(db, tenant_id=tenant_id, debito_id=debito_id,
                                      usuario_id=usuario.id, lock_version=payload.lock_version,
                                      ip=_ip(request))
-    return (await _out(db, tenant_id, [d]))[0]
+    return await _out_e_avisa(db, tenant_id, d, usuario)
 
 
 @debitos_router.post("/{debito_id}/gestor-autorizar", response_model=DebitoOut)
@@ -374,7 +436,7 @@ async def gestor_autorizar(debito_id: int, payload: DecisaoIn, request: Request,
     d = await svc.gestor_autorizar(db, tenant_id=tenant_id, debito_id=debito_id,
                                    usuario_id=usuario.id, lock_version=payload.lock_version,
                                    ip=_ip(request))
-    return (await _out(db, tenant_id, [d]))[0]
+    return await _out_e_avisa(db, tenant_id, d, usuario)
 
 
 @debitos_router.post("/{debito_id}/gestor-rejeitar", response_model=DebitoOut)
@@ -386,7 +448,7 @@ async def gestor_rejeitar(debito_id: int, payload: DecisaoJustificadaIn, request
     d = await svc.gestor_rejeitar(db, tenant_id=tenant_id, debito_id=debito_id,
                                   usuario_id=usuario.id, lock_version=payload.lock_version,
                                   justificativa=payload.justificativa, ip=_ip(request))
-    return (await _out(db, tenant_id, [d]))[0]
+    return await _out_e_avisa(db, tenant_id, d, usuario)
 
 
 @debitos_router.post("/{debito_id}/solicitar-ajuste", response_model=DebitoOut)
@@ -407,7 +469,7 @@ async def solicitar_ajuste(debito_id: int, payload: SolicitarAjusteIn, request: 
         transacao_responsavel=payload.transacao_responsavel, tipo=payload.tipo,
         prazo=payload.prazo, campos_relacionados=payload.campos_relacionados,
         ip=_ip(request))
-    return (await _out(db, tenant_id, [d]))[0]
+    return await _out_e_avisa(db, tenant_id, d, usuario)
 
 
 @debitos_router.get("/{debito_id}/pedidos-ajuste", response_model=list[PedidoAjusteOut])
@@ -514,6 +576,8 @@ async def _anexos_debito_out(db, tenant_id: int, tenant_slug: str, vinculos) -> 
     if anexo_ids:
         rows = (await db.execute(select(Anexo).where(Anexo.id.in_(anexo_ids)))).scalars()
         anexos_map = {a.id: a for a in rows}
+    nomes_u = await svc.nomes_usuarios(
+        db, tenant_id=tenant_id, ids={v.id_usuario for v in vinculos if v.id_usuario})
     out = []
     for v in vinculos:
         a = anexos_map.get(v.id_anexo)
@@ -532,7 +596,8 @@ async def _anexos_debito_out(db, tenant_id: int, tenant_slug: str, vinculos) -> 
         out.append(AnexoDebitoOut(
             id=v.id, id_anexo=v.id_anexo, nome=nome, tamanho=tamanho, tipo=tipo,
             versao_debito=v.versao_debito, id_pedido_ajuste=v.id_pedido_ajuste,
-            id_usuario=v.id_usuario, criado_em=v.criado_em))
+            id_usuario=v.id_usuario, nome_usuario=nomes_u.get(v.id_usuario),
+            criado_em=v.criado_em))
     return out
 
 
@@ -623,7 +688,7 @@ async def responder_ajuste(debito_id: int, payload: DecisaoIn, request: Request,
     d = await svc.responder_ajuste(db, tenant_id=tenant_id, debito_id=debito_id,
                                    usuario_id=usuario.id, lock_version=payload.lock_version,
                                    ip=_ip(request))
-    return (await _out(db, tenant_id, [d]))[0]
+    return await _out_e_avisa(db, tenant_id, d, usuario)
 
 
 # Endpoints de validação e autoridade (4 total)
@@ -636,19 +701,23 @@ async def validar(debito_id: int, payload: DecisaoIn, request: Request,
     d = await svc.validar(db, tenant_id=tenant_id, debito_id=debito_id,
                           usuario_id=usuario.id, lock_version=payload.lock_version,
                           ip=_ip(request))
-    return (await _out(db, tenant_id, [d]))[0]
+    return await _out_e_avisa(db, tenant_id, d, usuario)
 
 
 @debitos_router.post("/{debito_id}/autoridade-aprovar", response_model=DebitoOut)
-async def autoridade_aprovar(debito_id: int, payload: DecisaoIn, request: Request,
+async def autoridade_aprovar(debito_id: int, payload: AutoridadeAprovarIn, request: Request,
                              usuario: Usuario = Depends(require_permission("pagamento_autorizar")),
                              tenant_id: int = Depends(require_tenant_id),
                              db: AsyncSession = Depends(get_db)):
-    """Autoridade competente aprova a despesa; segue para o pagador."""
-    d = await svc.autoridade_aprovar(db, tenant_id=tenant_id, debito_id=debito_id,
-                                     usuario_id=usuario.id, lock_version=payload.lock_version,
-                                     ip=_ip(request))
-    return (await _out(db, tenant_id, [d]))[0]
+    """Autoridade competente aprova a despesa e ordena o pagamento.
+
+    Mesmo caminho de `POST /pagamentos/autorizacoes` (lote), para um débito."""
+    d = await aut.autorizar_debito(
+        db, tenant_id=tenant_id, debito_id=debito_id, usuario_id=usuario.id,
+        lock_version=payload.lock_version, id_conta_pagadora=payload.id_conta_pagadora,
+        permitir_saldo_insuficiente=payload.permitir_saldo_insuficiente,
+        justificativa_excecao=payload.justificativa_excecao, ip=_ip(request))
+    return await _out_e_avisa(db, tenant_id, d, usuario)
 
 
 @debitos_router.post("/{debito_id}/autoridade-indeferir", response_model=DebitoOut)
@@ -660,7 +729,7 @@ async def autoridade_indeferir(debito_id: int, payload: DecisaoJustificadaIn, re
     d = await svc.autoridade_indeferir(db, tenant_id=tenant_id, debito_id=debito_id,
                                        usuario_id=usuario.id, lock_version=payload.lock_version,
                                        justificativa=payload.justificativa, ip=_ip(request))
-    return (await _out(db, tenant_id, [d]))[0]
+    return await _out_e_avisa(db, tenant_id, d, usuario)
 
 
 # Endpoint deprecado: /autorizar (nunca existiu com novo serviço)
@@ -697,7 +766,15 @@ async def autorizar(payload: AutorizarLoteIn, request: Request,
                     db: AsyncSession = Depends(get_db)):
     ops = await aut.autorizar_lote(db, tenant_id=tenant_id, usuario_id=usuario.id,
                                    grupos=payload.grupos, ip=_ip(request))
-    return await _op_out(db, tenant_id, ops)
+    out = await _op_out(db, tenant_id, ops)
+    # Avisa o solicitante de cada débito autorizado. Ids lidos antes do
+    # primeiro aviso: o commit dele expira os objetos.
+    ids = [d.id for op_id in [o.id for o in ops]
+           for d in await aut.debitos_da_ordem(db, tenant_id=tenant_id, ordem_id=op_id)]
+    for debito_id in ids:
+        d = await svc.obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+        await notif.apos_transicao(db, tenant_id=tenant_id, debito=d, ator_id=usuario.id)
+    return out
 
 
 # Onda C (C1.2) — relatório de exceções. Leitura ampla de propósito: quem
@@ -793,7 +870,10 @@ async def pagar(parcela_id: int, payload: PagarParcelaIn, request: Request,
     p = await aut.pagar_parcela(db, tenant_id=tenant_id, usuario_id=usuario.id,
                                 parcela_id=parcela_id, forma_pagamento=payload.forma_pagamento,
                                 data_pagamento=payload.data_pagamento, ip=_ip(request))
-    return ParcelaOut.model_validate(p)
+    out = ParcelaOut.model_validate(p)
+    d = await svc.obter_debito(db, tenant_id=tenant_id, debito_id=out.id_debito)
+    await notif.apos_pagamento(db, tenant_id=tenant_id, debito=d, ator_id=usuario.id)
+    return out
 
 
 @operacoes_router.post("/parcelas/{parcela_id}/estornar", response_model=ParcelaOut)
@@ -822,6 +902,94 @@ async def fila_autorizacao(_: Usuario = Depends(require_permission("pagamento_au
                            tenant_id: int = Depends(require_tenant_id),
                            db: AsyncSession = Depends(get_db)):
     return await filas.fila_autorizacao(db, tenant_id=tenant_id)
+
+
+@operacoes_router.get("/panorama", response_model=PanoramaVisaoGeralOut)
+async def panorama_visao_geral(_: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                               tenant_id: int = Depends(require_tenant_id),
+                               db: AsyncSession = Depends(get_db)):
+    """Valor parado por etapa, envelhecimento da fila e ritmo semanal."""
+    return await panorama.montar_panorama(db, tenant_id=tenant_id)
+
+
+@operacoes_router.get("/orcamento/execucao", response_model=ExecucaoOrcamentariaOut)
+async def execucao_orcamentaria(exercicio: int | None = None,
+                                _: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                                tenant_id: int = Depends(require_tenant_id),
+                                db: AsyncSession = Depends(get_db)):
+    """Execução orçamentária do exercício: dotação, créditos, empenhado e
+    disponível, por dotação e consolidado. Só leitura."""
+    return await orc.execucao_orcamentaria(db, tenant_id=tenant_id, exercicio=exercicio)
+
+
+@operacoes_router.get("/orcamento/dotacoes", response_model=list[DotacaoOut])
+async def listar_dotacoes(exercicio: int | None = None,
+                          _: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                          tenant_id: int = Depends(require_tenant_id),
+                          db: AsyncSession = Depends(get_db)):
+    return await orc.listar_dotacoes(db, tenant_id=tenant_id, exercicio=exercicio)
+
+
+@operacoes_router.post("/orcamento/dotacoes", response_model=DotacaoOut,
+                       status_code=status.HTTP_201_CREATED)
+async def criar_dotacao(payload: DotacaoCreate,
+                        _: Usuario = Depends(require_permission("pagamento_cadastro",
+                                                                action="inserir")),
+                        tenant_id: int = Depends(require_tenant_id),
+                        db: AsyncSession = Depends(get_db)):
+    d = await orc.criar_dotacao(db, tenant_id=tenant_id, payload=payload)
+    return (await orc.listar_dotacoes(db, tenant_id=tenant_id, exercicio=d.exercicio))[0]
+
+
+@operacoes_router.post("/orcamento/creditos", response_model=CreditoOut,
+                       status_code=status.HTTP_201_CREATED)
+async def lancar_credito(payload: CreditoCreate,
+                         usuario: Usuario = Depends(require_permission("pagamento_cadastro",
+                                                                       action="inserir")),
+                         tenant_id: int = Depends(require_tenant_id),
+                         db: AsyncSession = Depends(get_db)):
+    """Suplementação, crédito especial/extraordinário ou anulação. Não altera a
+    dotação: a atualizada é derivada dos créditos."""
+    return await orc.lancar_credito(db, tenant_id=tenant_id, usuario_id=usuario.id,
+                                    payload=payload)
+
+
+@operacoes_router.get("/catalogo-indicadores", response_model=list[IndicadorCatalogo])
+async def catalogo_indicadores(_: Usuario = Depends(require_any_permission(*PERMS_LEITURA))):
+    """Catálogo formal dos indicadores (§12). Domínio puro: não toca banco e
+    não depende do tenant — as definições são as mesmas para toda prefeitura."""
+    return catalogo.listar()
+
+
+@operacoes_router.get("/alertas", response_model=AlertasOut)
+async def alertas_gerenciais(_: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                             tenant_id: int = Depends(require_tenant_id),
+                             db: AsyncSession = Depends(get_db)):
+    """Central de alertas: o que precisa de atenção, com impacto, origem e ação.
+    Só leitura — nenhum alerta executa nada por conta própria."""
+    return await alertas.montar_alertas(db, tenant_id=tenant_id)
+
+
+@operacoes_router.get("/previsao", response_model=PrevisaoFinanceiraOut)
+async def previsao_financeira(_: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
+                              tenant_id: int = Depends(require_tenant_id),
+                              db: AsyncSession = Depends(get_db)):
+    """Projeção de saída de caixa em 7/15/30/60/90 dias. Só leitura.
+
+    Leitura ampla (mesmo conjunto do painel): saber se o caixa aguenta os
+    próximos vencimentos interessa a quem solicita, valida, autoriza e paga —
+    não só a quem decide."""
+    return await previsao.montar_previsao(db, tenant_id=tenant_id)
+
+
+@operacoes_router.get("/autorizacao/impacto", response_model=ImpactoAutorizacoesOut)
+async def impacto_autorizacoes(_: Usuario = Depends(require_permission("pagamento_autorizar")),
+                               tenant_id: int = Depends(require_tenant_id),
+                               db: AsyncSession = Depends(get_db)):
+    """Impacto no caixa das despesas que aguardam autorização. Somente leitura:
+    nada é autorizado nem reservado aqui — o gate é o mesmo da fila, porque
+    quem vê o impacto é quem vai decidir."""
+    return await filas.impacto_autorizacoes(db, tenant_id=tenant_id)
 
 
 @operacoes_router.get("/fontes/{fonte_id}/contas-elegiveis", response_model=list[ContaElegivelOut])
@@ -876,7 +1044,10 @@ async def liberar_parcelas(payload: LiberarParcelasIn, request: Request,
     parcelas = await aut.liberar_parcelas(db, tenant_id=tenant_id, usuario_id=usuario.id,
                                           parcela_ids=payload.parcela_ids,
                                           data_prevista=payload.data_prevista, ip=_ip(request))
-    return [ParcelaOut.model_validate(p) for p in parcelas]
+    out = [ParcelaOut.model_validate(p) for p in parcelas]
+    await notif.apos_liberacao(db, tenant_id=tenant_id, qtd_parcelas=len(out),
+                               ator_id=usuario.id)
+    return out
 
 
 @operacoes_router.post("/parcelas/{parcela_id}/revogar-liberacao", response_model=ParcelaOut)
@@ -892,10 +1063,21 @@ async def revogar_liberacao(parcela_id: int, payload: JustificativaIn, request: 
 
 @operacoes_router.get("/dashboard", response_model=DashboardOut)
 async def dashboard(meses: int = 12,
+                    unidade: int | None = None,
+                    fornecedor: int | None = None,
+                    contrato: int | None = None,
+                    natureza: int | None = None,
+                    fonte: int | None = None,
                     _: Usuario = Depends(require_any_permission(*PERMS_LEITURA)),
                     tenant_id: int = Depends(require_tenant_id),
                     db: AsyncSession = Depends(get_db)):
-    return await dash.montar_dashboard(db, tenant_id=tenant_id, meses=meses)
+    """Painel executivo. Os parâmetros de dimensão recortam as agregações de
+    despesa paga; os KPIs de saldo seguem consolidados, porque saldo é da conta
+    bancária e não se recorta por secretaria ou fornecedor."""
+    return await dash.montar_dashboard(
+        db, tenant_id=tenant_id, meses=meses,
+        filtros={"unidade": unidade, "fornecedor": fornecedor, "contrato": contrato,
+                 "natureza": natureza, "fonte": fonte})
 
 
 @operacoes_router.get("/minha-fila", response_model=MinhaFilaOut)

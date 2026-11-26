@@ -197,7 +197,7 @@ async def test_google_callback_minuta_zero_so_conecta_e_volta_pro_processo(
 
     host_header = f"{s['tenant_slug']}.aprimora.local"
 
-    async def _fake_handle_callback(self, code, state, db=None):
+    async def _fake_handle_callback(self, code, state, db=None, **_sessao):
         return {
             "user_id": s["su_id"],
             "tenant_id": s["tenant_id"],
@@ -220,3 +220,95 @@ async def test_google_callback_minuta_zero_so_conecta_e_volta_pro_processo(
 
     assert response.status_code == 307
     assert response.headers["location"] == "/m/protocolo/processos/999?tab=documentos"
+
+
+# ---------------------------------------------------------------- SI-32
+
+
+def _sessao_de_teste(s, redis_client):
+    from app.auth.deps import _resolve_current_user
+
+    arreio_tenant_http(s["tenant_id"], s["tenant_slug"])
+    app.dependency_overrides[get_redis] = lambda: redis_client
+
+    async def sem_gate(user: Usuario = Depends(_resolve_current_user)) -> Usuario:
+        return user
+
+    app.dependency_overrides[get_current_user] = sem_gate
+    return f"{s['tenant_slug']}.aprimora.local"
+
+
+@pytest.mark.asyncio
+async def test_si32_sem_configuracao_vai_para_a_tela_de_erro_e_nao_500(
+    admin_engine, auth_setup, client, admin_token, redis_client
+):
+    from unittest.mock import PropertyMock
+
+    from app.services.google_oauth_flow import GoogleOAuthFlow
+
+    host = _sessao_de_teste(auth_setup, redis_client)
+    with patch.object(GoogleOAuthFlow, "configurado", new_callable=PropertyMock, return_value=False):
+        r = await client.get(
+            "/api/v2/auth/google?minuta_id=0&processo_id=456",
+            headers={"Authorization": f"Bearer {admin_token}", "Host": host},
+            follow_redirects=False,
+        )
+    assert r.status_code == 307
+    assert r.headers["location"] == "/minuta-error?error=google_nao_configurado&processo=456"
+
+
+@pytest.mark.asyncio
+async def test_si32_recusa_no_google_volta_ao_processo_e_descarta_o_state(
+    admin_engine, auth_setup, client, admin_token, redis_client
+):
+    import json as _json
+
+    host = _sessao_de_teste(auth_setup, redis_client)
+    await redis_client.setex(
+        "oauth_state:abc",
+        300,
+        _json.dumps({"user_id": auth_setup["su_id"], "tenant_id": auth_setup["tenant_id"],
+                     "minuta_id": 0, "processo_id": 77, "code_verifier": "x" * 43}),
+    )
+    r = await client.get(
+        "/api/v2/auth/google/callback?error=access_denied&state=abc",
+        headers={"Authorization": f"Bearer {admin_token}", "Host": host},
+        follow_redirects=False,
+    )
+    assert r.headers["location"] == "/minuta-error?error=access_denied&processo=77"
+    assert await redis_client.get("oauth_state:abc") is None
+
+
+@pytest.mark.asyncio
+async def test_si32_state_de_outro_usuario_vira_conta_diferente(
+    admin_engine, auth_setup, client, admin_token, redis_client
+):
+    from app.services.google_oauth_flow import OutroUsuarioError
+
+    host = _sessao_de_teste(auth_setup, redis_client)
+
+    async def recusa(self, code, state, db=None, **_):
+        raise OutroUsuarioError("Sessão de outro usuário")
+
+    with patch("app.services.google_oauth_flow.GoogleOAuthFlow.handle_callback", recusa):
+        r = await client.get(
+            "/api/v2/auth/google/callback?code=c&state=s",
+            headers={"Authorization": f"Bearer {admin_token}", "Host": host},
+            follow_redirects=False,
+        )
+    assert r.headers["location"] == "/minuta-error?error=conta_diferente"
+
+
+@pytest.mark.asyncio
+async def test_si32_status_diz_configurado_e_conectado(
+    admin_engine, auth_setup, client, admin_token, redis_client
+):
+    host = _sessao_de_teste(auth_setup, redis_client)
+    r = await client.get(
+        "/api/v2/auth/google/status",
+        headers={"Authorization": f"Bearer {admin_token}", "Host": host},
+    )
+    assert r.status_code == 200
+    corpo = r.json()
+    assert corpo["conectado"] is False and corpo["conectado_em"] is None
+    assert isinstance(corpo["configurado"], bool)

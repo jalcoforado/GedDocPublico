@@ -30,6 +30,7 @@ from ..models import (
     MovimentacaoConta, Parcela,
 )
 from ..schemas.pagamentos import RetornoParcelaIn
+from . import audit
 from . import pagamentos_cronologia as cron
 from . import pagamentos_estados as est
 from . import pagamentos_retencoes as ret
@@ -122,6 +123,27 @@ async def parcelas_elegiveis_para_lote(db: AsyncSession, *, tenant_id: int,
             Debito.id_conta_pagadora == id_conta_pagadora)
     return list((await db.execute(
         stmt.order_by(Parcela.data_prevista_pagamento, Parcela.vencimento))).scalars().all())
+
+
+async def debitos_das_parcelas(db: AsyncSession, *, tenant_id: int,
+                               parcelas: list[Parcela]) -> dict[int, Debito]:
+    """Débitos das parcelas dadas, por id — para o router dizer de quem é cada uma."""
+    ids = {p.id_debito for p in parcelas}
+    if not ids:
+        return {}
+    rows = (await db.execute(select(Debito).where(
+        Debito.tenant_id == tenant_id, Debito.id.in_(ids)))).scalars().all()
+    return {d.id: d for d in rows}
+
+
+async def debitos_das_parcelas_por_id(db: AsyncSession, *, tenant_id: int,
+                                      parcela_ids: list[int]) -> list[int]:
+    """Ids (distintos, ordenados) dos débitos das parcelas dadas."""
+    if not parcela_ids:
+        return []
+    rows = (await db.execute(select(Parcela.id_debito).distinct().where(
+        Parcela.tenant_id == tenant_id, Parcela.id.in_(parcela_ids)))).scalars().all()
+    return sorted(rows)
 
 
 async def _validar_parcelas_para_lote(db: AsyncSession, *, tenant_id: int,
@@ -344,6 +366,12 @@ async def enviar_lote(db: AsyncSession, *, tenant_id: int, lote_id: int,
         _registrar_transicao(db, debito=d, acao="LOTE_ENVIADO", pagamento=est.ENVIADA_BANCO,
                              usuario_id=usuario_id, justificativa=f"Lote {lote.numero} enviado")
         d.atualizado_em = _utcnow()
+    await audit.log(
+        db, tenant_id=tenant_id, id_usuario=usuario_id,
+        acao="pagamento.lote_enviado", entidade="lote_pagamento", id_entidade=lote.id,
+        payload={"numero": lote.numero, "id_conta_pagadora": lote.id_conta_pagadora,
+                 "valor_total": str(lote.valor_total),
+                 "parcela_ids": sorted(v.id_parcela for v in vinculos)})
     await db.commit()
     await db.refresh(lote)
     return lote
@@ -437,7 +465,7 @@ async def processar_retorno(db: AsyncSession, *, tenant_id: int, lote_id: int,
         db.add(mov)
         await db.flush()
         parcela.status = "PAGA"; parcela.data_pagamento = quando
-        parcela.forma_pagamento = "TED"; parcela.id_movimentacao = mov.id
+        parcela.forma_pagamento = r.forma_pagamento or "TED"; parcela.id_movimentacao = mov.id
         parcela.atualizado_em = _utcnow()
         v.situacao = "PAGA"
         v.atualizado_em = _utcnow()
@@ -471,6 +499,13 @@ async def processar_retorno(db: AsyncSession, *, tenant_id: int, lote_id: int,
         lote.situacao = "PROCESSADO"
         lote.processado_em = _utcnow()
     lote.atualizado_em = _utcnow()
+    await audit.log(
+        db, tenant_id=tenant_id, id_usuario=usuario_id,
+        acao="pagamento.lote_retorno", entidade="lote_pagamento", id_entidade=lote.id,
+        payload={"numero": lote.numero, "situacao_lote": lote.situacao,
+                 "retornos": [{"parcela_id": r.parcela_id, "resultado": r.resultado,
+                               "forma_pagamento": r.forma_pagamento,
+                               "motivo_falha": r.motivo_falha} for r in retornos]})
     await db.commit()
     await db.refresh(lote)
     return lote

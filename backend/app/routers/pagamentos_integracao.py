@@ -59,7 +59,7 @@ from ..models import (
     MovimentacaoConta,
     OrdemPagamento,
 )
-from ..schemas.pagamentos import DebitoCreate
+from ..schemas.pagamentos import DebitoCreate, EmpenhoIn, LiquidarIn
 from ..services import modulos as modulos_svc
 from ..services import pagamentos_debitos as debsvc
 from ..services import pagamentos_idempotencia as idemsvc
@@ -160,10 +160,50 @@ async def criar_debito(
     return corpo
 
 
+@router.post("/debitos/{debito_id}/empenho")
+async def registrar_empenho(
+    debito_id: int,
+    payload: EmpenhoIn,
+    request: Request,
+    chave: str = Depends(_idempotency_key),
+    sistema: SistemaIntegrado = Depends(_sistema_escrita),
+    db: AsyncSession = Depends(get_db_m2m),
+) -> Any:
+    """Retorno do sistema financeiro sobre o empenho (0144).
+
+    Só existe na porta M2M, de propósito: o valor é do sistema de origem, e dar
+    à tela um campo para digitar o mesmo número criaria duas verdades — era
+    justamente o que a decisão do `revisado` quis evitar. Se a prefeitura não
+    tiver sistema integrado, o débito fica com `valor_empenhado` nulo, que é
+    informação honesta ("não voltou"), não zero.
+    """
+    corpo_bruto = await request.body()
+    payload_hash = idemsvc.hash_payload(corpo_bruto)
+
+    async def _executor() -> tuple[int, Any]:
+        d = await debsvc.registrar_empenho(
+            db, tenant_id=sistema.tenant_id, debito_id=debito_id,
+            usuario_id=sistema.id_usuario_criador,
+            valor_empenhado=payload.valor_empenhado, numero_ne=payload.numero_ne,
+        )
+        nomes = await debsvc.nomes_fornecedores(db, tenant_id=sistema.tenant_id,
+                                                 ids={d.id_fornecedor})
+        corpo = debsvc.debito_out(d, nome_fornecedor=nomes.get(d.id_fornecedor, "?"))
+        return status.HTTP_200_OK, corpo
+
+    status_code, corpo = await idemsvc.executar_idempotente(
+        db, sistema=sistema, chave=chave, payload_hash=payload_hash, executor=_executor,
+    )
+    if status_code >= 400:
+        raise HTTPException(status_code=status_code, detail=corpo)
+    return corpo
+
+
 @router.post("/debitos/{debito_id}/liquidar")
 async def liquidar_debito(
     debito_id: int,
     request: Request,
+    payload: LiquidarIn | None = None,
     chave: str = Depends(_idempotency_key),
     sistema: SistemaIntegrado = Depends(_sistema_escrita),
     db: AsyncSession = Depends(get_db_m2m),
@@ -185,6 +225,8 @@ async def liquidar_debito(
         d = await debsvc.confirmar_liquidacao(
             db, tenant_id=sistema.tenant_id, debito_id=debito_id,
             usuario_id=sistema.id_usuario_criador,
+            data_liquidacao=payload.data_liquidacao if payload else None,
+            valor_liquidado=payload.valor_liquidado if payload else None,
         )
         nomes = await debsvc.nomes_fornecedores(db, tenant_id=sistema.tenant_id,
                                                  ids={d.id_fornecedor})

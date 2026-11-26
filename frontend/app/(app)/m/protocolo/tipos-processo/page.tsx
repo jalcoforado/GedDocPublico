@@ -1,12 +1,18 @@
 "use client";
 
+import { Layers } from "lucide-react";
+
 import { CrudPage } from "@/components/CrudPage";
+import { BadgeAtivo } from "@/components/protocolo/BadgeAtivo";
 import { api, type TipoProcesso } from "@/lib/api";
 
 export default function TiposProcessoPage() {
   return (
     <CrudPage<TipoProcesso>
       title="Tipos de Processo"
+      icon={Layers}
+      description="Tipos de processo e se exigem um processo pai."
+      novoLabel="Novo tipo de processo"
       queryKey={["tipos-processo"]}
       fetchList={() => api.tiposProcesso.list()}
       createFn={api.tiposProcesso.create}
@@ -16,15 +22,20 @@ export default function TiposProcessoPage() {
       columns={[
         { header: "Nome", render: (r) => r.tipo_processo },
         {
-          header: "Exige Pai",
+          header: "Exige pai",
           render: (r) => (r.exige_processo_pai ? "Sim" : "Não"),
           className: "w-24",
         },
-        { header: "Ativo", render: (r) => (r.ativo ? "Sim" : "Não"), className: "w-20" },
+        { header: "Situação", render: (r) => <BadgeAtivo ativo={r.ativo} />, className: "w-24" },
       ]}
       fields={[
-        { name: "tipo_processo", label: "Nome", type: "text", required: true, colSpan: 2 },
-        { name: "exige_processo_pai", label: "Exige processo pai", type: "checkbox" },
+        { name: "tipo_processo", label: "Nome", type: "text", required: true, colSpan: 2, placeholder: "Ex.: Requerimento" },
+        {
+          name: "exige_processo_pai",
+          label: "Exige processo pai",
+          type: "checkbox",
+          dica: "Só pode ser aberto vinculado a outro processo.",
+        },
         { name: "ativo", label: "Ativo", type: "checkbox" },
       ]}
     />

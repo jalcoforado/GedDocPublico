@@ -9,7 +9,7 @@ Onda B, por exemplo, subiu sem um único dado para exercitar).
 Uso:
     docker exec aprimora-py-backend python -m app.cli.seed_demo_operacional \\
         status --tenant sobral --allow-non-demo
-    ... apply --tenant sobral --allow-non-demo [--modulo pagamentos|frota|transporte|todos]
+    ... apply --tenant sobral --allow-non-demo [--modulo pagamentos|frota|transporte|protocolo|todos]
     ... reset --tenant sobral --allow-non-demo [--modulo ...]
 
 Decisões de projeto:
@@ -61,7 +61,7 @@ from ..models import (
 OPS_EMAIL_DOMAIN = "ops.demo.test"
 OPS_PASSWORD = "Demo@12345"
 DEMO_PREFIX = "DEMO"
-MODULOS = ("pagamentos", "frota", "transporte")
+MODULOS = ("pagamentos", "frota", "transporte", "protocolo")
 
 
 # ---------------------------------------------------------------------------
@@ -75,6 +75,9 @@ USUARIOS_PAGAMENTOS = [
     ("secretario", "Sônia Bastos", "pag.secretario", "Secretária de Pasta"),
     ("autorizador", "Otávio Prado", "pag.autorizador", "Ordenador de Despesa"),
     ("tesoureiro", "Teresa Cordeiro", "pag.tesoureiro", "Tesoureira"),
+    # Não pratica ato nenhum do rito: existe para a demonstração ter quem abra
+    # a Trilha de auditoria e o relatório de Exceções só com a leitura.
+    ("auditor", "Carla Vasconcelos", "pag.auditor", "Controladora Interna"),
 ]
 
 # chave (de USUARIOS_PAGAMENTOS) -> codigo de utils.transacao que o papel
@@ -88,7 +91,18 @@ TRANSACAO_POR_PAPEL_PAGAMENTOS = {
     "secretario": "pagamento_gerir",
     "autorizador": "pagamento_autorizar",
     "tesoureiro": "pagamento_pagar",
+    "auditor": "pagamento_auditar",
 }
+
+# Protocolo: um USUÁRIO COMUM, para mostrar a tela de quem não é
+# administrador (pedido da reunião de 2026-10-20, item 2.3). Até aqui todo
+# login da demonstração era super-usuário, e as telas de administrador e de
+# usuário saíam iguais. Este opera processos — abre, tramita, despacha,
+# arquiva — e só lê o resto: sem Administração, sem cadastros.
+USUARIOS_PROTOCOLO = [
+    ("protocolo_servidor", "Bruno Teixeira", "prot.servidor", "Agente Administrativo"),
+]
+TRANSACAO_POR_PAPEL_PROTOCOLO = {"protocolo_servidor": "processo"}
 
 USUARIOS_OPERACAO = [
     ("frota_gestor", "Marcos Aurélio Pinto", "frota.gestor", "Gestor de Frota"),
@@ -173,6 +187,11 @@ DEBITOS = [
      Decimal("124000.00"), 1, "encaminhado"),
     ("Aquisição de mobiliário escolar", 1, 2, 1, 2, None,
      Decimal("63200.00"), 2, "encaminhado"),
+    # Parado na validação financeira COM o checklist por conferir: é o único
+    # estado em que a seção "Conferência de documentos" do detalhe é editável.
+    # Sem ele a demonstração não tinha onde mostrar a validação acontecendo.
+    ("Limpeza de fossas — unidades rurais de saúde", 5, 1, 1, 2, None,
+     Decimal("6400.00"), 1, "aguardando_validacao"),
     # F3 (ordem cronológica): os débitos que vão até "pago" precisam ser
     # liquidados ANTES dos que param em "autorizado" — senão o autorizado fica
     # elegível à frente na fila e a guarda de preterição barra a liberação com
@@ -181,6 +200,12 @@ DEBITOS = [
      Decimal("11250.00"), 1, "pago"),
     ("Manutenção elétrica do prédio da Prefeitura", 2, 1, 0, 0, None,
      Decimal("16480.00"), 1, "pago"),
+    # Liberado e ainda não pago: é o que a tesouraria tem na fila ao abrir a
+    # tela, e o que mostra "Revogar liberação" e "Recolher" no detalhe. Fica na
+    # fonte de índice 1, onde nenhum outro débito chega a ELEGIVEL — na mesma
+    # chave de um "autorizado" a guarda de preterição barraria a liberação.
+    ("Recarga de extintores — prédios públicos", 5, 1, 1, 2, None,
+     Decimal("4800.00"), 2, "liberado"),
     ("Serviços gráficos — campanha de vacinação", 5, 1, 2, 3, None,
      Decimal("8900.00"), 1, "autorizado"),
     ("Suprimentos de informática — 1º trimestre", 2, 0, 0, 0, 2,
@@ -512,6 +537,31 @@ async def _criar_usuarios(
 
 
 # ---------------------------------------------------------------------------
+# Protocolo
+# ---------------------------------------------------------------------------
+
+
+async def _apply_protocolo(tenant_id: int, contagens: dict[str, int]) -> None:
+    """O servidor de setor fica na MESMA unidade do administrador: é ela que
+    tem os processos de demonstração nas caixas (`seed_demo_caixas`), e assim
+    os dois logins mostram a mesma mesa vista por perfis diferentes."""
+    from .seed_demo import _resolver_admin_id
+
+    async with _sessao(tenant_id) as db:
+        admin = (
+            await db.execute(
+                select(Usuario).where(Usuario.id == await _resolver_admin_id(db, tenant_id))
+            )
+        ).scalar_one()
+        id_unidade = admin.id_unidade_trabalho or await _unidade_padrao(db, tenant_id)
+        await _criar_usuarios(
+            db, tenant_id=tenant_id, id_unidade=id_unidade,
+            especificacao=USUARIOS_PROTOCOLO, cpf_base=99730000000,
+            contagens=contagens, transacao_por_chave=TRANSACAO_POR_PAPEL_PROTOCOLO,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Pagamentos
 # ---------------------------------------------------------------------------
 
@@ -729,6 +779,11 @@ async def _apply_pagamentos(tenant_id: int, contagens: dict[str, int]) -> None:
                 pagos=pagos, favorecido=FORNECEDORES[f_idx][2],
             )
 
+    # --- lote de pagamento já enviado ao banco (F4) -----------------------
+    async with _sessao(tenant_id) as db:
+        await _garantir_lote_enviado(
+            db, tenant_id=tenant_id, usuarios=usuarios, contagens=contagens)
+
     # --- conciliação bancária (Onda B) -----------------------------------
     if pagos:
         async with _sessao(tenant_id) as db:
@@ -765,6 +820,61 @@ async def _apply_pagamentos(tenant_id: int, contagens: dict[str, int]) -> None:
                     print(f"  ! extrato da conta {id_conta} não importado: {e}")
 
 
+# Débito cujas parcelas ficam LIBERADAS (estado "liberado" em DEBITOS).
+DEBITO_DO_LOTE = "Recarga de extintores — prédios públicos"
+
+
+async def _garantir_lote_enviado(
+    db: AsyncSession, *, tenant_id: int, usuarios: dict[str, int], contagens: dict[str, int],
+) -> None:
+    """Põe a PRIMEIRA parcela liberada do débito de demonstração num lote e o
+    leva até ENVIADO — o estado em que a tesouraria registra o retorno do
+    banco. A outra parcela fica liberada e fora de lote, para a tela de
+    montagem de lote também ter o que mostrar.
+
+    É um passo à parte, e não um estado de `DEBITOS`, de propósito: um débito
+    NOVO liberado esbarraria na guarda de ordem cronológica em base já
+    populada (há débito elegível à frente em toda fila de demonstração).
+    Reaproveitar as parcelas já liberadas funciona em base nova e na que já
+    tem a demonstração.
+
+    Idempotente: parcela que já esteve em lote não entra de novo. Falha aqui
+    vira aviso, não aborta o seed.
+    """
+    from ..services import pagamentos_lotes as lot_svc
+
+    linhas = (await db.execute(text("""
+        SELECT p.id, d.id_conta_pagadora
+          FROM pagamentos.parcela p
+          JOIN pagamentos.debito d ON d.id = p.id_debito
+         WHERE p.tenant_id = :t AND d.descricao = :d AND d.excluido = false
+           AND p.excluido = false AND p.status = 'LIBERADA'
+           AND NOT EXISTS (SELECT 1 FROM pagamentos.lote_pagamento_parcela lp
+                            WHERE lp.tenant_id = :t AND lp.id_parcela = p.id)
+           AND NOT EXISTS (SELECT 1 FROM pagamentos.lote_pagamento_parcela lp
+                            JOIN pagamentos.parcela p2 ON p2.id = lp.id_parcela
+                           WHERE lp.tenant_id = :t AND p2.id_debito = d.id)
+         ORDER BY p.numero LIMIT 1"""),
+        {"t": tenant_id, "d": f"{DEMO_PREFIX} {DEBITO_DO_LOTE}"})).all()
+    if not linhas:
+        return
+    id_parcela, id_conta = linhas[0]
+    try:
+        lote = await lot_svc.criar_lote(
+            db, tenant_id=tenant_id, id_conta_pagadora=id_conta,
+            parcela_ids=[id_parcela], usuario_id=usuarios["tesoureiro"])
+        lote = await lot_svc.programar_lote(
+            db, tenant_id=tenant_id, lote_id=lote.id,
+            data_programada=date.today() + timedelta(days=2),
+            usuario_id=usuarios["tesoureiro"])
+        await lot_svc.enviar_lote(
+            db, tenant_id=tenant_id, lote_id=lote.id, usuario_id=usuarios["tesoureiro"])
+        contagens["lotes_enviados"] += 1
+    except Exception as e:  # noqa: BLE001 — seed não deve abortar pelo lote
+        await db.rollback()
+        print(f"  ! lote de demonstração não criado: {e}")
+
+
 def _dividir(total: Decimal, n: int, hoje: date) -> list[tuple[Decimal, date]]:
     """Divide em `n` parcelas fechando exatamente no total (a última absorve o
     resto do arredondamento — o envio ao gestor recusa se a soma divergir)."""
@@ -796,7 +906,8 @@ async def _levar_ao_estado(
     if ate == "rascunho":
         return
 
-    for item_id in itens_obrigatorios:
+    # "aguardando_validacao" fica com o checklist POR CONFERIR, de propósito.
+    for item_id in ([] if ate == "aguardando_validacao" else itens_obrigatorios):
         await chk_svc.marcar(
             db, tenant_id=tenant_id, debito_id=debito.id, id_checklist_item=item_id,
             usuario_id=usuarios["solicitante"], marcado=True,
@@ -829,6 +940,8 @@ async def _levar_ao_estado(
         db, tenant_id=tenant_id, debito_id=debito.id,
         usuario_id=usuarios["secretario"], lock_version=debito.lock_version,
     )
+    if ate == "aguardando_validacao":
+        return
     debito = await deb_svc.validar(
         db, tenant_id=tenant_id, debito_id=debito.id,
         usuario_id=usuarios["validador"], lock_version=debito.lock_version,
@@ -861,6 +974,26 @@ async def _levar_ao_estado(
         return
 
     parcelas = await deb_svc.listar_parcelas(db, tenant_id=tenant_id, debito_id=debito.id)
+    if ate == "liberado":
+        from ..schemas.pagamentos import RetencaoCreate
+        from ..services import pagamentos_retencoes as ret_svc
+
+        await aut_svc.liberar_parcelas(
+            db, tenant_id=tenant_id, usuario_id=usuarios["autorizador"],
+            parcela_ids=[p.id for p in parcelas],
+        )
+        contagens["parcelas_liberadas"] += len(parcelas)
+        # ISS de 5% sobre o valor do serviço, pendente de recolhimento.
+        await ret_svc.criar_retencao(
+            db, tenant_id=tenant_id, debito_id=debito.id,
+            payload=RetencaoCreate(
+                tipo="ISS", descricao="ISS retido na fonte",
+                base_calculo=debito.valor_total, aliquota=Decimal("5"),
+                valor=(debito.valor_total * Decimal("0.05")).quantize(Decimal("0.01")),
+            ),
+        )
+        contagens["retencoes"] += 1
+        return
     for p in parcelas:
         await aut_svc.liberar_parcelas(
             db, tenant_id=tenant_id, usuario_id=usuarios["autorizador"], parcela_ids=[p.id]
@@ -1170,6 +1303,21 @@ RESET_PAGAMENTOS = [
     ("extratos", """
         DELETE FROM pagamentos.extrato WHERE tenant_id = :t
           AND nome_arquivo LIKE 'demo-%'"""),
+    # Lote de demonstração: o vínculo sai antes da parcela; o lote, depois do
+    # vínculo. Só se apaga lote que ficou SEM parcela e que paga por conta de
+    # demonstração — lote real com parcelas reais não é tocado.
+    ("lote_parcelas", f"""
+        DELETE FROM pagamentos.lote_pagamento_parcela WHERE tenant_id = :t
+          AND id_parcela IN (SELECT id FROM pagamentos.parcela
+                             WHERE id_debito IN ({_DEBITOS_DEMO}))"""),
+    ("lotes", f"""
+        DELETE FROM pagamentos.lote_pagamento l WHERE l.tenant_id = :t
+          AND l.id_conta_pagadora IN ({_CONTAS_DEMO})
+          AND NOT EXISTS (SELECT 1 FROM pagamentos.lote_pagamento_parcela lp
+                          WHERE lp.id_lote = l.id)"""),
+    ("retencoes", f"""
+        DELETE FROM pagamentos.retencao WHERE tenant_id = :t
+          AND id_debito IN ({_DEBITOS_DEMO})"""),
     ("checklist_marcas", f"""
         DELETE FROM pagamentos.debito_checklist_marca WHERE tenant_id = :t
           AND id_debito IN ({_DEBITOS_DEMO})"""),
@@ -1310,6 +1458,17 @@ RESET_USUARIOS = [
     # apagar a trilha antes, "usuarios_ops" abaixo esbarra em
     # audit_log_id_usuario_fkey e falha silenciosamente (savepoint por
     # bloco), deixando os usuários de demonstração para trás.
+    # Mesmo problema, mesma causa: o rito de pagamentos passou a notificar
+    # (`services/pagamentos_notificacoes.py`), e quem usa a demonstração pela
+    # tela gera linhas de `notificacao` para os usuários `@ops.demo.test`.
+    ("notificacoes_demo", """
+        DELETE FROM aprimora_py.notificacao WHERE tenant_id = :t
+          AND id_usuario IN (SELECT id FROM utils.usuario WHERE tenant_id = :t
+                             AND email LIKE '%@ops.demo.test')"""),
+    ("notificacao_preferencias_demo", """
+        DELETE FROM aprimora_py.notificacao_preferencia_evento WHERE tenant_id = :t
+          AND id_usuario IN (SELECT id FROM utils.usuario WHERE tenant_id = :t
+                             AND email LIKE '%@ops.demo.test')"""),
     ("audit_log_demo", """
         DELETE FROM aprimora_py.audit_log WHERE tenant_id = :t
           AND id_usuario IN (SELECT id FROM utils.usuario WHERE tenant_id = :t
@@ -1355,7 +1514,9 @@ async def _apply(args: argparse.Namespace) -> int:
         k: 0 for k in (
             "usuarios_criados", "naturezas", "fontes", "contas", "fornecedores",
             "contratos", "alcadas", "checklist_itens", "movimentacoes", "debitos",
-            "ordens_pagamento", "parcelas_pagas", "extratos", "veiculos_frota",
+            "ordens_pagamento", "parcelas_liberadas", "retencoes", "lotes_enviados",
+            "parcelas_pagas",
+            "extratos", "veiculos_frota",
             "motoristas", "solicitacoes", "designacoes", "viagens_concluidas",
             "permissionarios", "veiculos_regulados", "alvaras",
         )
@@ -1367,6 +1528,8 @@ async def _apply(args: argparse.Namespace) -> int:
         await _apply_frota(tid, contagens)
     if "transporte" in selecionados:
         await _apply_transporte(tid, contagens)
+    if "protocolo" in selecionados:
+        await _apply_protocolo(tid, contagens)
 
     _resumo("APPLY", args.tenant, tid, contagens, selecionados)
     return 0
@@ -1446,7 +1609,9 @@ def _resumo(acao: str, slug: str, tid: int, contagens: dict[str, Any],
     if acao == "APPLY":
         print()
         print(f"Usuários operacionais (senha {OPS_PASSWORD}):")
-        for _chave, nome, email_local, cargo in USUARIOS_PAGAMENTOS + USUARIOS_OPERACAO:
+        for _chave, nome, email_local, cargo in (
+            USUARIOS_PAGAMENTOS + USUARIOS_OPERACAO + USUARIOS_PROTOCOLO
+        ):
             print(f"  {email_local}@{OPS_EMAIL_DOMAIN:22} {nome} — {cargo}")
         print()
 

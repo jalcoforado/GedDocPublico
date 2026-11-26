@@ -59,6 +59,9 @@ class TemplateDocumento(Base):
         JSONB, nullable=True
     )
     ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # SI-53 — o modelo que já vem selecionado ao redigir. No máximo um por
+    # tenant entre não excluídos (índice único parcial, migration 0143).
+    padrao: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     id_usuario_criacao: Mapped[int | None] = mapped_column(
         ForeignKey("utils.usuario.id"), nullable=True
@@ -114,6 +117,9 @@ class Minuta(Base):
     destinatario: Mapped[str | None] = mapped_column(String(300), nullable=True)
     origem: Mapped[str] = mapped_column(String(20), nullable=False, default="interno")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="rascunho")
+    # SI-62: "despacho" = rascunho de despacho avulso; só o autor vê, e só
+    # se conclui por `services/despacho.py` (vira PDF assinado + movimentação).
+    finalidade: Mapped[str] = mapped_column(String(20), nullable=False, default="documento")
     versao: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     corpo_html: Mapped[str | None] = mapped_column(Text, nullable=True)
     google_doc_id: Mapped[str | None] = mapped_column(String(120), nullable=True)

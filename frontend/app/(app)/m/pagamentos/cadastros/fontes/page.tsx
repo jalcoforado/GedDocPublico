@@ -1,15 +1,21 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { BookOpen, Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
+import { useValidacaoCampos } from "@/components/pagamentos/useValidacaoCampos";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
+import { EmptyState } from "@/components/ui/empty-state";
+import { EscolhaSegmentada } from "@/components/ui/escolha-segmentada";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
+import { PageHeader } from "@/components/ui/page-header";
+import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { api, type FonteRecursos } from "@/lib/api";
@@ -65,6 +71,7 @@ export default function FontesPage() {
     setEditId(null);
     setForm(EMPTY);
     setErr(null);
+    v.reiniciar();
     setOpen(true);
   }
 
@@ -82,6 +89,7 @@ export default function FontesPage() {
       vigencia_fim: f.vigencia_fim ?? "",
     });
     setErr(null);
+    v.reiniciar();
     setOpen(true);
   }
 
@@ -140,14 +148,36 @@ export default function FontesPage() {
 
   const fontes = listQ.data ?? [];
   const grupoOptions = enumsQ.data?.grupo_despesa ?? Object.keys(GRUPO_LABELS);
-  const podeSalvar = form.codigo.trim().length > 0 && form.descricao.trim().length > 0;
+  const v = useValidacaoCampos(
+    {
+      codigo: !form.codigo.trim() && "Informe o código da fonte, como no orçamento.",
+      descricao: !form.descricao.trim() && "Descreva a fonte em poucas palavras.",
+      vigencia_fim:
+        !!form.vigencia_inicio &&
+        !!form.vigencia_fim &&
+        form.vigencia_fim < form.vigencia_inicio &&
+        "O fim da vigência tem de ser depois do início.",
+    },
+    { codigo: "fonte-codigo", descricao: "fonte-descricao", vigencia_fim: "fonte-vig-fim" },
+  );
+
+  function salvar() {
+    if (v.conferir()) saveM.mutate();
+  }
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-aprimora">Fontes de recursos</h1>
-        <Button onClick={openNew}>Novo</Button>
-      </div>
+      <PageHeader
+        icon={BookOpen}
+        title="Fontes de recursos"
+        description="De onde vem o dinheiro de cada despesa e em quais grupos ele pode ser gasto."
+        actions={
+          <Button onClick={openNew}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Nova fonte de recursos
+          </Button>
+        }
+      />
 
       <Table>
         <THead>
@@ -159,10 +189,23 @@ export default function FontesPage() {
           </TR>
         </THead>
         <TBody>
+          {listQ.isLoading &&
+            Array.from({ length: 3 }).map((_, i) => <SkeletonRow key={i} cols={4} />)}
           {!listQ.isLoading && fontes.length === 0 && (
             <TR>
-              <TD colSpan={4} className="py-6 text-center text-sm text-muted-foreground">
-                Nenhuma fonte cadastrada.
+              <TD colSpan={4} className="p-0">
+                <EmptyState
+                  icon={BookOpen}
+                  title="Nenhuma fonte de recursos cadastrada"
+                  description="Cadastre as fontes antes das contas bancárias: toda conta pertence a uma."
+                  action={
+                    <Button onClick={openNew}>
+                      <Plus className="h-4 w-4" aria-hidden="true" />
+                      Nova fonte de recursos
+                    </Button>
+                  }
+                  className="rounded-none border-0 bg-transparent"
+                />
               </TD>
             </TR>
           )}
@@ -174,14 +217,12 @@ export default function FontesPage() {
                 {f.grupos_despesa_permitidos.map((g) => GRUPO_LABELS[g] ?? g).join(", ") || "—"}
               </TD>
               <TD className="text-right">
-                <div className="inline-flex gap-2">
-                  <Button variant="secondary" size="sm" onClick={() => openEdit(f)}>
-                    Editar
-                  </Button>
-                  <Button variant="danger" size="sm" onClick={() => excluir(f)}>
-                    Excluir
-                  </Button>
-                </div>
+                <AcoesDaLinha
+                  acoes={[
+                    { label: "Editar", icon: Pencil, onClick: () => openEdit(f) },
+                    { label: "Excluir", icon: Trash2, perigo: true, onClick: () => excluir(f) },
+                  ]}
+                />
               </TD>
             </TR>
           ))}
@@ -192,43 +233,45 @@ export default function FontesPage() {
         open={open}
         onClose={() => setOpen(false)}
         title={editId === null ? "Nova fonte de recursos" : "Editar fonte de recursos"}
+        size="lg"
         footer={
           <>
-            <Button variant="secondary" onClick={() => setOpen(false)}>
+            <Button variant="ghost" onClick={() => setOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={() => saveM.mutate()} disabled={!podeSalvar || saveM.isPending}>
-              {saveM.isPending ? "Salvando..." : "Salvar"}
+            <Button onClick={salvar} loading={saveM.isPending}>
+              {editId === null ? "Cadastrar fonte" : "Salvar alterações"}
             </Button>
           </>
         }
       >
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <Label htmlFor="fonte-codigo" required>
-              Código
-            </Label>
-            <Input
-              id="fonte-codigo"
-              value={form.codigo}
-              onChange={(e) => setForm({ ...form, codigo: e.target.value })}
-              required
-            />
+        <div className="space-y-5">
+          <div className="grid gap-4 sm:grid-cols-[10rem_minmax(0,1fr)]">
+            <FormField label="Código" required error={v.erro("codigo")}>
+              <Input
+                id="fonte-codigo"
+                value={form.codigo}
+                onChange={(e) => setForm({ ...form, codigo: e.target.value })}
+                onBlur={v.tocar("codigo")}
+                maxLength={20}
+                placeholder="Ex.: 1.500.000"
+              />
+            </FormField>
+            <FormField label="Descrição" required error={v.erro("descricao")}>
+              <Input
+                id="fonte-descricao"
+                value={form.descricao}
+                onChange={(e) => setForm({ ...form, descricao: e.target.value })}
+                onBlur={v.tocar("descricao")}
+                maxLength={200}
+                placeholder="Ex.: Recursos não vinculados de impostos"
+              />
+            </FormField>
           </div>
-          <div>
-            <Label htmlFor="fonte-descricao" required>
-              Descrição
-            </Label>
-            <Input
-              id="fonte-descricao"
-              value={form.descricao}
-              onChange={(e) => setForm({ ...form, descricao: e.target.value })}
-              required
-            />
-          </div>
-          <div className="col-span-2">
-            <Label>Grupos de despesa permitidos</Label>
-            <div className="flex flex-wrap gap-4 pt-1">
+
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium text-foreground">Grupos de despesa permitidos</legend>
+            <div className="flex flex-wrap gap-x-5 gap-y-2">
               {grupoOptions.map((g) => (
                 <label key={g} className="flex items-center gap-2 text-sm">
                   <Checkbox
@@ -239,66 +282,87 @@ export default function FontesPage() {
                 </label>
               ))}
             </div>
+            <p className="text-xs text-foreground-muted">
+              {form.grupos_despesa_permitidos.length === 0
+                ? "Nenhum marcado: contas desta fonte podem ser de qualquer grupo."
+                : "Contas bancárias desta fonte só podem ser dos grupos marcados."}
+            </p>
+          </fieldset>
+
+          <EscolhaSegmentada
+            nome="fonte-situacao"
+            titulo="Situação"
+            valor={form.situacao}
+            onChange={(s) => setForm({ ...form, situacao: s })}
+            opcoes={[
+              { valor: "ATIVA", rotulo: "Ativa" },
+              { valor: "SUSPENSA", rotulo: "Suspensa" },
+              { valor: "ENCERRADA", rotulo: "Encerrada" },
+            ]}
+            moldura={false}
+          />
+
+          <div className="space-y-4 border-t border-border pt-4">
+            <p className="text-sm font-semibold text-foreground">
+              Detalhes{" "}
+              <span className="text-xs font-normal text-foreground-subtle">opcionais</span>
+            </p>
+            <GradeCampos colunas={3}>
+              <FormField label="Exercício">
+                <Input
+                  id="fonte-exercicio"
+                  type="number"
+                  inputMode="numeric"
+                  value={form.exercicio}
+                  onChange={(e) => setForm({ ...form, exercicio: e.target.value })}
+                  placeholder={`Ex.: ${new Date().getFullYear()}`}
+                />
+              </FormField>
+              <FormField label="Esfera de origem">
+                <Input
+                  id="fonte-esfera"
+                  value={form.esfera_origem}
+                  onChange={(e) => setForm({ ...form, esfera_origem: e.target.value })}
+                  maxLength={20}
+                  placeholder="Ex.: Federal"
+                />
+              </FormField>
+              <FormField label="Tipo de vinculação">
+                <Input
+                  id="fonte-vinculacao"
+                  value={form.tipo_vinculacao}
+                  onChange={(e) => setForm({ ...form, tipo_vinculacao: e.target.value })}
+                  maxLength={30}
+                  placeholder="Ex.: Vinculada"
+                />
+              </FormField>
+            </GradeCampos>
+            <GradeCampos>
+              <FormField label="Início da vigência">
+                <Input
+                  id="fonte-vig-inicio"
+                  type="date"
+                  value={form.vigencia_inicio}
+                  onChange={(e) => setForm({ ...form, vigencia_inicio: e.target.value })}
+                />
+              </FormField>
+              <FormField label="Fim da vigência" error={v.erro("vigencia_fim")}>
+                <Input
+                  id="fonte-vig-fim"
+                  type="date"
+                  value={form.vigencia_fim}
+                  min={form.vigencia_inicio || undefined}
+                  onChange={(e) => setForm({ ...form, vigencia_fim: e.target.value })}
+                  onBlur={v.tocar("vigencia_fim")}
+                />
+              </FormField>
+            </GradeCampos>
           </div>
-          <div>
-            <Label htmlFor="fonte-exercicio">Exercício</Label>
-            <Input
-              id="fonte-exercicio"
-              type="number"
-              value={form.exercicio}
-              onChange={(e) => setForm({ ...form, exercicio: e.target.value })}
-            />
-          </div>
-          <div>
-            <Label htmlFor="fonte-situacao">Situação</Label>
-            <Select
-              id="fonte-situacao"
-              value={form.situacao}
-              onChange={(e) => setForm({ ...form, situacao: e.target.value as SituacaoFonte })}
-            >
-              <option value="ATIVA">Ativa</option>
-              <option value="SUSPENSA">Suspensa</option>
-              <option value="ENCERRADA">Encerrada</option>
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="fonte-esfera">Esfera de origem</Label>
-            <Input
-              id="fonte-esfera"
-              value={form.esfera_origem}
-              onChange={(e) => setForm({ ...form, esfera_origem: e.target.value })}
-            />
-          </div>
-          <div>
-            <Label htmlFor="fonte-vinculacao">Tipo de vinculação</Label>
-            <Input
-              id="fonte-vinculacao"
-              value={form.tipo_vinculacao}
-              onChange={(e) => setForm({ ...form, tipo_vinculacao: e.target.value })}
-            />
-          </div>
-          <div>
-            <Label htmlFor="fonte-vig-inicio">Vigência (início)</Label>
-            <Input
-              id="fonte-vig-inicio"
-              type="date"
-              value={form.vigencia_inicio}
-              onChange={(e) => setForm({ ...form, vigencia_inicio: e.target.value })}
-            />
-          </div>
-          <div>
-            <Label htmlFor="fonte-vig-fim">Vigência (fim)</Label>
-            <Input
-              id="fonte-vig-fim"
-              type="date"
-              value={form.vigencia_fim}
-              onChange={(e) => setForm({ ...form, vigencia_fim: e.target.value })}
-            />
-          </div>
+
           {err && (
             <div
               role="alert"
-              className="col-span-2 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
+              className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
             >
               {err}
             </div>

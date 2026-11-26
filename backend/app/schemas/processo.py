@@ -2,7 +2,7 @@ from datetime import date, datetime
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .marcador import MarcadorMini
 
@@ -32,6 +32,27 @@ class ProcessoCreate(BaseModel):
     rascunho: bool = False
 
 
+class RascunhoUpdate(BaseModel):
+    """Edição do rascunho (SI-16): os mesmos campos do formulário de abertura.
+
+    Edição completa, não parcial — a tela manda o formulário inteiro, como na
+    abertura. Situação, número, autor e tenant ficam de fora: são do servidor.
+    Rascunho só nasce pela tela de abertura (o balcão e o portal não usam), por
+    isso o canal fica no mesmo domínio de `ProcessoCreate`.
+    """
+
+    id_assunto: int
+    id_manifestante: int
+    id_unidade_proprietaria: int
+    observacao: str | None = Field(default=None, max_length=10000)
+    corpo: str | None = Field(default=None, max_length=50000)
+    numero_origem: str | None = None
+    publico: bool = True
+    nivel_sigilo: str = "ostensivo"
+    externo: bool = False
+    canal_entrada: Literal["interno", "email"] = "interno"
+
+
 class ClassificarSigiloRequest(BaseModel):
     """Classifica/reclassifica o sigilo de um processo (LAI).
 
@@ -54,6 +75,56 @@ class EncaminharRequest(BaseModel):
     # Strict workflow override: super-usuário pode quebrar o trilho do
     # workflow informando motivo. Será auditado.
     override_motivo: str | None = Field(default=None, max_length=500)
+
+
+class RecusarEncaminhamentoRequest(BaseModel):
+    """Recusa pelo destino. Motivo obrigatório: é o que a origem lê para
+    decidir para onde mandar em seguida, e campo opcional vira campo vazio."""
+
+    motivo: str = Field(min_length=5, max_length=2000)
+
+    @field_validator("motivo")
+    @classmethod
+    def _motivo_nao_e_so_espaco(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 5:
+            raise ValueError("Informe o motivo da recusa (mínimo de 5 caracteres).")
+        return v
+
+
+class DesarquivarRequest(BaseModel):
+    """SI-60 (RF-01) — reabrir processo arquivado. Justificativa obrigatória:
+    é ela que o histórico mostra ao lado do arquivamento que foi desfeito."""
+
+    justificativa: str = Field(min_length=5, max_length=2000)
+
+    @field_validator("justificativa")
+    @classmethod
+    def _justificativa_nao_e_so_espaco(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 5:
+            raise ValueError(
+                "Informe a justificativa do desarquivamento (mínimo de 5 caracteres)."
+            )
+        return v
+
+
+class CancelarRecebimentoRequest(BaseModel):
+    """SI-61 (RF-02) — desfazer um recebimento feito por engano. Justificativa
+    obrigatória: é o que a unidade de origem lê para entender por que o
+    processo voltou a ficar em trânsito."""
+
+    justificativa: str = Field(min_length=5, max_length=2000)
+
+    @field_validator("justificativa")
+    @classmethod
+    def _justificativa_nao_e_so_espaco(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 5:
+            raise ValueError(
+                "Informe a justificativa do cancelamento (mínimo de 5 caracteres)."
+            )
+        return v
 
 
 class CancelarEncaminhamentoRequest(BaseModel):
@@ -79,6 +150,26 @@ class ProcessoListItem(BaseModel):
     numero_origem: str | None
     situacao: str = "protocolado"
     data_hora_abertura: datetime
+    # Desde quando o processo está no estado em que está: a data da ÚLTIMA
+    # movimentação (abertura, encaminhamento, recebimento, arquivamento), ou a
+    # de abertura quando não há nenhuma. É o "tempo na caixa" da listagem.
+    # Opcional só para schema montado à mão (teste, fixture); a listagem
+    # sempre preenche.
+    parado_desde: datetime | None = None
+    # O prazo que decide o destaque da linha na caixa de trabalho
+    # (`services/prazos.py::prazo_da_caixa`): o do encaminhamento vigente ou,
+    # sem ele, o do serviço. A LISTAGEM preenche; o detalhe deixa o default e
+    # expõe o bloco `prazo`, mais completo.
+    prazo_caixa_status: Literal["sem_prazo", "dentro_do_prazo", "vencendo", "atrasado"] = (
+        "sem_prazo"
+    )
+    prazo_caixa_vence_em: datetime | None = None
+    prazo_caixa_origem: Literal["encaminhamento", "servico"] | None = None
+    # SI-60 — há arquivamento EM VIGOR (`processos.condicao_arquivado`). A tela
+    # decidia isso procurando "ARQUIVAMENTO" na linha do tempo, o que deixou de
+    # servir quando o processo passou a poder ser desarquivado: o arquivamento
+    # antigo continua no histórico.
+    arquivado: bool = False
     ativo: bool
     publico: bool
     nivel_sigilo: str = "ostensivo"
@@ -117,6 +208,107 @@ class EscopoProcesso(str, Enum):
     meus = "meus"
     unidade = "unidade"
     unidade_e_subordinadas = "unidade_e_subordinadas"
+
+
+class OrdemProcesso(str, Enum):
+    """Ordenação da listagem.
+
+    `recentes` é o comportamento de sempre (abertura, do mais novo). `parados`
+    põe no topo o que está há mais tempo sem movimentação — é a ordem de uma
+    caixa de trabalho, onde o que importa é o que está esperando há mais tempo.
+    """
+
+    recentes = "recentes"
+    parados = "parados"
+
+
+class OrdenarProcesso(str, Enum):
+    """SI-19 — coluna pela qual a listagem ordena (clique no título da
+    coluna). Lista fechada de propósito: o valor vira ORDER BY, e campo livre
+    vindo da URL não pode chegar ao SQL. Com `ordenar`, `ordem` é ignorada.
+    """
+
+    numero = "numero"
+    abertura = "abertura"
+    manifestante = "manifestante"
+    assunto = "assunto"
+    local_atual = "local_atual"
+    responsavel = "responsavel"
+    parado = "parado"
+
+
+class CaixaProcesso(str, Enum):
+    """Caixa de trabalho — o recorte "o que está comigo e em que estado".
+
+    Diferente de `EscopoProcesso`, que só diz DE QUEM é o processo: a caixa
+    cruza posse com o estado da tramitação. As cinco primeiras são da UNIDADE
+    de lotação principal de quem consulta; as duas de assinatura são da PESSOA.
+
+    As definições moram em `services/processos.py::_predicado_caixa`, e são
+    disjuntas onde o operador espera que sejam: um processo encaminhado e ainda
+    não recebido está na SAÍDA da origem e na ENTRADA do destino, e sai da
+    ANÁLISE da origem — embora `id_local_atual` continue apontando para ela
+    até o recebimento.
+
+    `recusados` (migration 0135) é da unidade de ORIGEM: processos cujo último
+    encaminhamento foi recusado pelo destino. Reencaminhar tira o processo de
+    lá. Sobrepõe-se à análise de propósito, como `externos`: o processo
+    recusado está na mesa da origem, e é um subconjunto que pede decisão.
+    """
+
+    entrada = "entrada"
+    saida = "saida"
+    analise = "analise"
+    externos = "externos"
+    aguardando_assinatura = "aguardando_assinatura"
+    enviado_para_assinatura = "enviado_para_assinatura"
+    arquivados = "arquivados"
+    recusados = "recusados"
+
+
+class CaixasContagem(BaseModel):
+    """Quantos processos em cada caixa — uma chave por `CaixaProcesso`."""
+
+    entrada: int = 0
+    saida: int = 0
+    analise: int = 0
+    externos: int = 0
+    aguardando_assinatura: int = 0
+    enviado_para_assinatura: int = 0
+    arquivados: int = 0
+    recusados: int = 0
+
+
+class PrazosDaUnidade(BaseModel):
+    """Processos na mesa da unidade (a caixa Análise), pelo prazo que vale para
+    cada um (`prazos.prazo_da_caixa`)."""
+
+    vencidos: int = 0
+    vencendo: int = 0
+    no_prazo: int = 0
+    sem_prazo: int = 0
+
+
+class AguardandoRetorno(BaseModel):
+    """O que a unidade enviou e o destino ainda não recebeu (a caixa Saída)."""
+
+    total: int = 0
+    atrasados: int = 0
+
+
+class PainelUnidade(BaseModel):
+    """Os números do painel de controle de quem consulta, numa chamada só.
+
+    Tudo é recortado como as caixas: unidade de lotação principal, sigilo de
+    quem consulta, sem rascunho. Cada número tem a caixa (ou a caixa + um
+    recorte) que o lista, para o painel levar a ela com um clique.
+    """
+
+    caixas: CaixasContagem
+    atribuidos_a_mim: int = 0
+    sem_responsavel: int = 0
+    prazos: PrazosDaUnidade
+    aguardando_retorno: AguardandoRetorno
 
 
 class CotaAnexacaoOut(BaseModel):
@@ -174,6 +366,52 @@ class AtribuirResponsavelRequest(BaseModel):
     id_usuario: int | None = None
 
 
+AcaoDoLote = Literal["receber", "encaminhar", "atribuir_responsavel", "arquivar"]
+
+# Teto de um lote. Cada processo é um ato completo (workflow, auditoria,
+# notificação); acima disso a requisição fica longa demais para a tela esperar.
+MAXIMO_DO_LOTE = 100
+
+
+class LoteRequest(BaseModel):
+    """A mesma ação sobre vários processos (`services/processos_lote.py`).
+    Cada ação traz o seu corpo — o mesmo da rota individual — e só ele."""
+
+    ids: list[int] = Field(min_length=1, max_length=MAXIMO_DO_LOTE)
+    acao: AcaoDoLote
+    encaminhar: EncaminharRequest | None = None
+    arquivar: ArquivarRequest | None = None
+    responsavel: AtribuirResponsavelRequest | None = None
+
+    @model_validator(mode="after")
+    def _corpo_da_acao(self) -> "LoteRequest":
+        exigido = {
+            "encaminhar": self.encaminhar,
+            "arquivar": self.arquivar,
+            "atribuir_responsavel": self.responsavel,
+        }
+        if self.acao in exigido and exigido[self.acao] is None:
+            campo = "responsavel" if self.acao == "atribuir_responsavel" else self.acao
+            raise ValueError(f"A ação '{self.acao}' exige o campo '{campo}'.")
+        if len(set(self.ids)) != len(self.ids):
+            raise ValueError("A seleção tem processos repetidos.")
+        return self
+
+
+class ItemDoLote(BaseModel):
+    id: int
+    ok: bool
+    erro: str | None = None
+
+
+class LoteResultado(BaseModel):
+    """Um item por processo pedido, na ordem do pedido."""
+
+    itens: list[ItemDoLote]
+    concluidos: int
+    falhas: int
+
+
 class AnexoNoProcesso(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int  # id do Anexo (file row)
@@ -192,6 +430,8 @@ class AnexoNoProcesso(BaseModel):
     # cache, não uma releitura do arquivo a cada listagem.
     documento_numero: int | None = None
     pagina_processo: int | None = None
+    # SI-62: documento que este arquivo acompanha (anexos do despacho).
+    id_anexo_principal: int | None = None
 
 
 class EncaminhamentoOut(BaseModel):
@@ -204,12 +444,26 @@ class EncaminhamentoOut(BaseModel):
     recebido: bool
     data_hora_recebimento: datetime | None
     cancelado: bool
+    recusado: bool = False
+    data_hora_recusa: datetime | None = None
+    motivo_recusa: str | None = None
+
+
+class AnexoDoDespacho(BaseModel):
+    """Arquivo que acompanha o despacho (filho do PDF assinado, SI-62)."""
+    id: int
+    descricao: str | None
 
 
 class DespachoOut(BaseModel):
     id: int
     despacho: str
     usuario: str | None
+    # SI-62: PDF assinado do despacho avulso; nulo nos despachos que vêm
+    # junto de encaminhar, recusar, cancelar ou arquivar.
+    id_anexo: int | None = None
+    # Os arquivos enviados junto (filhos do PDF), não assinados.
+    anexos: list[AnexoDoDespacho] = []
 
 
 class PermanenciaNo(BaseModel):
@@ -281,6 +535,12 @@ class PrazoInfo(BaseModel):
 
 
 class ProcessoDetail(ProcessoListItem):
+    # SI-16 — os ids do que o formulário de abertura escolhe, para a edição do
+    # rascunho se pré-preencher. Os nomes já vêm de `ProcessoListItem`.
+    id_assunto: int | None = None
+    id_tipo_processo: int | None = None
+    id_manifestante: int | None = None
+    id_unidade_proprietaria: int | None = None
     observacao: str | None
     corpo: str | None
     virtual: bool
@@ -307,3 +567,17 @@ class ProcessoDetail(ProcessoListItem):
 
     # F6 — orçamento de anexação, sempre presente.
     cota_anexacao: CotaAnexacaoOut
+
+    # O que QUEM CONSULTA pode decidir sobre o encaminhamento pendente
+    # (`acoes_processo.pode_decidir_encaminhamento`, a mesma regra dos atos).
+    # `None` quando não há pendente ou o detalhe foi montado sem usuário — a
+    # tela então não restringe, e o servidor continua sendo a barreira.
+    pode_receber_encaminhamento: bool | None = None
+    pode_cancelar_encaminhamento: bool | None = None
+    # SI-61 — o último recebimento pode ser desfeito por quem consulta?
+    # `None` = não há recebimento a cancelar (nunca recebido, em trânsito,
+    # arquivado) ou detalhe sem usuário. `False` vem com o motivo, que a tela
+    # mostra em vez de um botão cinza sem explicação. A permissão específica
+    # (`processo_cancelar_recebimento`) a tela confere à parte, por `can`.
+    pode_cancelar_recebimento: bool | None = None
+    motivo_cancelar_recebimento: str | None = None

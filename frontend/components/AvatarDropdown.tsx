@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  Building2,
   ChevronDown,
   Layers,
   LogOut,
@@ -13,11 +12,11 @@ import {
 import Link from "next/link";
 import { useRef, useState } from "react";
 
-import { PreferenciasAparencia } from "@/components/PreferenciasAparencia";
+import { ListaLotacoes } from "@/components/UnidadeAtiva";
 import { Popover } from "@/components/ui/popover";
-import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/lib/auth";
 import { useBranding } from "@/lib/branding";
+import { useLotacaoAtiva } from "@/lib/lotacao-ativa";
 import { cn } from "@/lib/utils";
 
 function initials(nome: string | null | undefined): string {
@@ -29,32 +28,15 @@ function initials(nome: string | null | undefined): string {
 }
 
 export function AvatarDropdown() {
-  const { user, perms, logout, trocarLotacao } = useAuth();
+  const { user, perms, logout } = useAuth();
   const branding = useBranding();
-  const toast = useToast();
 
   const [open, setOpen] = useState(false);
-  const [trocando, setTrocando] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
-  // E1 (benchmark SUiTE) — "alterar setor". Com 0 ou 1 lotação não há troca
-  // possível; a seção some (não faz sentido mostrar um seletor de opção
-  // única). `?? []` porque telas/testes que montam `user` à mão nem sempre
-  // preenchem o campo.
-  const lotacoes = user?.lotacoes ?? [];
-  const lotacaoAtivaId = user?.unidade_contexto_id ?? user?.id_unidade_trabalho ?? null;
-
-  async function selecionarLotacao(id: number) {
-    if (id === lotacaoAtivaId || trocando) return;
-    setTrocando(true);
-    try {
-      await trocarLotacao(id);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Não foi possível trocar de setor.");
-    } finally {
-      setTrocando(false);
-    }
-  }
+  // E1 (benchmark SUiTE) — "alterar setor". A regra (qual é a ativa, quando
+  // há troca, o que invalidar depois) é a do cabeçalho: `useLotacaoAtiva`.
+  const lotacao = useLotacaoAtiva();
 
   // Clique-fora/ESC são do Popover (fatia 3.4); fechar devolve o foco ao
   // avatar em vez de deixá-lo cair no body.
@@ -137,50 +119,14 @@ export function AvatarDropdown() {
             </div>
           </div>
 
-          {/* Tema + densidade — radiogroups compartilhados com /perfil (fatia 3.7) */}
-          <div className="border-b border-border px-3 py-2">
-            <PreferenciasAparencia />
-          </div>
+          {/* O tema saiu daqui (2026-11-11, pedido do Heitor): já há o botão
+              sol/lua na barra de cima, e a escolha completa fica em /perfil. */}
 
           {/* Lotação ativa — "alterar setor" (E1, benchmark SUiTE). Só
               aparece com 2+ lotações: com uma só não há o que escolher. */}
-          {lotacoes.length > 1 && (
-            <div
-              role="radiogroup"
-              aria-label="Lotação ativa"
-              className="border-b border-border px-3 py-2"
-            >
-              <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-foreground-muted">
-                <Building2 className="h-3.5 w-3.5" aria-hidden="true" />
-                Lotação ativa
-              </div>
-              <div className="space-y-0.5">
-                {lotacoes.map((l) => {
-                  const ativa = l.id === lotacaoAtivaId;
-                  return (
-                    <button
-                      key={l.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={ativa}
-                      disabled={trocando}
-                      onClick={() => selecionarLotacao(l.id)}
-                      className={cn(
-                        "flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm transition-colors duration-fast",
-                        "hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60",
-                        ativa && "bg-brand/10 font-medium text-brand",
-                      )}
-                    >
-                      <span className="truncate">{l.nome}</span>
-                      {l.principal && (
-                        <span className="ml-2 shrink-0 text-[10px] uppercase tracking-wide text-foreground-muted">
-                          principal
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+          {lotacao.podeTrocar && (
+            <div className="border-b border-border px-3 py-2">
+              <ListaLotacoes lotacao={lotacao} />
             </div>
           )}
 

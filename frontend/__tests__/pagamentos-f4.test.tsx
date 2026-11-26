@@ -4,10 +4,10 @@
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import type {
-  ContaBancaria, LoteDetalhe, LotePagamento, Parcela, RetencoesDebito,
+  ContaBancaria, LoteDetalhe, LotePagamento, ParcelaElegivel, RetencoesDebito,
 } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
@@ -20,7 +20,8 @@ const contaPrincipal: ContaBancaria = {
   saldo_inicial: "10000.00", saldo_minimo_alerta: "0", ativa: true,
 } as ContaBancaria;
 
-const parcelaElegivel: Parcela = {
+const parcelaElegivel: ParcelaElegivel = {
+  nome_fornecedor: "Papelaria Central", descricao_debito: "Material de expediente",
   id: 55, id_debito: 20, numero: 1, valor: "1000.00", vencimento: "2026-09-30",
   status: "LIBERADA", data_pagamento: null, forma_pagamento: null, id_movimentacao: null,
   data_prevista_pagamento: "2026-09-25",
@@ -159,6 +160,13 @@ function renderComQueryClient(children: React.ReactNode) {
 // Central da tesouraria
 // ---------------------------------------------------------------------------
 
+// A primeira importação das telas (muitos módulos) passava dos 5 s do teste
+// em máquina carregada; aquecer aqui tira o custo de dentro dos testes.
+beforeAll(async () => {
+  await import("@/components/pagamentos/DetalheDebitoContent");
+  await import("@/app/(app)/m/pagamentos/tesouraria/page");
+}, 60_000);
+
 describe("Central da tesouraria — selecionar e criar lote", () => {
   it("lista contas, mostra elegíveis ao escolher uma e cria o lote com a seleção", async () => {
     const { default: TesourariaPage } = await import(
@@ -172,7 +180,9 @@ describe("Central da tesouraria — selecionar e criar lote", () => {
     fireEvent.change(selectConta, { target: { value: "1" } });
 
     await waitFor(() => expect(elegiveisMock).toHaveBeenCalledWith(1));
-    expect(await screen.findByText(/débito #20 · parcela 1/i)).toBeInTheDocument();
+    // Quem monta o lote vê de quem é a parcela, não só o número do débito.
+    expect(await screen.findByText(/Papelaria Central · parcela 1/)).toBeInTheDocument();
+    expect(screen.getByText(/Solicitação #20 — Material de expediente/)).toBeInTheDocument();
 
     const checkbox = screen.getByLabelText(/selecionar parcela 1 do débito #20/i);
     fireEvent.click(checkbox);
@@ -202,10 +212,12 @@ describe("Central da tesouraria — selecionar e criar lote", () => {
     // O lote mockado por `obter` está ENVIADO — aparece o passo de retorno.
     const botaoRegistrar = await screen.findByRole("button", { name: /registrar retorno/i });
 
-    const selectResultado = screen.getByRole("combobox");
+    // Dois seletores no passo de retorno: o resultado da parcela (na linha
+    // dela) e a forma de pagamento do lote.
+    const selectResultado = screen.getByLabelText("Resultado da parcela #55");
     fireEvent.change(selectResultado, { target: { value: "FALHOU" } });
 
-    const inputMotivo = await screen.findByPlaceholderText(/motivo da falha/i);
+    const inputMotivo = await screen.findByLabelText(/motivo da falha/i);
     fireEvent.change(inputMotivo, { target: { value: "conta encerrada" } });
 
     fireEvent.click(botaoRegistrar);
@@ -213,6 +225,28 @@ describe("Central da tesouraria — selecionar e criar lote", () => {
     await waitFor(() =>
       expect(processarRetornoMock).toHaveBeenCalledWith(7, [
         { parcela_id: 55, resultado: "FALHOU", motivo_falha: "conta encerrada" },
+      ]),
+    );
+    // Parcela que falhou não foi paga por meio nenhum.
+    const enviado = processarRetornoMock.mock.calls.at(-1) as unknown as [number, Array<Record<string, unknown>>];
+    expect(enviado[1][0].forma_pagamento).toBeUndefined();
+  });
+
+  it("o retorno pago leva a forma de pagamento escolhida, e não mais sempre TED", async () => {
+    processarRetornoMock.mockClear();
+    const { default: Pagina } = await import("@/app/(app)/m/pagamentos/tesouraria/page");
+    renderComQueryClient(<Pagina />);
+
+    fireEvent.click(screen.getByRole("tab", { name: /^lotes$/i }));
+    fireEvent.click(await screen.findByText(/L-2026-0001/i));
+    const botaoRegistrar = await screen.findByRole("button", { name: /registrar retorno/i });
+
+    fireEvent.change(screen.getByLabelText(/Forma de pagamento/), { target: { value: "PIX" } });
+    fireEvent.click(botaoRegistrar);
+
+    await waitFor(() =>
+      expect(processarRetornoMock).toHaveBeenCalledWith(7, [
+        { parcela_id: 55, resultado: "PAGA", forma_pagamento: "PIX" },
       ]),
     );
   });
@@ -248,12 +282,34 @@ describe("Detalhe da solicitação — seção Retenções (F4)", () => {
     fireEvent.change(screen.getByLabelText(/^base de cálculo/i), { target: { value: "1000.00" } });
     fireEvent.change(screen.getByLabelText(/^valor/i), { target: { value: "15.00" } });
 
-    fireEvent.click(screen.getByRole("button", { name: /^lançar$/i }));
+    // O botão do diálogo diz o verbo inteiro — e tem o mesmo nome do que o
+    // abriu, por isso a busca fica dentro do diálogo.
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Lançar retenção" }),
+    );
 
     await waitFor(() =>
       expect(retencoesCriarMock).toHaveBeenCalledWith(20, expect.objectContaining({
         tipo: "IRRF", base_calculo: "1000.00", valor: "15.00",
       })),
     );
+  });
+
+  it("calcula o valor retido de base × alíquota, e não lança sem valor", async () => {
+    const { DetalheDebitoContent } = await import(
+      "@/components/pagamentos/DetalheDebitoContent"
+    );
+    renderComQueryClient(<DetalheDebitoContent id={20} />);
+    fireEvent.click(await screen.findByRole("button", { name: /lançar retenção/i }));
+    const dialogo = within(await screen.findByRole("dialog"));
+
+    retencoesCriarMock.mockClear();
+    fireEvent.click(dialogo.getByRole("button", { name: "Lançar retenção" }));
+    expect(await dialogo.findByText(/Informe a base de cálculo/)).toBeInTheDocument();
+    expect(retencoesCriarMock).not.toHaveBeenCalled();
+
+    fireEvent.change(dialogo.getByLabelText(/^base de cálculo/i), { target: { value: "1000" } });
+    fireEvent.change(dialogo.getByLabelText(/^alíquota/i), { target: { value: "1.5" } });
+    expect(dialogo.getByLabelText(/^valor retido/i)).toHaveValue(15);
   });
 });

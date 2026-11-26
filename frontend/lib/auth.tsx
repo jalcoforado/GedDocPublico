@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useState } from "react";
 
 import { api, type MeResponse } from "@/lib/api";
+import { esquecerSessao, guardarSessao, sessaoEmMemoria } from "@/lib/sessao-em-memoria";
 
 interface AuthContextValue {
   user: MeResponse | null;
@@ -20,15 +21,19 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const [user, setUser] = useState<MeResponse | null>(null);
-  const [perms, setPerms] = useState<MeResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Nasce com o usuário que a aba já conhecia (troca entre `(app)` e
+  // `(launcher)`), sem piscar a tela de carregamento; o `/auth/me` abaixo
+  // revalida em segundo plano. Ver `lib/sessao-em-memoria.ts`.
+  const [user, setUser] = useState<MeResponse | null>(() => sessaoEmMemoria());
+  const [perms, setPerms] = useState<MeResponse | null>(() => sessaoEmMemoria());
+  const [loading, setLoading] = useState(() => sessaoEmMemoria() === null);
 
   useEffect(() => {
     // Cookie HttpOnly: JS não pode ler, mas o navegador envia em /auth/me automaticamente.
     // Se 401, redireciona pra login. /auth/me agora retorna permissões junto.
     api.me()
       .then((u) => {
+        guardarSessao(u);
         setUser(u);
         setPerms(u);
         // SEC-1 Commit 5 — se o servidor diz que a senha é temporária,
@@ -44,6 +49,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       })
       .catch(() => {
+        esquecerSessao();
+        setUser(null);
+        setPerms(null);
         router.replace("/login");
       })
       .finally(() => setLoading(false));
@@ -51,6 +59,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   function logout() {
     api.logout().finally(() => {
+      esquecerSessao();
       setUser(null);
       setPerms(null);
       router.push("/login");
@@ -68,6 +77,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function trocarLotacao(idUnidadeTrabalho: number) {
     const atualizado = await api.trocarLotacaoAtiva(idUnidadeTrabalho);
+    guardarSessao(atualizado);
     setUser(atualizado);
     setPerms(atualizado);
   }

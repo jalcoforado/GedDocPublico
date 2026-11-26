@@ -1,10 +1,12 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Tag } from "lucide-react";
 import { useRef, useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
+import { EtiquetaMarcador } from "@/components/EtiquetaMarcador";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover } from "@/components/ui/popover";
@@ -57,13 +59,11 @@ export function MarcadoresProcesso({
 
   return (
     <div className="flex flex-wrap items-center gap-1">
+      {/* Mesma etiqueta das listagens: a cor do marcador só na bolinha, para
+          o nome não depender do contraste de uma cor escolhida no cadastro.
+          Aqui sem corte: o detalhe é o único lugar onde o nome aparece inteiro. */}
       {processo.marcadores.map((mk) => (
-        <Badge
-          key={mk.id}
-          style={{ backgroundColor: `${mk.cor}22`, color: mk.cor }}
-        >
-          {mk.nome}
-        </Badge>
+        <EtiquetaMarcador key={mk.id} marcador={mk} truncar={false} />
       ))}
       {podeEditar && (
         <>
@@ -81,7 +81,7 @@ export function MarcadoresProcesso({
             <div className="w-64 space-y-2 p-3">
               <p className="text-xs font-semibold text-foreground-muted">Marcadores</p>
               {catalogoQ.isLoading && (
-                <p className="text-xs text-foreground-muted">Carregando…</p>
+                <Carregando className="text-xs text-foreground-muted" />
               )}
               {catalogoQ.data?.length === 0 && (
                 <p className="text-xs text-foreground-muted">

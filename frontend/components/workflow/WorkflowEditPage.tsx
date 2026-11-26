@@ -1,12 +1,13 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Save, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, GitBranch, Save } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { FormField } from "@/components/ui/form-field";
+import { PageHeader } from "@/components/ui/page-header";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { WorkflowEditor, type WorkflowEditorSelection } from "./WorkflowEditor";
@@ -36,6 +37,8 @@ interface Props {
 interface ValidationIssue {
   level: "error" | "warning";
   msg: string;
+  /** Erro de um campo do cabeçalho: aparece embaixo dele, não na lista. */
+  campo?: "slug" | "nome";
 }
 
 function validateDsl(
@@ -51,11 +54,12 @@ function validateDsl(
     if (!/^[a-z][a-z0-9_-]*$/.test(slug)) {
       issues.push({
         level: "error",
-        msg: "Slug do workflow deve começar com letra e usar só [a-z0-9_-].",
+        msg: "O identificador deve começar com letra e usar só minúsculas, números, _ e -.",
+        campo: "slug",
       });
     }
   }
-  if (!nome.trim()) issues.push({ level: "error", msg: "Nome é obrigatório." });
+  if (!nome.trim()) issues.push({ level: "error", msg: "Dê um nome ao workflow.", campo: "nome" });
 
   // Estados
   if (dsl.estados.length === 0) {
@@ -170,9 +174,21 @@ export function WorkflowEditPage({
     [dsl, slug, nome, mode],
   );
   const errors = issues.filter((i) => i.level === "error");
+  // Erro de campo só depois que a pessoa mexeu nele ou tentou salvar: a tela
+  // abria com "Slug… deve começar com letra" e "Nome é obrigatório" em
+  // vermelho antes de qualquer digitação. Por isso o Criar não fica mais
+  // desabilitado com erro — clicar é o que revela o que falta.
+  const [tocados, setTocados] = useState<{ slug?: boolean; nome?: boolean }>({});
+  const [tentouSalvar, setTentouSalvar] = useState(false);
+  const erroDoCampo = (campo: "slug" | "nome") =>
+    tentouSalvar || tocados[campo]
+      ? errors.find((i) => i.campo === campo)?.msg
+      : undefined;
+  const errosDoFluxo = errors.filter((i) => !i.campo);
   const warnings = issues.filter((i) => i.level === "warning");
 
   const handleSave = useCallback(async () => {
+    setTentouSalvar(true);
     if (errors.length > 0) {
       toast.error(`Corrija ${errors.length} erro(s) antes de salvar.`);
       return;
@@ -199,80 +215,105 @@ export function WorkflowEditPage({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold text-primary">
-          {mode === "novo" ? "Novo workflow" : `Editar workflow${versao ? ` · v${versao}` : ""}`}
-        </h1>
-        <div className="flex gap-2">
-          <Button variant="secondary" onClick={handleCancel} disabled={saving}>
-            <X className="mr-1 h-4 w-4" aria-hidden="true" />
-            Cancelar
-          </Button>
-          <Button onClick={handleSave} disabled={saving || errors.length > 0}>
-            <Save className="mr-1 h-4 w-4" aria-hidden="true" />
-            {saving
-              ? "Salvando…"
-              : mode === "novo"
-                ? "Criar"
-                : "Salvar nova versão"}
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        icon={GitBranch}
+        breadcrumbs={[
+          { label: "Workflows", href: "/m/protocolo/workflow" },
+          ...(mode === "editar" && workflowId
+            ? [{ label: initialNome || "Workflow", href: `/m/protocolo/workflow/${workflowId}` }]
+            : []),
+          { label: mode === "novo" ? "Novo workflow" : "Editar" },
+        ]}
+        title={mode === "novo" ? "Novo workflow" : `Editar workflow${versao ? ` · v${versao}` : ""}`}
+        description="Desenhe os estados e as transições no diagrama; clique num item para editar os detalhes ao lado."
+        actions={
+          <>
+            <Button variant="ghost" onClick={handleCancel} disabled={saving}>
+              Cancelar
+            </Button>
+            <Button onClick={handleSave} loading={saving}>
+              {!saving && <Save className="h-4 w-4" aria-hidden="true" />}
+              {saving
+                ? "Salvando…"
+                : mode === "novo"
+                  ? "Criar workflow"
+                  : "Salvar nova versão"}
+            </Button>
+          </>
+        }
+      />
 
       {mode === "editar" && (
-        <p className="rounded border border-blue-200 bg-blue-50 p-2 text-xs text-blue-900">
-          Editar gera <strong>nova versão</strong> deste workflow (instances ativas
+        <p className="rounded border border-info/30 bg-info-soft p-2 text-xs text-info-soft-foreground">
+          Editar gera <strong>nova versão</strong> deste workflow (instâncias ativas
           continuam na versão antiga).
         </p>
       )}
 
-      <div className="grid gap-3 md:grid-cols-3">
-        <div className="space-y-1">
-          <Label htmlFor="wf-slug">Slug</Label>
-          <Input
-            id="wf-slug"
-            value={slug}
-            onChange={(e) => setSlug(e.target.value)}
-            disabled={mode === "editar"}
-            placeholder="ex: fluxo_recurso"
-          />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="wf-nome">Nome</Label>
+      <div className="grid gap-4 md:grid-cols-3">
+        <FormField
+          label="Nome"
+          required
+          hint="Como o fluxo aparece nas listas."
+          error={erroDoCampo("nome")}
+        >
           <Input
             id="wf-nome"
             value={nome}
             onChange={(e) => setNome(e.target.value)}
-            placeholder="Nome humano"
+            onBlur={() => setTocados((t) => ({ ...t, nome: true }))}
+            placeholder="Ex.: Recurso administrativo"
           />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="wf-desc">Descrição</Label>
+        </FormField>
+        <FormField
+          label="Identificador"
+          required={mode === "novo"}
+          hint={
+            mode === "novo"
+              ? "Minúsculas, números, _ e -. Não muda depois de criado."
+              : "Não muda depois de criado."
+          }
+          error={erroDoCampo("slug")}
+        >
+          <Input
+            id="wf-slug"
+            value={slug}
+            onChange={(e) => setSlug(e.target.value)}
+            onBlur={() => setTocados((t) => ({ ...t, slug: true }))}
+            disabled={mode === "editar"}
+            placeholder="Ex.: recurso_administrativo"
+            className="font-mono"
+          />
+        </FormField>
+        <FormField label="Descrição" opcional>
           <Textarea
             id="wf-desc"
             rows={1}
             value={descricao ?? ""}
             onChange={(e) => setDescricao(e.target.value || null)}
+            placeholder="Ex.: Recursos contra decisões da Secretaria."
           />
-        </div>
+        </FormField>
       </div>
 
-      {(errors.length > 0 || warnings.length > 0) && (
+      {(errosDoFluxo.length > 0 || warnings.length > 0) && (
         <div className="space-y-1">
-          {errors.map((i, idx) => (
+          {errosDoFluxo.map((i, idx) => (
             <p
               key={`e-${idx}`}
-              className="rounded border border-danger/40 bg-danger/10 px-2 py-1 text-xs text-danger-soft-foreground"
+              className="flex items-start gap-1.5 rounded border border-danger/40 bg-danger-soft px-2 py-1 text-xs text-danger-soft-foreground"
             >
-              ❌ {i.msg}
+              <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              {i.msg}
             </p>
           ))}
           {warnings.map((i, idx) => (
             <p
               key={`w-${idx}`}
-              className="rounded border border-warning/40 bg-warning/10 px-2 py-1 text-xs text-warning-soft-foreground"
+              className="flex items-start gap-1.5 rounded border border-warning/40 bg-warning-soft px-2 py-1 text-xs text-warning-soft-foreground"
             >
-              ⚠ {i.msg}
+              <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              {i.msg}
             </p>
           ))}
         </div>

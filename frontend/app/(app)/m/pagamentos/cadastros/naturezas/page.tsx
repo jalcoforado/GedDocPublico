@@ -1,12 +1,18 @@
 "use client";
 
+import { Layers } from "lucide-react";
+
 import { CrudPage } from "@/components/CrudPage";
+import { AtivoBadge, CriticidadeBadge } from "@/components/pagamentos/Rotulos";
 import { api, type NaturezaDespesa } from "@/lib/api";
 
 export default function NaturezasPage() {
   return (
     <CrudPage<NaturezaDespesa>
       title="Naturezas de despesa"
+      icon={Layers}
+      description="Classificação das despesas e a criticidade que cada uma traz por padrão."
+      novoLabel="Nova natureza"
       queryKey={["pag-naturezas"]}
       fetchList={() => api.pagamentos.cadastros.naturezas.list()}
       createFn={api.pagamentos.cadastros.naturezas.create}
@@ -16,15 +22,21 @@ export default function NaturezasPage() {
       columns={[
         { header: "Código", render: (r) => r.codigo },
         { header: "Descrição", render: (r) => r.descricao },
-        { header: "Criticidade", render: (r) => r.criticidade_padrao },
-        { header: "Ativa", render: (r) => (r.ativa ? "Sim" : "Não") },
+        { header: "Criticidade", render: (r) => <CriticidadeBadge valor={r.criticidade_padrao} /> },
+        { header: "Situação", render: (r) => <AtivoBadge ativo={r.ativa} feminino /> },
       ]}
       fields={[
-        { name: "codigo", label: "Código", type: "text", required: true },
-        { name: "descricao", label: "Descrição", type: "textarea", required: true, colSpan: 2 },
+        {
+          name: "codigo",
+          label: "Código",
+          type: "text",
+          required: true,
+          placeholder: "Ex.: 3.3.90.30",
+          dica: "O elemento de despesa do orçamento.",
+        },
         {
           name: "criticidade_padrao",
-          label: "Criticidade",
+          label: "Criticidade padrão",
           type: "select",
           required: true,
           options: [
@@ -33,8 +45,17 @@ export default function NaturezasPage() {
             { value: "MEDIA", label: "Média" },
             { value: "BAIXA", label: "Baixa" },
           ],
+          dica: "Prioridade típica. Baixa, Média e Alta já vêm sugeridas na nova solicitação.",
         },
-        { name: "ativa", label: "Ativa", type: "checkbox" },
+        {
+          name: "descricao",
+          label: "Descrição",
+          type: "textarea",
+          required: true,
+          colSpan: 2,
+          placeholder: "Ex.: Material de consumo",
+        },
+        { name: "ativa", label: "Situação", type: "checkbox", textoAoLado: "Ativa" },
       ]}
     />
   );

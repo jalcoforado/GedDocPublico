@@ -127,6 +127,7 @@ TIPO_UNIDADE_NOME = "Secretaria"
 UNIDADE_SIGLA = "PG"
 UNIDADE_NOME = "Protocolo Geral"
 TIPO_MANIFESTANTE_NOME = "Pessoa Física"
+TIPO_MANIFESTANTE_PJ_NOME = "Pessoa Jurídica"
 GRUPO_SU_NOME = "Super Usuário"
 
 
@@ -271,6 +272,63 @@ async def criar_registro_de_tenant(
 # ---------------------------------------------------------------------------
 
 
+async def garantir_unidade_padrao(
+    db: AsyncSession, *, tenant_id: int
+) -> UnidadeTrabalho:
+    """get_or_create do tipo de unidade `SEC` + da unidade `PG` do tenant.
+
+    Extraída de `semear_tenant` para que o `seed_bootstrap` monte a MESMA
+    unidade padrão pelas MESMAS chaves naturais. Enquanto eram dois caminhos,
+    o tenant do seed nascia sem unidade alguma e o admin dele sem lotação — e
+    `utils.usuario.id_unidade_trabalho` é o que o `seed_demo` usa para montar
+    as caixas de trabalho, que por isso ficavam vazias, com um `[aviso]` e
+    exit 0.
+
+    **Não comita** — quem chama decide a transação. Idempotente pelas chaves
+    naturais (`TIPO_UNIDADE_CODIGO`, `UNIDADE_SIGLA`), como o resto do ato
+    municipal.
+    """
+    tu = (
+        await db.execute(
+            select(TipoUnidadeTrabalho).where(
+                TipoUnidadeTrabalho.tenant_id == tenant_id,
+                TipoUnidadeTrabalho.codigo == TIPO_UNIDADE_CODIGO,
+                TipoUnidadeTrabalho.excluido.is_(False),
+            )
+        )
+    ).scalars().first()
+    if tu is None:
+        tu = TipoUnidadeTrabalho(
+            tenant_id=tenant_id,
+            tipo_unidade_trabalho=TIPO_UNIDADE_NOME,
+            codigo=TIPO_UNIDADE_CODIGO,
+        )
+        db.add(tu)
+        await db.flush()
+
+    unidade = (
+        await db.execute(
+            select(UnidadeTrabalho).where(
+                UnidadeTrabalho.tenant_id == tenant_id,
+                UnidadeTrabalho.sigla == UNIDADE_SIGLA,
+                UnidadeTrabalho.excluido.is_(False),
+            )
+        )
+    ).scalars().first()
+    if unidade is None:
+        unidade = UnidadeTrabalho(
+            tenant_id=tenant_id,
+            unidade_trabalho=UNIDADE_NOME,
+            sigla=UNIDADE_SIGLA,
+            id_tipo_unidade_trabalho=tu.id,
+        )
+        db.add(unidade)
+        await db.flush()
+
+
+    return unidade
+
+
 async def semear_tenant(
     db: AsyncSession,
     *,
@@ -339,61 +397,34 @@ async def semear_tenant(
             f"(nível valor=0 ou sistema '{app_name}')."
         )
 
-    tu = (
-        await db.execute(
-            select(TipoUnidadeTrabalho).where(
-                TipoUnidadeTrabalho.tenant_id == tenant_id,
-                TipoUnidadeTrabalho.codigo == TIPO_UNIDADE_CODIGO,
-                TipoUnidadeTrabalho.excluido.is_(False),
-            )
-        )
-    ).scalars().first()
-    if tu is None:
-        tu = TipoUnidadeTrabalho(
-            tenant_id=tenant_id,
-            tipo_unidade_trabalho=TIPO_UNIDADE_NOME,
-            codigo=TIPO_UNIDADE_CODIGO,
-        )
-        db.add(tu)
-        await db.flush()
+    unidade = await garantir_unidade_padrao(db, tenant_id=tenant_id)
 
-    unidade = (
-        await db.execute(
-            select(UnidadeTrabalho).where(
-                UnidadeTrabalho.tenant_id == tenant_id,
-                UnidadeTrabalho.sigla == UNIDADE_SIGLA,
-                UnidadeTrabalho.excluido.is_(False),
+    # Física primeiro: o portal do cidadão, sem tipo explícito, usa o de menor id.
+    for nome_tipo, natureza in (
+        (TIPO_MANIFESTANTE_NOME, "F"),
+        (TIPO_MANIFESTANTE_PJ_NOME, "J"),
+    ):
+        tem_tipo_manifestante = (
+            await db.execute(
+                select(TipoManifestante.id).where(
+                    TipoManifestante.tenant_id == tenant_id,
+                    TipoManifestante.tipo_manifestante == nome_tipo,
+                    TipoManifestante.excluido.is_(False),
+                )
             )
-        )
-    ).scalars().first()
-    if unidade is None:
-        unidade = UnidadeTrabalho(
-            tenant_id=tenant_id,
-            unidade_trabalho=UNIDADE_NOME,
-            sigla=UNIDADE_SIGLA,
-            id_tipo_unidade_trabalho=tu.id,
-        )
-        db.add(unidade)
-        await db.flush()
-
-    tem_tipo_manifestante = (
-        await db.execute(
-            select(TipoManifestante.id).where(
-                TipoManifestante.tenant_id == tenant_id,
-                TipoManifestante.tipo_manifestante == TIPO_MANIFESTANTE_NOME,
-                TipoManifestante.excluido.is_(False),
+        ).scalars().first()
+        if tem_tipo_manifestante is None:
+            db.add(
+                TipoManifestante(
+                    tenant_id=tenant_id,
+                    tipo_manifestante=nome_tipo,
+                    id_categoria=1,
+                    natureza=natureza,
+                    ativo=True,
+                )
             )
-        )
-    ).scalars().first()
-    if tem_tipo_manifestante is None:
-        db.add(
-            TipoManifestante(
-                tenant_id=tenant_id,
-                tipo_manifestante=TIPO_MANIFESTANTE_NOME,
-                id_categoria=1,
-                ativo=True,
-            )
-        )
+            # flush por tipo: garante a ordem dos ids (física antes da jurídica).
+            await db.flush()
 
     usuario = (
         await db.execute(

@@ -172,23 +172,32 @@ overlay `docker-compose.dev.yml`, que usa base absoluta.
 
 ### Seeds
 
-São **quatro**, com papéis distintos:
+São **cinco**, com papéis distintos:
 
 ```bash
 # 1. Pré-requisitos globais — roda a cada deploy, idempotente. Garante
 #    utils.sistema/nivel, o tenant+admin padrão, o segredo JWT e o catálogo
-#    protocolos.acao (ABERTURA/ENCAMINHAMENTO/RECEBIMENTO). Sem as ações não
+#    protocolos.acao (ABERTURA/ENCAMINHAMENTO/RECEBIMENTO/ARQUIVAMENTO e, desde
+#    o SI-62, DESPACHO). Sem as ações não
 #    se abre nem tramita processo. Garante também o catálogo de módulos e a
 #    CONTRATAÇÃO INICIAL do tenant — só quando ele não tem nenhuma linha em
 #    tenant_modulo, para não ressuscitar descontratação deliberada do admin.
 docker exec aprimora-py-backend python -m app.cli.seed_bootstrap
 
-# 2. Protocolo: 12 processos, 15 anexos, 6 serviços, manifestantes, servidores
+# 2. Protocolo: 12 processos, 15 anexos, 6 serviços, manifestantes, servidores,
+#    mais 8 processos tramitados pelos serviços (um em cada caixa de trabalho de
+#    quem abre a demo, com prazos para o destaque da caixa ter o que mostrar).
 docker exec aprimora-py-backend python -m app.cli.seed_demo apply --tenant sobral --allow-non-demo
+#    Em tenant que JÁ tem a demonstração e passou pelo seed 4, rode só a parte
+#    das caixas: o `apply` completo recriaria a unidade "Protocolo Geral", que
+#    o `seed_itaitinga` renomeou.
+docker exec aprimora-py-backend python -m app.cli.seed_demo caixas --tenant sobral --allow-non-demo
 
 # 3. Pagamentos/frota/transporte. Passa pelos SERVIÇOS: os débitos percorrem o
 #    rito real e as baixas geram movimentação de conta — é disso que a
 #    conciliação vive. `--modulo` limita a um deles; `reset`/`status` também.
+#    `--modulo protocolo` cria só o usuário comum de demonstração
+#    (`prot.servidor@ops.demo.test`), para mostrar a tela de quem não é admin.
 docker exec aprimora-py-backend python -m app.cli.seed_demo_operacional apply --tenant sobral --allow-non-demo
 
 # 4. Apresentação como Prefeitura de Itaitinga/CE: identidade (nome, brasão,
@@ -197,8 +206,17 @@ docker exec aprimora-py-backend python -m app.cli.seed_demo_operacional apply --
 #    táxi com coordenadas e trajetos de GPS, que são ilustrativos. Roda DEPOIS
 #    dos dois acima: renomeia as unidades fictícias do `seed_demo` para as
 #    secretarias reais. O mapa da frota mostra 24h, então repita
-#    `--parte demo` no dia da apresentação.
+#    `--parte demo` no dia da apresentação. A `--parte documento` (SI-53)
+#    cria o modelo de documento padrão; o brasão e o rodapé do documento NÃO
+#    vêm dele, e sim do papel timbrado (`services/papel_timbrado.py`), que lê
+#    a cópia do brasão em `backend/app/static/brand/`.
 docker exec aprimora-py-backend python -m app.cli.seed_itaitinga apply --tenant sobral --allow-non-demo
+
+# 5. Catálogo do protocolo (SI-54): 19 tipos de processo e 112 assuntos
+#    SUGERIDOS por IA para prefeitura de pequeno/médio porte, até a prefeitura
+#    trazer os dela. Só cria o que falta; não reativa, não renomeia, não move.
+#    Ver `docs/catalogo-protocolo.md`.
+docker exec aprimora-py-backend python -m app.cli.seed_catalogo_protocolo apply --tenant sobral --allow-non-demo
 ```
 
 `--allow-non-demo` é obrigatório fora de um tenant `demo*`. Na VPS o alvo tem de ser **`sobral`**: o acesso é por IP e o `TenantMiddleware` resolve tudo para o tenant padrão, então dados em outro tenant ficariam invisíveis.
@@ -322,6 +340,13 @@ a listagem — que filtra certo — dava a impressão de que o assunto estava re
 autenticado do tenant baixava anexo de processo ultrassecreto iterando o id. Hoje o carregador cru
 `get_anexo_path` é proibido em router (`tests/test_guarda_anexo_sigiloso.py`); use
 `get_anexo_path_autorizado`.
+
+A minuta repetiu o defeito até 2026-11-22 (SI-62): as rotas filtravam o tenant e mais nada, e o
+callback do OAuth do Google — sem `minuta_id` na assinatura, o id vem do `state` — copiava a minuta
+de processo sigiloso para a conta Google de quem pedisse. Hoje toda rota que mexe numa minuta chama
+`services.minutas.obter_minuta_autorizada`, e as que recebem o processo, `exigir_acesso_ao_processo`;
+`tests/test_guarda_minuta_sigilosa.py` reprova quem esquecer, inclusive a rota que chama um serviço
+de minuta por id sem receber `minuta_id`.
 
 Duas regras que saíram daquele conserto: **a autorização vem antes de resolver o recurso** (senão a
 mensagem de erro distingue "existe" de "não existe" para quem não pode saber), e **teste de service

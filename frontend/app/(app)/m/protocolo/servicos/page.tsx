@@ -6,20 +6,27 @@ import {
   FileText,
   Inbox,
   MessageSquareText,
+  Pause,
+  Pencil,
+  Play,
   Plus,
   Settings2,
   Trash2,
 } from "lucide-react";
 import { useState } from "react";
 
+import { BadgeAtivo } from "@/components/protocolo/BadgeAtivo";
+import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useConfirm } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterBar } from "@/components/ui/filter-bar";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { CampoComUnidade } from "@/components/ui/campo-com-unidade";
+import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { Select } from "@/components/ui/select";
@@ -28,8 +35,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import {
   api,
+  NIVEL_SIGILO_LABEL,
   protocoloApi,
   servicosApi,
+  type NivelSigilo,
   type Servico,
   type ServicoDocumento,
   type ServicoInput,
@@ -228,28 +237,25 @@ export default function ServicosPage() {
         icon={ClipboardList}
         title="Catálogo de Serviços"
         description="Carta de Serviços do município. Cadastre os serviços que aparecem no portal do cidadão."
+        actions={
+          canCreate && (
+            <Button onClick={openNew}>
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Novo serviço
+            </Button>
+          )
+        }
       />
 
-      <div
-        role="region"
-        aria-label="Filtros do catálogo"
-        data-testid="servicos-toolbar"
-        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface-1 p-3"
-      >
-        <label className="flex items-center gap-2 text-sm text-foreground-muted">
+      <FilterBar ariaLabel="Filtros do catálogo">
+        <label className="flex h-11 items-center gap-2 text-sm text-foreground-muted">
           <Checkbox
             checked={incluirInativos}
             onChange={(e) => setIncluirInativos(e.target.checked)}
           />
           Mostrar inativos
         </label>
-        {canCreate && (
-          <Button onClick={openNew}>
-            <Plus className="mr-1 h-4 w-4" />
-            Novo serviço
-          </Button>
-        )}
-      </div>
+      </FilterBar>
 
       {!servicosQ.isLoading && servicosQ.data && servicosQ.data.length === 0 ? (
         <EmptyState
@@ -299,23 +305,19 @@ export default function ServicosPage() {
                 <TD className="text-muted-foreground">{s.categoria ?? "—"}</TD>
                 <TD className="tabular-nums">{s.ordem_exibicao}</TD>
                 <TD>
-                  <Badge intent={s.ativo ? "success" : "neutral"}>
-                    {s.ativo ? "Ativo" : "Inativo"}
-                  </Badge>
+                  <BadgeAtivo ativo={s.ativo} />
                 </TD>
                 <TD className="text-right">
-                  <div className="inline-flex gap-2">
-                    {canEdit && (
-                      <Button variant="secondary" size="sm" onClick={() => openEdit(s)}>
-                        Editar
-                      </Button>
-                    )}
-                    {canEdit && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        disabled={toggleM.isPending}
-                        onClick={async () => {
+                  <AcoesDaLinha
+                    acoes={[
+                      { label: "Editar", icon: Pencil, oculta: !canEdit, onClick: () => openEdit(s) },
+                      {
+                        label: s.ativo ? "Desativar" : "Ativar",
+                        icon: s.ativo ? Pause : Play,
+                        perigo: s.ativo,
+                        oculta: !canEdit,
+                        disabled: toggleM.isPending,
+                        onClick: async () => {
                           const ok = await confirm({
                             title: s.ativo ? "Desativar serviço" : "Ativar serviço",
                             message: s.ativo
@@ -324,12 +326,10 @@ export default function ServicosPage() {
                             confirmLabel: s.ativo ? "Desativar" : "Ativar",
                           });
                           if (ok) toggleM.mutate({ id: s.id, ativo: !s.ativo });
-                        }}
-                      >
-                        {s.ativo ? "Desativar" : "Ativar"}
-                      </Button>
-                    )}
-                  </div>
+                        },
+                      },
+                    ]}
+                  />
                 </TD>
               </TR>
             ))}
@@ -340,15 +340,15 @@ export default function ServicosPage() {
       <Dialog
         open={dialogOpen}
         onClose={closeDialog}
-        title={editing ? `Editar — ${editing.nome}` : "Novo serviço"}
+        title={editing ? `Editar serviço — ${editing.nome}` : "Novo serviço"}
         size="lg"
         footer={
           <>
-            <Button variant="secondary" onClick={closeDialog}>
+            <Button variant="ghost" onClick={closeDialog}>
               Cancelar
             </Button>
-            <Button onClick={salvar} disabled={saveM.isPending}>
-              {saveM.isPending ? "Salvando..." : "Salvar"}
+            <Button onClick={salvar} loading={saveM.isPending}>
+              {saveM.isPending ? "Salvando…" : editing ? "Salvar alterações" : "Criar serviço"}
             </Button>
           </>
         }
@@ -359,17 +359,20 @@ export default function ServicosPage() {
             title="Identificação do serviço"
             description="Como o serviço aparece no portal do cidadão (nome, categoria, descrições)."
           >
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="sm:col-span-2">
-                <Label htmlFor="nome" required>
-                  Nome
-                </Label>
-                <Input id="nome" value={form.nome} onChange={(e) => onNomeChange(e.target.value)} />
-              </div>
-              <div>
-                <Label htmlFor="slug" required>
-                  Slug
-                </Label>
+            <FormField label="Nome" required hint="Como o cidadão procura o serviço.">
+              <Input
+                id="nome"
+                value={form.nome}
+                onChange={(e) => onNomeChange(e.target.value)}
+                placeholder="Ex.: Poda de árvore"
+              />
+            </FormField>
+            <GradeCampos>
+              <FormField
+                label="Slug"
+                required
+                hint="Endereço na URL: minúsculas, números e hífens (3 a 80). Sai do nome sozinho."
+              >
                 <Input
                   id="slug"
                   value={form.slug}
@@ -378,112 +381,153 @@ export default function ServicosPage() {
                     set("slug", e.target.value);
                   }}
                   className="font-mono"
+                  placeholder="Ex.: poda-de-arvore"
                 />
-                <p className="mt-1 text-xs text-foreground-muted">
-                  Identificador na URL. Minúsculas, números e hífens (3–80 caracteres).
-                </p>
-              </div>
-              <div>
-                <Label htmlFor="categoria">Categoria</Label>
-                <Input id="categoria" value={form.categoria ?? ""} onChange={(e) => set("categoria", e.target.value)} />
-                <p className="mt-1 text-xs text-foreground-muted">
-                  Agrupa serviços relacionados no portal.
-                </p>
-              </div>
-              <div className="sm:col-span-2">
-                <Label htmlFor="desc-curta">Descrição curta</Label>
-                <Input id="desc-curta" maxLength={300} value={form.descricao_curta ?? ""} onChange={(e) => set("descricao_curta", e.target.value)} />
-                <p className="mt-1 text-xs text-foreground-muted">
-                  Resumo exibido nos cards de listagem (até 300 caracteres).
-                </p>
-              </div>
-              <div className="sm:col-span-2">
-                <Label htmlFor="desc-det">Descrição detalhada</Label>
-                <Textarea id="desc-det" rows={3} value={form.descricao_detalhada ?? ""} onChange={(e) => set("descricao_detalhada", e.target.value)} />
-              </div>
-              <div className="sm:col-span-2">
-                <Label htmlFor="publico">Público-alvo</Label>
-                <Input id="publico" value={form.publico_alvo ?? ""} onChange={(e) => set("publico_alvo", e.target.value)} />
-                <p className="mt-1 text-xs text-foreground-muted">
-                  Quem pode solicitar (ex.: pessoa física, microempreendedor).
-                </p>
-              </div>
-            </div>
+              </FormField>
+              <FormField label="Categoria" hint="Agrupa serviços parecidos no portal.">
+                <Input
+                  id="categoria"
+                  value={form.categoria ?? ""}
+                  onChange={(e) => set("categoria", e.target.value)}
+                  placeholder="Ex.: Meio ambiente"
+                />
+              </FormField>
+            </GradeCampos>
+            <FormField
+              label="Descrição curta"
+              hint={`Resumo nos cards da listagem. ${(form.descricao_curta ?? "").length}/300`}
+            >
+              <Input
+                id="desc-curta"
+                maxLength={300}
+                value={form.descricao_curta ?? ""}
+                onChange={(e) => set("descricao_curta", e.target.value)}
+                placeholder="Ex.: Peça a poda de árvores em vias e praças públicas."
+              />
+            </FormField>
+            <FormField label="Descrição detalhada">
+              <Textarea
+                id="desc-det"
+                rows={3}
+                value={form.descricao_detalhada ?? ""}
+                onChange={(e) => set("descricao_detalhada", e.target.value)}
+              />
+            </FormField>
+            <FormField label="Público-alvo" hint="Quem pode pedir o serviço.">
+              <Input
+                id="publico"
+                value={form.publico_alvo ?? ""}
+                onChange={(e) => set("publico_alvo", e.target.value)}
+                placeholder="Ex.: Pessoa física, microempreendedor"
+              />
+            </FormField>
           </SectionCard>
 
           <SectionCard
             icon={Settings2}
             title="Configuração operacional"
-            description="Parâmetros internos: roteamento, prazo, destaque. Não aparecem ao cidadão."
+            description="Para onde o pedido vai e como nasce o processo. Não aparece ao cidadão."
           >
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <Label htmlFor="unidade">Unidade responsável</Label>
-                <Select id="unidade" value={form.id_unidade_responsavel ?? ""} onChange={(e) => set("id_unidade_responsavel", e.target.value ? Number(e.target.value) : null)}>
-                  <option value="">—</option>
-                  {unidadesQ.data?.items.map((u) => (
-                    <option key={u.id} value={u.id}>{u.unidade_trabalho}</option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="assunto">Assunto padrão</Label>
-                <Select id="assunto" value={form.id_assunto_padrao ?? ""} onChange={(e) => set("id_assunto_padrao", e.target.value ? Number(e.target.value) : null)}>
-                  <option value="">—</option>
-                  {assuntosQ.data?.map((a) => (
-                    <option key={a.id} value={a.id}>{a.assunto}</option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="tipo">Tipo de processo padrão</Label>
-                <Select id="tipo" value={form.id_tipo_processo_padrao ?? ""} onChange={(e) => set("id_tipo_processo_padrao", e.target.value ? Number(e.target.value) : null)}>
-                  <option value="">—</option>
+            <FormField label="Unidade responsável" hint="Recebe os processos abertos por este serviço.">
+              <Select
+                id="unidade"
+                value={form.id_unidade_responsavel ?? ""}
+                onChange={(e) => set("id_unidade_responsavel", e.target.value ? Number(e.target.value) : null)}
+              >
+                <option value="">Nenhuma</option>
+                {unidadesQ.data?.items.map((u) => (
+                  <option key={u.id} value={u.id}>{u.unidade_trabalho}</option>
+                ))}
+              </Select>
+            </FormField>
+            <GradeCampos>
+              <FormField label="Tipo de processo padrão">
+                <Select
+                  id="tipo"
+                  value={form.id_tipo_processo_padrao ?? ""}
+                  onChange={(e) => set("id_tipo_processo_padrao", e.target.value ? Number(e.target.value) : null)}
+                >
+                  <option value="">Nenhum</option>
                   {tiposQ.data?.map((t) => (
                     <option key={t.id} value={t.id}>{t.tipo_processo}</option>
                   ))}
                 </Select>
-              </div>
-              <div>
-                <Label htmlFor="especie">Espécie documental padrão</Label>
-                <Select id="especie" value={form.id_especie_documental_padrao ?? ""} onChange={(e) => set("id_especie_documental_padrao", e.target.value ? Number(e.target.value) : null)}>
-                  <option value="">—</option>
+              </FormField>
+              <FormField label="Assunto padrão">
+                <Select
+                  id="assunto"
+                  value={form.id_assunto_padrao ?? ""}
+                  onChange={(e) => set("id_assunto_padrao", e.target.value ? Number(e.target.value) : null)}
+                >
+                  <option value="">Nenhum</option>
+                  {assuntosQ.data?.map((a) => (
+                    <option key={a.id} value={a.id}>{a.assunto}</option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="Espécie documental padrão">
+                <Select
+                  id="especie"
+                  value={form.id_especie_documental_padrao ?? ""}
+                  onChange={(e) => set("id_especie_documental_padrao", e.target.value ? Number(e.target.value) : null)}
+                >
+                  <option value="">Nenhuma</option>
                   {especiesQ.data?.map((e) => (
                     <option key={e.id} value={e.id}>{e.nome}</option>
                   ))}
                 </Select>
-              </div>
-              <div>
-                <Label htmlFor="sigilo">Nível de sigilo padrão</Label>
-                <Select id="sigilo" value={form.nivel_sigilo_padrao ?? "ostensivo"} onChange={(e) => set("nivel_sigilo_padrao", e.target.value)}>
+              </FormField>
+              <FormField label="Nível de sigilo padrão">
+                <Select
+                  id="sigilo"
+                  value={form.nivel_sigilo_padrao ?? "ostensivo"}
+                  onChange={(e) => set("nivel_sigilo_padrao", e.target.value)}
+                >
                   {NIVEIS_SIGILO.map((n) => (
-                    <option key={n} value={n}>{n}</option>
+                    <option key={n} value={n}>
+                      {NIVEL_SIGILO_LABEL[n as NivelSigilo] ?? n}
+                    </option>
                   ))}
                 </Select>
-              </div>
-              <div>
-                <Label htmlFor="prazo">Prazo estimado (dias)</Label>
-                <Input
+              </FormField>
+              <FormField
+                label="Prazo estimado"
+                hint="Mostrado ao cidadão como previsão, não como promessa."
+              >
+                <CampoComUnidade
                   id="prazo"
                   type="number"
                   min={0}
+                  sufixo="dias"
                   value={form.prazo_estimado_dias ?? ""}
                   onChange={(e) => set("prazo_estimado_dias", e.target.value ? Number(e.target.value) : null)}
+                  placeholder="Ex.: 15"
                 />
-                <p className="mt-1 text-xs text-foreground-muted">
-                  Estimativa exibida ao cidadão como previsão (não é uma promessa).
+              </FormField>
+              <FormField label="Ordem de exibição" hint="Menor número aparece primeiro.">
+                <Input
+                  id="ordem"
+                  type="number"
+                  value={form.ordem_exibicao ?? 0}
+                  onChange={(e) => set("ordem_exibicao", e.target.value ? Number(e.target.value) : 0)}
+                />
+              </FormField>
+            </GradeCampos>
+            <div className="flex items-start gap-2.5 rounded-md border border-border bg-surface-1 px-3 py-2.5">
+              <Checkbox
+                id="destaque"
+                checked={form.destaque ?? false}
+                onChange={(e) => set("destaque", e.target.checked)}
+                className="mt-0.5 h-4 w-4"
+                aria-describedby="destaque-dica"
+              />
+              <div className="text-sm">
+                <label htmlFor="destaque" className="block cursor-pointer font-medium text-foreground">
+                  Destaque no portal
+                </label>
+                <p id="destaque-dica" className="text-xs text-foreground-muted">
+                  Aparece em destaque no portal do cidadão.
                 </p>
-              </div>
-              <div>
-                <Label htmlFor="ordem">Ordem de exibição</Label>
-                <Input id="ordem" type="number" value={form.ordem_exibicao ?? 0} onChange={(e) => set("ordem_exibicao", e.target.value ? Number(e.target.value) : 0)} />
-                <p className="mt-1 text-xs text-foreground-muted">
-                  Menor número aparece primeiro na listagem.
-                </p>
-              </div>
-              <div className="flex items-center gap-2 sm:col-span-2">
-                <Checkbox id="destaque" checked={form.destaque ?? false} onChange={(e) => set("destaque", e.target.checked)} />
-                <Label htmlFor="destaque" className="!mb-0">Destaque no portal</Label>
               </div>
             </div>
           </SectionCard>
@@ -493,83 +537,94 @@ export default function ServicosPage() {
             title="Orientações ao cidadão"
             description="Textos e documentos solicitados que o cidadão verá ao abrir o serviço."
           >
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="instrucoes">Instruções ao cidadão</Label>
-                <Textarea id="instrucoes" rows={3} value={form.instrucoes_cidadao ?? ""} onChange={(e) => set("instrucoes_cidadao", e.target.value)} />
-                <p className="mt-1 text-xs text-foreground-muted">
-                  Passo a passo ou observações importantes para quem vai solicitar.
-                </p>
-              </div>
+            <FormField
+              label="Instruções ao cidadão"
+              hint="Passo a passo ou observações importantes para quem vai pedir."
+            >
+              <Textarea
+                id="instrucoes"
+                rows={3}
+                value={form.instrucoes_cidadao ?? ""}
+                onChange={(e) => set("instrucoes_cidadao", e.target.value)}
+              />
+            </FormField>
 
-              <div>
-                <div className="mb-2 flex items-center justify-between">
-                  <div>
-                    <Label className="!mb-0">Documentos exigidos</Label>
-                    <p className="mt-0.5 text-xs text-foreground-muted">
-                      Lista mostrada ao cidadão no momento da solicitação. Marque como obrigatório o que bloqueia o envio.
-                    </p>
+            <div>
+              <div className="mb-2 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Documentos exigidos</p>
+                  <p className="mt-0.5 text-xs text-foreground-muted">
+                    Lista mostrada ao cidadão ao pedir o serviço. Marque como obrigatório o que bloqueia o envio.
+                  </p>
+                </div>
+                <Button type="button" variant="secondary" size="sm" onClick={addDoc}>
+                  <Plus className="h-3.5 w-3.5" aria-hidden="true" /> Adicionar documento
+                </Button>
+              </div>
+              <div className="space-y-2 rounded-md border border-border bg-surface-1 p-3" data-testid="servicos-docs-area">
+                {(form.documentos_exigidos ?? []).length === 0 ? (
+                  <div className="flex flex-col items-center justify-center gap-1 py-4 text-center text-xs text-foreground-muted">
+                    <p>Nenhum documento exigido.</p>
+                    <p>Clique em &quot;Adicionar documento&quot; para listar o que o cidadão deve enviar.</p>
                   </div>
-                  <Button type="button" variant="secondary" size="sm" onClick={addDoc}>
-                    <Plus className="mr-1 h-3.5 w-3.5" /> Adicionar
-                  </Button>
-                </div>
-                <div className="space-y-2 rounded-md border border-border bg-surface-1 p-3" data-testid="servicos-docs-area">
-                  {(form.documentos_exigidos ?? []).length === 0 ? (
-                    <div className="flex flex-col items-center justify-center gap-1 py-4 text-center text-xs text-foreground-muted">
-                      <p>Nenhum documento exigido.</p>
-                      <p>Clique em &quot;Adicionar&quot; para listar um documento que o cidadão deve enviar.</p>
-                    </div>
-                  ) : (
-                    (form.documentos_exigidos ?? []).map((d, i) => (
-                      <div
-                        key={i}
-                        className="rounded-md border border-border bg-surface-2 p-2"
-                        data-testid="servicos-doc-item"
-                      >
-                        <div className="flex items-center gap-2">
-                          <Input
-                            placeholder="Nome do documento"
-                            value={d.nome}
-                            onChange={(e) => updateDoc(i, { nome: e.target.value })}
-                            className="flex-1"
-                            aria-label={`Documento ${i + 1} — nome`}
-                          />
-                          <label className="flex shrink-0 items-center gap-1 text-xs">
-                            <Checkbox checked={d.obrigatorio} onChange={(e) => updateDoc(i, { obrigatorio: e.target.checked })} />
-                            Obrigatório
-                          </label>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => removeDoc(i)}
-                            aria-label={`Remover documento ${i + 1}`}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
+                ) : (
+                  (form.documentos_exigidos ?? []).map((d, i) => (
+                    <div
+                      key={i}
+                      className="rounded-md border border-border bg-surface-2 p-2"
+                      data-testid="servicos-doc-item"
+                    >
+                      <div className="flex items-center gap-2">
                         <Input
-                          placeholder="Descrição (opcional)"
-                          value={d.descricao ?? ""}
-                          onChange={(e) => updateDoc(i, { descricao: e.target.value })}
-                          className="mt-2"
-                          aria-label={`Documento ${i + 1} — descrição`}
+                          placeholder="Ex.: RG ou CNH"
+                          value={d.nome}
+                          onChange={(e) => updateDoc(i, { nome: e.target.value })}
+                          className="flex-1"
+                          aria-label={`Documento ${i + 1} — nome`}
                         />
+                        <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-foreground">
+                          <Checkbox
+                            checked={d.obrigatorio}
+                            onChange={(e) => updateDoc(i, { obrigatorio: e.target.checked })}
+                            className="h-4 w-4"
+                          />
+                          Obrigatório
+                        </label>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeDoc(i)}
+                          aria-label={`Remover documento ${i + 1}`}
+                        >
+                          <Trash2 className="h-4 w-4" aria-hidden="true" />
+                        </Button>
                       </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <Label htmlFor="confirmacao">Texto de confirmação</Label>
-                <Textarea id="confirmacao" rows={2} value={form.texto_confirmacao ?? ""} onChange={(e) => set("texto_confirmacao", e.target.value)} />
-                <p className="mt-1 text-xs text-foreground-muted">
-                  Mensagem exibida ao cidadão após o envio da solicitação.
-                </p>
+                      <Input
+                        placeholder="Descrição, se precisar (ex.: frente e verso, legível)"
+                        value={d.descricao ?? ""}
+                        onChange={(e) => updateDoc(i, { descricao: e.target.value })}
+                        className="mt-2"
+                        aria-label={`Documento ${i + 1} — descrição`}
+                      />
+                    </div>
+                  ))
+                )}
               </div>
             </div>
+
+            <FormField
+              label="Texto de confirmação"
+              hint="Mensagem que o cidadão vê depois de enviar o pedido."
+            >
+              <Textarea
+                id="confirmacao"
+                rows={2}
+                value={form.texto_confirmacao ?? ""}
+                onChange={(e) => set("texto_confirmacao", e.target.value)}
+                placeholder="Ex.: Recebemos seu pedido. Acompanhe pelo número do protocolo."
+              />
+            </FormField>
           </SectionCard>
 
           {err && (

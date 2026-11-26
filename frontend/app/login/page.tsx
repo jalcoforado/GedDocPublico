@@ -1,26 +1,72 @@
 "use client";
 
-import { ArrowRight, ShieldCheck, Sparkles, Zap } from "lucide-react";
+import { ShieldCheck, User, Users } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { AssinaturaAprimora } from "@/components/AssinaturaAprimora";
+import { AtalhosPublicos, CAMPO_LOGIN, CAMPO_SENHA_LOGIN } from "@/components/login/comum";
+import { EsqueciSenha } from "@/components/login/EsqueciSenha";
+import { EtapaCodigo } from "@/components/login/EtapaCodigo";
 import { PasswordInput } from "@/components/ui/password-input";
-import { api } from "@/lib/api";
+import { type LoginResponse, api } from "@/lib/api";
 import { useBranding } from "@/lib/branding";
 import { destinoDaQuery } from "@/lib/destino-login";
 
 const DEV = process.env.NODE_ENV !== "production";
+
+// Só o E-MAIL é lembrado. Guardar a senha no navegador deixaria a credencial
+// em texto claro em `localStorage`, ao alcance de qualquer script da página.
+const CHAVE_EMAIL_LEMBRADO = "aprimora_login_email";
+
+function emailLembrado(): string | null {
+  try {
+    return window.localStorage.getItem(CHAVE_EMAIL_LEMBRADO);
+  } catch {
+    return null;
+  }
+}
+
+function gravarEmailLembrado(email: string | null): void {
+  try {
+    if (email) window.localStorage.setItem(CHAVE_EMAIL_LEMBRADO, email);
+    else window.localStorage.removeItem(CHAVE_EMAIL_LEMBRADO);
+  } catch {
+    // Armazenamento bloqueado (aba anônima etc.): o login segue sem lembrar.
+  }
+}
 
 export default function LoginPage() {
   const router = useRouter();
   const branding = useBranding();
   const [email, setEmail] = useState(DEV ? "admin@local.test" : "");
   const [senha, setSenha] = useState(DEV ? "admin123" : "");
+  const [lembrar, setLembrar] = useState(false);
+  // Passos da tela: senha → (2FA) código; "Não lembro a senha" troca o
+  // formulário pelo pedido de link.
+  const [etapa, setEtapa] = useState<"senha" | "codigo" | "esqueci">("senha");
+  const [desafio, setDesafio] = useState<{ token: string; email: string | null } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A foto entra com fade quando termina de carregar. Sem isso, em conexão
+  // lenta ela era pintada de cima para baixo, aos pedaços, por vários
+  // segundos. O `ref` cobre o caso em que o navegador já a tinha em cache e o
+  // `load` dispara antes de o React anexar o `onLoad`.
+  const fotoRef = useRef<HTMLImageElement>(null);
+  const [fotoPronta, setFotoPronta] = useState(false);
+  const fotoUrl = branding?.imagem_login_url ?? null;
+  useEffect(() => {
+    setFotoPronta(fotoRef.current?.complete === true && fotoRef.current.naturalWidth > 0);
+  }, [fotoUrl]);
+
+  useEffect(() => {
+    const salvo = emailLembrado();
+    if (salvo) {
+      setEmail(salvo);
+      setLembrar(true);
+    }
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -34,6 +80,23 @@ export default function LoginPage() {
       // Sem must_change_password, o destino do login bem-sucedido é o
       // launcher de módulos (F2 Task 5) — não mais o dashboard fixo /home.
       const r = await api.login(email, senha);
+      gravarEmailLembrado(lembrar ? email : null);
+      if (r.requer_2fa && r.desafio) {
+        // 2FA por e-mail (0136): a senha passou, mas a sessão só sai com o
+        // código. Este computador não está entre os lembrados.
+        setDesafio({ token: r.desafio, email: r.email_mascarado ?? null });
+        setEtapa("codigo");
+        return;
+      }
+      entrou(r);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao autenticar");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function entrou(r: LoginResponse) {
       // `must_change_password` tem PRECEDÊNCIA sobre o `next` (SEC-1). O
       // destino guardado na URL é conveniência de navegação; a troca de senha
       // obrigatória é decisão do backend, e deixá-la ser pulada por um
@@ -47,208 +110,237 @@ export default function LoginPage() {
           ? "/alterar-senha-obrigatoria"
           : destinoDaQuery(window.location.search),
       );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao autenticar");
-    } finally {
-      setLoading(false);
-    }
   }
 
+  function voltarAoLogin() {
+    setEtapa("senha");
+    setDesafio(null);
+    setError(null);
+  }
+
+  const nome = branding?.nome ?? "Aprimora";
+  // Tinta do painel da cidade: a cor de destaque do município, senão a
+  // primária, senão a marca. Vai por `style` porque vem do banco — não há
+  // classe do Tailwind para um valor só conhecido em runtime.
+  const tinta = branding?.cor_destaque ?? branding?.cor_primaria ?? "hsl(var(--brand))";
+
+
+  // Layout de referência: protótipo Figma "Sistema - Aprimora" (tela de login).
   return (
-    <main className="grid min-h-dvh lg:grid-cols-2">
-      {/* === Hero (esquerda) — só desktop === */}
+    // Painel da cidade a ~58% da largura, como na arte de Itaitinga
+    // (apresentação de 2026-10-21): a foto é quase quadrada, e com o painel a
+    // 50% o `cover` cortava as laterais. O formulário tem `max-w-sm` e cabe
+    // folgado nos 42% restantes.
+    <main className="grid min-h-dvh lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+      {/* === Painel da cidade (esquerda) — só desktop ===
+          Empilhamento pela ORDEM do DOM (foto → faixa → crédito), sem z-index
+          local: cada camada posicionada cobre a anterior.
+
+          A foto vai em COR e sem véu. Até 2026-10-10 era um duotone (tons de
+          cinza multiplicados pela cor do município), que só funcionava com cor
+          escura e saturada; depois virou um véu na cor do município subindo da
+          base. Saiu em 2026-10-21, quando Itaitinga mandou uma arte pronta, com
+          as cores dela: o véu laranja tingia o pórtico. A cor do município
+          continua no fundo do painel — é o que aparece enquanto a foto carrega
+          e quando o tenant não tem foto. */}
       <aside
-        className="
-          relative hidden flex-col justify-between overflow-hidden p-12 text-white lg:flex
-        "
-        style={{
-          background: branding?.cor_primaria
-            ? `linear-gradient(135deg, ${branding.cor_primaria} 0%, ${branding.cor_primaria}dd 50%, hsl(var(--accent)) 200%)`
-            : "linear-gradient(135deg, hsl(var(--brand)) 0%, hsl(var(--brand-light)) 60%, hsl(var(--accent)) 200%)",
-        }}
+        className="relative hidden overflow-hidden lg:block"
+        style={{ backgroundColor: tinta }}
       >
-        {/* Dot grid decorativo */}
-        <div
-          className="absolute inset-0 opacity-[0.08]"
-          style={{
-            backgroundImage:
-              "radial-gradient(white 1.5px, transparent 1.5px)",
-            backgroundSize: "24px 24px",
-          }}
-          aria-hidden="true"
-        />
-        {/* Glow round decorativo */}
-        <div
-          className="absolute -right-32 -top-32 h-96 w-96 rounded-full opacity-25 blur-3xl"
-          style={{ background: "hsl(var(--accent))" }}
-          aria-hidden="true"
-        />
-
-        {/* Brand mark */}
-        <div className="relative z-10 flex items-center gap-3">
-          {branding?.logo_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={branding.logo_url}
-              alt={branding.nome}
-              className="h-12 w-12 rounded-lg object-cover ring-1 ring-white/20"
+        {fotoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            ref={fotoRef}
+            src={fotoUrl}
+            alt=""
+            // É a maior imagem da tela: pede prioridade de rede.
+            fetchPriority="high"
+            decoding="async"
+            onLoad={() => setFotoPronta(true)}
+            // Onde o painel é mais estreito que a foto (tela de 1024 px), o
+            // `cover` corta as laterais. Ancorar a 15% da largura poupa o texto
+            // da arte, à esquerda, e corta mais da borda direita.
+            className={`absolute inset-0 h-full w-full object-cover object-[15%_50%] transition-opacity duration-slow motion-reduce:transition-none ${
+              fotoPronta ? "opacity-100" : "opacity-0"
+            }`}
+          />
+        ) : null}
+        {branding?.imagem_login_credito ? (
+          <>
+            {/* Faixa escura só no rodapé, para o crédito ler sobre qualquer cor. */}
+            <div
+              className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/50 to-transparent"
+              aria-hidden="true"
             />
-          ) : (
-            <div className="inline-flex h-12 w-12 items-center justify-center rounded-lg bg-white/10 backdrop-blur ring-1 ring-white/20">
-              <span className="text-lg font-bold tracking-tight">A</span>
-            </div>
-          )}
-          <div>
-            <div className="text-sm font-semibold tracking-tight">
-              {branding?.nome ?? "Aprimora"}
-            </div>
-            <div className="text-[11px] uppercase tracking-wider opacity-70">
-              Plataforma de Gestão
-            </div>
-          </div>
-        </div>
-
-        {/* Tagline */}
-        <div className="relative z-10 max-w-md space-y-6">
-          <h1 className="text-4xl font-bold leading-tight tracking-tight">
-            Processos administrativos,{" "}
-            <span className="text-accent-light">com fluidez de software moderno.</span>
-          </h1>
-          <p className="text-base leading-relaxed opacity-80">
-            Workflow visual, SLA por etapa, notificações multi-canal e
-            auditoria completa — feito sob medida para prefeituras.
-          </p>
-
-          {/* Pills com features-chave */}
-          <ul className="flex flex-wrap gap-2 pt-2">
-            {[
-              { icon: Zap, label: "Workflow visual" },
-              { icon: ShieldCheck, label: "Auditoria completa" },
-              { icon: Sparkles, label: "BI executivo" },
-            ].map(({ icon: Icon, label }) => (
-              <li
-                key={label}
-                className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-medium backdrop-blur ring-1 ring-white/15"
-              >
-                <Icon className="h-3 w-3" aria-hidden="true" />
-                {label}
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        {/* Footer credit */}
-        <div className="relative z-10 text-[10px] uppercase tracking-wider opacity-50">
-          © {new Date().getFullYear()} Aprimora — todos os direitos reservados
-        </div>
+            {/* Atribuição exigida pela licença da foto: fica legível, não
+                escondida de leitor de tela. */}
+            <p className="absolute bottom-3 left-4 right-4 text-[11px] text-white/80">
+              {branding.imagem_login_credito}
+            </p>
+          </>
+        ) : null}
       </aside>
 
-      {/* === Form (direita) === */}
-      <section className="flex items-center justify-center bg-background p-6 sm:p-12">
-        <div className="w-full max-w-sm">
-          {/* Brand mark mobile-only */}
-          <div className="mb-8 flex items-center gap-3 lg:hidden">
-            {branding?.logo_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={branding.logo_url}
-                alt={branding.nome}
-                className="h-11 w-11 rounded-lg object-cover"
-              />
-            ) : (
-              <div className="inline-flex h-11 w-11 items-center justify-center rounded-lg bg-brand-gradient text-base font-bold text-white shadow-brand">
-                A
-              </div>
-            )}
-            <div>
-              <div className="text-base font-semibold tracking-tight">
-                {branding?.nome ?? "Aprimora"}
-              </div>
-              <div className="text-[10px] uppercase tracking-wider text-foreground-subtle">
-                Gestão de processos
-              </div>
-            </div>
-          </div>
-
-          <h2 className="text-2xl font-semibold tracking-tight text-foreground">
-            Bem-vindo de volta
-          </h2>
-          <p className="mt-1 text-sm text-foreground-muted">
-            Entre com seu acesso institucional pra continuar.
-          </p>
-
-          <form onSubmit={handleSubmit} className="mt-8 space-y-4" noValidate>
-            <div>
-              <Label htmlFor="email" required>
-                E-mail
-              </Label>
-              <Input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoComplete="username"
-                inputMode="email"
-                placeholder="seu.nome@prefeitura.gov.br"
-                required
-              />
-            </div>
-            <div>
-              <div className="flex items-center justify-between">
-                <Label htmlFor="senha" required>
-                  Senha
-                </Label>
-                {/* Slot pra "Esqueci minha senha" futuro */}
-                {/* <Link className="text-xs text-brand hover:underline" href="/recuperar-senha">
-                  Esqueci minha senha
-                </Link> */}
-              </div>
-              <PasswordInput
-                id="senha"
-                value={senha}
-                onChange={(e) => setSenha(e.target.value)}
-                autoComplete="current-password"
-                required
-              />
-            </div>
-
-            {error && (
-              <div
-                role="alert"
-                className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
-              >
-                {error}
-              </div>
-            )}
-
-            <Button
-              type="submit"
-              disabled={loading}
-              size="lg"
-              className="w-full justify-center gap-2"
-            >
-              {loading ? (
-                "Entrando..."
+      {/* === Formulário (direita) === */}
+      <section className="flex flex-col bg-background p-6 sm:p-12">
+        <div className="flex flex-1 items-center justify-center">
+          <div className="w-full max-w-sm motion-safe:animate-slide-up">
+            <div className="flex flex-col items-center text-center">
+              {branding?.logo_login_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={branding.logo_login_url}
+                  alt={nome}
+                  className="max-h-28 w-auto max-w-full object-contain"
+                />
               ) : (
-                <>
-                  Entrar
-                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
-                </>
+                <div className="flex items-center gap-3">
+                  {branding?.logo_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={branding.logo_url}
+                      alt=""
+                      className="h-14 w-14 rounded-lg object-contain"
+                    />
+                  ) : (
+                    <div className="inline-flex h-14 w-14 items-center justify-center rounded-lg bg-brand-gradient font-display text-xl font-bold text-white shadow-brand">
+                      A
+                    </div>
+                  )}
+                  <div className="text-left font-display text-lg font-semibold tracking-tight text-foreground">
+                    {nome}
+                  </div>
+                </div>
               )}
-            </Button>
+              <h1 className="mt-8 text-2xl font-normal text-foreground-muted">
+                {etapa === "codigo" ? "Confirme que é você" : etapa === "esqueci" ? "Nova senha" : "Login"}
+              </h1>
+            </div>
 
-            {DEV && (
-              <p className="text-center text-[11px] text-foreground-subtle">
-                Modo dev — credenciais pré-preenchidas
-              </p>
+            {etapa === "codigo" && desafio && (
+              <EtapaCodigo
+                desafio={desafio.token}
+                emailMascarado={desafio.email}
+                onEntrou={entrou}
+                onVoltar={voltarAoLogin}
+              />
             )}
-          </form>
+            {etapa === "esqueci" && <EsqueciSenha emailInicial={email} onVoltar={voltarAoLogin} />}
 
-          <p className="mt-8 text-center text-[11px] text-foreground-subtle">
-            Acesso seguro com auditoria de ações. Em caso de problemas, contate a
-            TI da prefeitura.
-          </p>
+            {etapa === "senha" && (
+            <form onSubmit={handleSubmit} className="mt-5 space-y-3.5" noValidate>
+              <div>
+                <label htmlFor="email" className="sr-only">
+                  E-mail
+                </label>
+                <input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="username"
+                  inputMode="email"
+                  placeholder="E-mail"
+                  required
+                  className={CAMPO_LOGIN}
+                />
+              </div>
+              <div>
+                <label htmlFor="senha" className="sr-only">
+                  Senha
+                </label>
+                <PasswordInput
+                  id="senha"
+                  value={senha}
+                  onChange={(e) => setSenha(e.target.value)}
+                  autoComplete="current-password"
+                  placeholder="Senha"
+                  required
+                  className={CAMPO_SENHA_LOGIN}
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-3 px-4 pt-1 text-sm">
+                <label className="inline-flex cursor-pointer items-center gap-2 text-foreground-muted">
+                  <input
+                    type="checkbox"
+                    checked={lembrar}
+                    onChange={(e) => setLembrar(e.target.checked)}
+                    className="peer sr-only"
+                  />
+                  <ShieldCheck
+                    className="h-5 w-5 text-accent opacity-50 transition-opacity duration-fast peer-checked:opacity-100 peer-focus-visible:ring-2 peer-focus-visible:ring-ring"
+                    aria-hidden="true"
+                  />
+                  Lembrar meu usuário
+                </label>
+                {/* Só com a conta por e-mail ligada: sem ela o link não chegaria. */}
+                {branding?.conta_por_email && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setError(null);
+                      setEtapa("esqueci");
+                    }}
+                    className="-mx-1.5 rounded px-1.5 py-0.5 text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    Não lembro a senha
+                  </button>
+                )}
+              </div>
+
+              {error && (
+                <div
+                  role="alert"
+                  className="rounded-2xl border border-danger/30 bg-danger-soft px-4 py-2 text-sm text-danger-soft-foreground"
+                >
+                  {error}
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3 pt-3">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  aria-label="Entrar como servidor"
+                  className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-primary px-4 font-display text-base font-medium text-primary-foreground shadow-sm transition-all duration-fast hover:bg-primary/90 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Users className="h-5 w-5" aria-hidden="true" />
+                  {loading ? "Entrando..." : "Servidor"}
+                </button>
+                <Link
+                  href="/cidadao/login"
+                  aria-label="Acessar como solicitante (portal do cidadão)"
+                  className="inline-flex h-12 items-center justify-center gap-2 rounded-full border border-accent px-4 font-display text-base font-medium text-accent-dark transition-colors duration-fast hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                >
+                  <User className="h-5 w-5" aria-hidden="true" />
+                  Solicitante
+                </Link>
+              </div>
+
+              {DEV && (
+                <p className="text-center text-[11px] text-foreground-subtle">
+                  Modo dev — credenciais pré-preenchidas
+                </p>
+              )}
+            </form>
+            )}
+
+            <p className="mt-8 px-2 text-sm text-foreground-muted">
+              Ainda não tem acesso?{" "}
+              <Link
+                href="/cidadao/cadastrar"
+                className="font-semibold text-accent-dark underline-offset-2 hover:underline"
+              >
+                Crie uma conta
+              </Link>
+            </p>
+
+            <AtalhosPublicos className="mt-8" />
+          </div>
         </div>
+
+        <AssinaturaAprimora className="pt-8" />
       </section>
     </main>
   );

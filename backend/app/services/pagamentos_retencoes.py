@@ -123,12 +123,21 @@ async def excluir_retencao(db: AsyncSession, *, tenant_id: int, retencao_id: int
 
 
 async def recolher_retencao(db: AsyncSession, *, tenant_id: int, retencao_id: int,
-                            data_recolhimento: date, documento_recolhimento: str) -> Retencao:
+                            data_recolhimento: date, documento_recolhimento: str,
+                            usuario_id: int | None = None) -> Retencao:
     r = await _obter_retencao(db, tenant_id=tenant_id, retencao_id=retencao_id)
     r.recolhido = True
     r.data_recolhimento = data_recolhimento
     r.documento_recolhimento = documento_recolhimento
     r.atualizado_em = _utcnow()
+    # Mesma trilha dos demais atos financeiros (`pagamento.*` no audit_log).
+    from . import audit
+    await audit.log(
+        db, tenant_id=tenant_id, id_usuario=usuario_id,
+        acao="pagamento.retencao_recolhida", entidade="retencao", id_entidade=r.id,
+        payload={"id_debito": r.id_debito, "tipo": r.tipo, "valor": str(r.valor),
+                 "data_recolhimento": data_recolhimento.isoformat(),
+                 "documento_recolhimento": documento_recolhimento})
     await db.commit()
     await db.refresh(r)
     return r

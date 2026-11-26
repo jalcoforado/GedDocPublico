@@ -11,10 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import (
     ContaBancaria, Debito, DebitoHistorico, FonteRecursos, NaturezaDespesa, OrdemPagamento,
-    OrdemPagamentoDebito, Parcela,
+    OrdemPagamentoDebito, Parcela, UnidadeTrabalho,
 )
 from ..schemas.pagamentos import (
     DebitoFilaItem, FilaAutorizacaoFonteGrupo, FilaLiberacaoGrupo, FilaTesourariaOut, GrupoConta,
+    ImpactoAutorizacoesOut, ImpactoFonteItem, ImpactoUnidadeItem,
     ParcelaFilaLibItem, ParcelaTesourariaItem,
 )
 from . import pagamentos_autorizacao as aut
@@ -30,6 +31,14 @@ async def _contas_by_id(db, *, tenant_id: int, ids: set[int]) -> dict[int, Conta
         ContaBancaria.tenant_id == tenant_id, ContaBancaria.id.in_(ids),
         ContaBancaria.excluido.is_(False)))).scalars().all()
     return {c.id: c for c in rows}
+
+
+async def _unidades_by_id(db, *, tenant_id: int, ids: set[int]) -> dict[int, UnidadeTrabalho]:
+    if not ids:
+        return {}
+    rows = (await db.execute(select(UnidadeTrabalho).where(
+        UnidadeTrabalho.tenant_id == tenant_id, UnidadeTrabalho.id.in_(ids)))).scalars().all()
+    return {u.id: u for u in rows}
 
 
 async def _naturezas_by_id(db, *, tenant_id: int, ids: set[int]) -> dict[int, NaturezaDespesa]:
@@ -258,3 +267,81 @@ async def fila_tesouraria(db: AsyncSession, *, tenant_id: int) -> FilaTesouraria
         key=lambda it: it.data_prevista_pagamento or it.vencimento)
     pagas_out = [_item(p, para_pagas=True) for p in pagas]
     return FilaTesourariaOut(liberadas=liberadas_out, pagas_recentes=pagas_out)
+
+
+async def impacto_autorizacoes(db: AsyncSession, *, tenant_id: int) -> ImpactoAutorizacoesOut:
+    """Impacto financeiro das despesas que aguardam autorização (fatia 4).
+
+    Somente leitura: não autoriza, não reserva, não grava. O painel responde
+    "se eu disser sim para tudo isto, como fica o caixa?" — a decisão continua
+    sendo um ato humano na fila, com alçada e segregação de funções.
+
+    **Por fonte, e não no total.** Um débito só pode ser pago por conta da
+    própria fonte (RN-02/05), então o total consolidado não responde se cabe:
+    R$ 500 mil parados numa fonte com R$ 80 mil continuam sem lastro mesmo que
+    o município tenha R$ 40 milhões em outras contas. O consolidado serve para
+    dimensionar; quem decide é a linha da fonte.
+
+    A disponibilidade de cada fonte vem de `contas_elegiveis` — a MESMA função
+    que a tela de autorização usa para listar as contas pagadoras candidatas.
+    Calcular por outro caminho (todas as contas da fonte, por exemplo) daria um
+    número maior que o real, porque entrariam contas inativas ou que não
+    admitem pagamento, e o painel prometeria folga que a autorização recusa.
+    """
+    debitos = list((await db.execute(select(Debito).where(
+        Debito.tenant_id == tenant_id, Debito.excluido.is_(False),
+        Debito.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE))).scalars().all())
+
+    agora = datetime.utcnow()
+    if not debitos:
+        return ImpactoAutorizacoesOut(
+            qtd_debitos=0, total_pendente=Decimal("0"), disponivel_total=Decimal("0"),
+            disponivel_total_depois=Decimal("0"), apurado_em=agora)
+
+    por_fonte: dict[int, list[Debito]] = {}
+    for d in debitos:
+        por_fonte.setdefault(d.id_fonte_recursos, []).append(d)
+    fontes = await _fontes_by_id(db, tenant_id=tenant_id, ids=set(por_fonte))
+
+    itens: list[ImpactoFonteItem] = []
+    disponivel_total = Decimal("0")
+    for fonte_id, ds in por_fonte.items():
+        contas = await aut.contas_elegiveis(db, tenant_id=tenant_id, id_fonte=fonte_id)
+        disponivel = sum((c.disponivel_projetado for c in contas), Decimal("0"))
+        pendente = sum((d.valor_total for d in ds), Decimal("0"))
+        depois = disponivel - pendente
+        f = fontes.get(fonte_id)
+        itens.append(ImpactoFonteItem(
+            id_fonte=fonte_id, codigo=f.codigo if f else "?",
+            descricao=f.descricao if f else "?",
+            qtd_debitos=len(ds), pendente=pendente,
+            disponivel_antes=disponivel, disponivel_depois=depois,
+            suficiente=depois >= 0, falta=max(Decimal("0"), -depois)))
+        disponivel_total += disponivel
+
+    # Falta primeiro, depois maior valor parado: a fonte que não fecha é a que
+    # muda o que o gestor faz a seguir.
+    itens.sort(key=lambda i: (i.suficiente, -i.pendente))
+
+    unidades = await _unidades_by_id(db, tenant_id=tenant_id,
+                                     ids={d.id_unidade for d in debitos})
+    por_unidade: dict[int, list[Debito]] = {}
+    for d in debitos:
+        por_unidade.setdefault(d.id_unidade, []).append(d)
+    itens_unidade = []
+    for uid, ds in por_unidade.items():
+        u = unidades.get(uid)
+        itens_unidade.append(ImpactoUnidadeItem(
+            sigla=(u.sigla if u and u.sigla else "—"),
+            nome=(u.unidade_trabalho if u else "?"),
+            valor=sum((d.valor_total for d in ds), Decimal("0")),
+            qtd_debitos=len(ds)))
+    itens_unidade.sort(key=lambda i: i.valor, reverse=True)
+
+    total_pendente = sum((d.valor_total for d in debitos), Decimal("0"))
+    return ImpactoAutorizacoesOut(
+        qtd_debitos=len(debitos), total_pendente=total_pendente,
+        disponivel_total=disponivel_total,
+        disponivel_total_depois=disponivel_total - total_pendente,
+        fontes=itens, fontes_insuficientes=sum(1 for i in itens if not i.suficiente),
+        por_unidade=itens_unidade, apurado_em=agora)

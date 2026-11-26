@@ -117,7 +117,7 @@ describe("abas — ARIA", () => {
         "de aba, passe `keepMounted`. Se o visual for de botão arredondado, " +
         '`variant="pill"`.\n' +
         '  NÃO  -> não são abas, são links. Use `<nav>` + `aria-current="page"`, ' +
-        "como `components/RelatoriosNav.tsx`.",
+        "como `components/protocolo/AbasCaixas.tsx`.",
     ).toEqual([]);
   });
 

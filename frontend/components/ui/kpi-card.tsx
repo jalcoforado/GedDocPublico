@@ -1,6 +1,6 @@
 "use client";
 
-import { LucideIcon, Minus, TrendingDown, TrendingUp } from "lucide-react";
+import { Info, LucideIcon, Minus, TrendingDown, TrendingUp } from "lucide-react";
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
@@ -42,6 +42,16 @@ interface KpiCardProps {
   label: string;
   value: React.ReactNode;
   hint?: React.ReactNode;
+  /**
+   * O que este número significa e de onde ele vem. Opcional: nenhum card
+   * existente muda de aparência por causa disto.
+   *
+   * Existe porque um painel executivo sem definição vira discussão — dois
+   * gestores leem "comprometido" de dois jeitos e a reunião trava no que o
+   * número quer dizer, em vez do que fazer com ele. O texto também vai para
+   * leitor de tela, não só para o `title` do mouse.
+   */
+  definicao?: string;
   icon?: LucideIcon;
   intent?: Intent;
   /** Para tendência: valor atual e anterior, e flag se queda é boa. */
@@ -112,7 +122,11 @@ function TrendBadge({
 /**
  * Card de KPI premium pra dashboards. Diferenças vs antigo:
  * - Borda gradient sutil ao hover (brand→accent)
- * - Número grande em font-mono pra alinhamento entre cards
+ * - Número grande na fonte dos títulos (`font-display`), que é a do tema do
+ *   município: padrão Montserrat, a do protótipo, e trocável em Aparência.
+ *   Era `font-mono`: destoava do resto da tela e, por ser mais larga, cortava
+ *   valores em reais ao lado do ícone. Os algarismos seguem alinhados entre
+ *   cards por `tabular-nums`.
  * - Ícone num quadrado tinto identitário (mesmo do PageHeader)
  * - Trend badge em pill colorida com background sutil
  */
@@ -120,6 +134,7 @@ export function KpiCard({
   label,
   value,
   hint,
+  definicao,
   icon: Icon,
   intent = "default",
   current,
@@ -141,26 +156,29 @@ export function KpiCard({
         className,
       )}
     >
+      {/* O ícone divide a linha só com o rótulo. O valor fica abaixo, com a
+          largura inteira do card: ao lado do ícone, um valor em reais de sete
+          dígitos não cabia e era cortado. */}
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-medium uppercase tracking-wider text-foreground-muted">
-              {label}
-            </span>
-            <TrendBadge delta={delta} lowerIsBetter={lowerIsBetter} />
-          </div>
-          <div
-            className={cn(
-              "mt-2 text-[28px] font-bold leading-none tabular-nums tracking-tight",
-              "font-mono", // alinha melhor entre cards
-              i.valueColor,
-            )}
-          >
-            {value}
-          </div>
-          {hint && (
-            <div className="mt-2 text-xs text-foreground-subtle">{hint}</div>
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 pt-1">
+          <span className="text-[11px] font-medium uppercase tracking-wider text-foreground-muted">
+            {label}
+          </span>
+          {definicao && (
+            <>
+              {/* Ícone não-focável (não cria parada de Tab numa grade de 8
+                  cards); quem usa leitor de tela recebe o texto pelo
+                  `sr-only` logo abaixo, que é lido junto com o rótulo. */}
+              <span title={definicao} className="inline-flex">
+                <Info
+                  className="h-3.5 w-3.5 shrink-0 text-foreground-subtle"
+                  aria-hidden="true"
+                />
+              </span>
+              <span className="sr-only">{definicao}</span>
+            </>
           )}
+          <TrendBadge delta={delta} lowerIsBetter={lowerIsBetter} />
         </div>
         {Icon && (
           <div
@@ -173,6 +191,17 @@ export function KpiCard({
           </div>
         )}
       </div>
+      <div
+        data-testid="kpi-valor"
+        className={cn(
+          "mt-1 font-display text-[26px] font-bold leading-tight tabular-nums tracking-tight",
+          "[overflow-wrap:anywhere]",
+          i.valueColor,
+        )}
+      >
+        {value}
+      </div>
+      {hint && <div className="mt-2 text-xs text-foreground-subtle">{hint}</div>}
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 Cobre as 4 transições de validação/autoridade (`services/pagamentos_debitos.py`):
 - validar: AGUARDANDO_VALIDACAO → AGUARDANDO_AUTORIDADE
-- autoridade_aprovar: AGUARDANDO_AUTORIDADE → AUTORIZADA + ELEGIVEL
+- autorizar_debito: AGUARDANDO_AUTORIDADE → AUTORIZADA + ELEGIVEL
 - autoridade_indeferir: AGUARDANDO_AUTORIDADE → INDEFERIDA_AUTORIDADE (terminal)
 - cancelar: de qualquer etapa não-terminal → CANCELADA
 
@@ -18,9 +18,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.schemas.pagamentos import (
-    ContaCreate, DebitoCreate, FonteCreate, FornecedorCreate,
+    AlcadaCreate, ContaCreate, DebitoCreate, FonteCreate, FornecedorCreate,
     NaturezaCreate, ParcelaCreate,
 )
+from app.services import pagamentos_autorizacao as aut
 from app.services import pagamentos_cadastros as cad
 from app.services import pagamentos_debitos as svc
 from app.services import pagamentos_estados as est
@@ -86,6 +87,7 @@ def _payload_debito(forn, nat, conta, unidade, *, valor="1000.00"):
         id_fornecedor=forn.id, id_natureza=nat.id, id_unidade=unidade.id,
         id_fonte_recursos=conta.id_fonte_recursos, id_conta=conta.id,
         valor_total=valor, competencia="2026-07", descricao="Compra de material",
+        numero_ne="NE-2026-0001",  # sem empenho não se autoriza (RN-01)
         categoria="SERVICOS",  # débito sem contrato: exigida p/ confirmar_liquidacao (F3)
         parcelas=[ParcelaCreate(numero=1, valor=valor, vencimento="2026-08-01")],
     )
@@ -171,14 +173,19 @@ async def test_validar_transita_para_autoridade(admin_engine, arreio_debito_em_v
 
 @pytest.mark.asyncio
 async def test_autoridade_aprovar_transita_para_autorizada(admin_engine, arreio_debito_em_autoridade):
-    """AGUARDANDO_AUTORIDADE → AUTORIZADA + ELEGIVEL."""
-    t, d, _sol, _gest, _val, _forn, _nat, _conta = arreio_debito_em_autoridade
+    """AGUARDANDO_AUTORIDADE → AUTORIZADA + ELEGIVEL, com conta pagadora gravada."""
+    t, d, _sol, _gest, _val, _forn, _nat, conta = arreio_debito_em_autoridade
     autoridade = await _novo_usuario(admin_engine, t.id, f"aut{uuid.uuid4().hex[:6]}")
     async with _sm(admin_engine)() as s:
-        result = await svc.autoridade_aprovar(s, tenant_id=t.id, debito_id=d.id,
-                                             usuario_id=autoridade, lock_version=d.lock_version)
+        await cad.criar_alcada(s, tenant_id=t.id, payload=AlcadaCreate(
+            id_usuario=autoridade, id_natureza=None, valor_maximo="999999.00"))
+    async with _sm(admin_engine)() as s:
+        result = await aut.autorizar_debito(
+            s, tenant_id=t.id, debito_id=d.id, usuario_id=autoridade,
+            lock_version=d.lock_version, id_conta_pagadora=conta.id)
     assert result.situacao_tramitacao == est.AUTORIZADA
     assert result.situacao_fila == est.ELEGIVEL
+    assert result.id_conta_pagadora == conta.id
     async with _sm(admin_engine)() as s:
         hist = await svc.listar_historico(s, tenant_id=t.id, debito_id=d.id)
     assert any(h.acao == "AUTORIZADO" for h in hist)
@@ -293,11 +300,18 @@ async def test_validar_lock_version_mismatch_409(admin_engine, arreio_debito_em_
 
 @pytest.mark.asyncio
 async def test_autoridade_aprovar_lock_version_mismatch_409(admin_engine, arreio_debito_em_autoridade):
-    """Lock version incompatível em autoridade_aprovar → 409."""
-    t, d, _sol, _gest, _val, _forn, _nat, _conta = arreio_debito_em_autoridade
+    """Lock version incompatível em autorizar_debito → 409, sem autorizar nada."""
+    t, d, _sol, _gest, _val, _forn, _nat, conta = arreio_debito_em_autoridade
     autoridade = await _novo_usuario(admin_engine, t.id, f"aut{uuid.uuid4().hex[:6]}")
     async with _sm(admin_engine)() as s:
+        await cad.criar_alcada(s, tenant_id=t.id, payload=AlcadaCreate(
+            id_usuario=autoridade, id_natureza=None, valor_maximo="999999.00"))
+    async with _sm(admin_engine)() as s:
         with pytest.raises(HTTPException) as exc:
-            await svc.autoridade_aprovar(s, tenant_id=t.id, debito_id=d.id,
-                                        usuario_id=autoridade, lock_version=d.lock_version + 999)
+            await aut.autorizar_debito(
+                s, tenant_id=t.id, debito_id=d.id, usuario_id=autoridade,
+                lock_version=d.lock_version + 999, id_conta_pagadora=conta.id)
         assert exc.value.status_code == 409
+    async with _sm(admin_engine)() as s:
+        atual = await svc.obter_debito(s, tenant_id=t.id, debito_id=d.id)
+    assert atual.situacao_tramitacao == est.AGUARDANDO_AUTORIDADE

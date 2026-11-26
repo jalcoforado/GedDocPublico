@@ -109,6 +109,20 @@ ENDPOINTS_TRANSVERSAIS: set[tuple[str, str]] = {
     # é do usuário, não do módulo que a consome depois (minutas).
     ("GET", "/api/v2/auth/google"),
     ("GET", "/api/v2/auth/google/callback"),
+    # Conta por e-mail (0137, SI-6/SI-7/SI-22): todas rodam ANTES de haver
+    # sessão — quem chama ainda não provou quem é, então não há usuário para
+    # permissionar nem módulo a exigir. O controle é o segredo de uso único
+    # (link ou código, guardado só como HMAC, com validade curta), o limite de
+    # 5 erros do código e o intervalo de 60 s entre reenvios
+    # (`services/conta_tokens.py`). "Esqueci a senha" responde igual exista ou
+    # não o e-mail, para não virar oráculo de contas.
+    ("POST", "/api/v2/auth/login/2fa"),
+    ("POST", "/api/v2/auth/login/2fa/reenviar"),
+    ("POST", "/api/v2/auth/esqueci-senha"),
+    ("POST", "/api/v2/auth/redefinir-senha"),
+    ("POST", "/api/v2/auth/verificar-email"),
+    ("POST", "/api/v2/auth/convite/info"),
+    ("POST", "/api/v2/auth/convite/aceitar"),
 
     # -- Infra e identidade visual: sem auth, consumidos na tela de login.
     ("GET", "/api/v2/health"),
@@ -179,6 +193,10 @@ ENDPOINTS_TRANSVERSAIS: set[tuple[str, str]] = {
     ("POST", "/api/v2/cidadao/denuncias"),
     ("POST", "/api/v2/cidadao/cadastrar"),
     ("POST", "/api/v2/cidadao/login"),
+    # Conta do cidadão por e-mail (0137): mesma porta do login acima, antes de
+    # haver sessão. Mesmos controles das rotas de conta do servidor.
+    ("POST", "/api/v2/cidadao/esqueci-senha"),
+    ("POST", "/api/v2/cidadao/reenviar-confirmacao"),
     ("POST", "/api/v2/cidadao/logout"),
     ("POST", "/api/v2/cidadao/processos"),
     ("POST", "/api/v2/cidadao/processos/{processo_id}/anexos"),
@@ -203,6 +221,10 @@ ENDPOINTS_TRANSVERSAIS: set[tuple[str, str]] = {
     # (`require_escopo_leitura/escrita`) é a "permissão" deste realm.
     ("POST", "/api/v2/integracao/pagamentos/debitos"),
     ("POST", "/api/v2/integracao/pagamentos/debitos/{debito_id}/liquidar"),
+    # Retorno do sistema financeiro (0144) — mesmo realm, mesma razão: a chave
+    # de API com escopo de escrita é a credencial, e `_exigir_modulo_pagamentos`
+    # é o gate de módulo.
+    ("POST", "/api/v2/integracao/pagamentos/debitos/{debito_id}/empenho"),
     ("GET", "/api/v2/integracao/pagamentos/debitos"),
     ("GET", "/api/v2/integracao/pagamentos/ordens"),
     ("GET", "/api/v2/integracao/pagamentos/baixas"),
@@ -481,6 +503,8 @@ ROTAS_POR_MODULO: dict[tuple[str, str], str | tuple[str, ...]] = {
     ("GET", "/api/v2/marcadores"): "protocolo",
     ("GET", "/api/v2/processos"): "protocolo",
     ("GET", "/api/v2/processos/apensamentos/{apensamento_id}/termo.pdf"): "protocolo",
+    ("GET", "/api/v2/processos/caixas"): "protocolo",
+    ("GET", "/api/v2/processos/painel"): "protocolo",
     ("GET", "/api/v2/processos/encaminhamentos/{encaminhamento_id}/comprovante.pdf"): "protocolo",
     ("GET", "/api/v2/processos/{processo_id}"): "protocolo",
     ("GET", "/api/v2/processos/{processo_id}/anexos/{anexo_processo_id}/termo-desentranhamento.pdf"): "protocolo",
@@ -510,6 +534,19 @@ ROTAS_POR_MODULO: dict[tuple[str, str], str | tuple[str, ...]] = {
     ("GET", "/api/v2/relatorios/assinaturas.csv"): "protocolo",
     ("GET", "/api/v2/relatorios/assinaturas.json"): "protocolo",
     ("GET", "/api/v2/relatorios/assinaturas.pdf"): "protocolo",
+    ("GET", "/api/v2/relatorios/gerencial.json"): "protocolo",
+    ("GET", "/api/v2/relatorios/gerencial.pdf"): "protocolo",
+    ("GET", "/api/v2/relatorios/documentacao.json"): "protocolo",
+    ("GET", "/api/v2/relatorios/documentacao.csv"): "protocolo",
+    ("GET", "/api/v2/relatorios/documentacao.pdf"): "protocolo",
+    ("GET", "/api/v2/relatorios/servicos.json"): "protocolo",
+    # SI-35 — relatório montado e os salvos da pessoa
+    ("GET", "/api/v2/relatorios/montado.json"): "protocolo",
+    ("GET", "/api/v2/relatorios/montado.csv"): "protocolo",
+    ("GET", "/api/v2/relatorios/montado.pdf"): "protocolo",
+    ("GET", "/api/v2/relatorios/montado/catalogo.json"): "protocolo",
+    ("GET", "/api/v2/relatorios/salvos"): "protocolo",
+    ("GET", "/api/v2/relatorios/salvos/{id_salvo}"): "protocolo",
     ("GET", "/api/v2/relatorios/processos.csv"): "protocolo",
     ("GET", "/api/v2/relatorios/processos.json"): "protocolo",
     ("GET", "/api/v2/relatorios/processos.pdf"): "protocolo",

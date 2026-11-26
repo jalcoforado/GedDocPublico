@@ -7,8 +7,6 @@ import {
   FileText,
   KeyboardIcon,
   LogOut,
-  Maximize2,
-  Minimize2,
   Monitor,
   Moon,
   Plus,
@@ -22,6 +20,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api, buscaApi } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { CAIXAS, hrefDaCaixa } from "@/lib/caixas-processos";
 import { canSeeItem, itensNavegaveis, type NavItem } from "@/lib/menus";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -41,6 +40,14 @@ export const ITENS_EXTRA: ReadonlyArray<{ item: NavItem; moduloSlug: string; gro
     group: "navegar",
     item: { label: "Preferências de notificações", href: "/perfil/notificacoes", icon: Bell },
   },
+  // As caixas de trabalho saíram do menu lateral (viraram abas da tela de
+  // Processos), mas continuam alcançáveis pelo teclado: "entrada" no Ctrl+K
+  // abre a caixa de entrada direto.
+  ...CAIXAS.map(({ caixa, rotulo, icone }) => ({
+    moduloSlug: "protocolo",
+    group: "navegar" as const,
+    item: { label: rotulo, href: hrefDaCaixa(caixa), icon: icone, perm: "processo" },
+  })),
   {
     moduloSlug: "protocolo",
     group: "criar",
@@ -61,10 +68,15 @@ export const ITENS_EXTRA: ReadonlyArray<{ item: NavItem; moduloSlug: string; gro
  */
 export const KEYWORDS_POR_HREF: Record<string, string[]> = {
   "/home": ["dashboard", "início"],
+  // O painel morou na `/home` até sair para o módulo: quem o procurava por
+  // "início" ou "caixas" continua achando.
+  "/m/protocolo/painel": ["sei", "quadros", "caixas", "prazos", "início"],
+  "/m/protocolo/processos": ["processos", "todos", "lista", "caixas"],
   "/m/protocolo/workflow": ["bpm", "fluxo"],
   "/m/administracao/organograma": ["unidades", "hierarquia"],
   "/m/administracao/auditoria": ["log", "histórico"],
   "/m/administracao/jobs": ["celery", "tarefas"],
+  "/m/administracao/aparencia": ["cores", "cor", "tema", "fonte", "menu", "visual"],
   "/m/protocolo/manifestantes": ["cidadão", "requerente"],
   "/m/transporte/recadastramento": ["ciclo", "convocação", "prazo", "escalonamento"],
   "/m/transporte/linhas": ["linha", "itinerario", "horario", "distrital", "escolar"],
@@ -98,7 +110,7 @@ interface Props {
 export function CommandPalette({ open, onOpenChange }: Props) {
   const router = useRouter();
   const { logout, can } = useAuth();
-  const { setPreference, setDensity } = useTheme();
+  const { setPreference } = useTheme();
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
@@ -128,7 +140,7 @@ export function CommandPalette({ open, onOpenChange }: Props) {
     enabled: open && debouncedQ.length >= 2,
   });
 
-  // Módulos contratados do tenant — MESMA queryKey que ModuloSwitcher e o
+  // Módulos contratados do tenant — MESMA queryKey que o menu lateral e o
   // launcher usam (não inventa chave nova). Herda o cache: a paleta abre por
   // cima de uma página já montada dentro de `(app)`, então o dado costuma já
   // estar quente quando o usuário aperta Ctrl+K.
@@ -178,17 +190,15 @@ export function CommandPalette({ open, onOpenChange }: Props) {
       ...doMenu,
       ...extras,
 
-      // Preferências (tema + densidade)
+      // Preferências (tema)
       { id: "pref-theme-system", type: "action", title: "Tema: seguir sistema", icon: Monitor, onSelect: () => setPreference("system"), group: "preferencias", keywords: ["theme", "auto", "modo"] },
       { id: "pref-theme-light", type: "action", title: "Tema: claro", icon: Sun, onSelect: () => setPreference("light"), group: "preferencias", keywords: ["theme", "light", "claro"] },
       { id: "pref-theme-dark", type: "action", title: "Tema: escuro", icon: Moon, onSelect: () => setPreference("dark"), group: "preferencias", keywords: ["theme", "dark", "escuro", "noturno"] },
-      { id: "pref-density-comfortable", type: "action", title: "Densidade: confortável", icon: Maximize2, onSelect: () => setDensity("comfortable"), group: "preferencias", keywords: ["density", "espaçoso"] },
-      { id: "pref-density-compact", type: "action", title: "Densidade: compacta", icon: Minimize2, onSelect: () => setDensity("compact"), group: "preferencias", keywords: ["density", "denso", "power-user"] },
 
       // Conta
       { id: "act-logout", type: "action", title: "Sair", icon: LogOut, onSelect: logout, group: "conta", keywords: ["logout", "sign out"] },
     ];
-  }, [can, modulosContratados, logout, setPreference, setDensity]);
+  }, [can, modulosContratados, logout, setPreference]);
 
   /* ---- Resultados de busca como ações ---- */
   const searchResults: CommandAction[] = useMemo(() => {
@@ -330,19 +340,22 @@ export function CommandPalette({ open, onOpenChange }: Props) {
         type="button"
         aria-label="Fechar"
         onClick={() => onOpenChange(false)}
-        className="absolute inset-0 bg-foreground/30 backdrop-blur-sm animate-fade-in"
+        // Véu escuro nos dois temas, como o dos diálogos. Era
+        // `bg-foreground/30`: no escuro o "foreground" é claro, e a tela
+        // inteira ficava atrás de um véu branco leitoso.
+        className="absolute inset-0 bg-black/60 backdrop-blur-[2px] animate-fade-in"
       />
 
       {/* Panel */}
       <div
         className={cn(
-          "relative w-full max-w-2xl overflow-hidden rounded-xl border border-border bg-surface-1 shadow-xl",
+          "relative flex w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border-strong bg-card shadow-2xl",
           "animate-scale-in",
         )}
       >
         {/* Input */}
-        <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-          <Search className="h-4 w-4 shrink-0 text-foreground-muted" aria-hidden="true" />
+        <div className="flex items-center gap-3 border-b border-border px-5 py-4">
+          <Search className="h-5 w-5 shrink-0 text-foreground-muted" aria-hidden="true" />
           <input
             ref={inputRef}
             type="search"
@@ -350,11 +363,9 @@ export function CommandPalette({ open, onOpenChange }: Props) {
             onChange={(e) => setQ(e.target.value)}
             placeholder="Buscar processos, usuários, comandos…"
             aria-label="Comando ou busca"
-            className="flex-1 bg-transparent text-sm outline-none placeholder:text-foreground-subtle"
+            className="flex-1 bg-transparent text-base text-foreground outline-none placeholder:text-foreground-subtle"
           />
-          <kbd className="hidden items-center gap-0.5 rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-mono text-foreground-muted sm:inline-flex">
-            ESC
-          </kbd>
+          <Kbd>Esc</Kbd>
         </div>
 
         {/* Lista */}
@@ -362,21 +373,21 @@ export function CommandPalette({ open, onOpenChange }: Props) {
           ref={listRef}
           role="listbox"
           aria-label="Comandos disponíveis"
-          className="max-h-[60vh] overflow-y-auto py-1"
+          className="max-h-[60vh] overflow-y-auto px-2 pb-2"
         >
           {searchQuery.isLoading && debouncedQ.length >= 2 && (
-            <div className="px-4 py-3 text-sm text-foreground-muted">
+            <div className="px-3 py-4 text-sm text-foreground-muted">
               Buscando…
             </div>
           )}
           {items.length === 0 && !searchQuery.isLoading && (
-            <div className="px-4 py-8 text-center text-sm text-foreground-muted">
+            <div className="px-4 py-10 text-center text-sm text-foreground-muted">
               Nada encontrado para “{debouncedQ}”.
             </div>
           )}
           {groups.map((g) => (
-            <div key={g.key}>
-              <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-foreground-subtle">
+            <div key={g.key} className="space-y-0.5">
+              <div className="px-3 pb-2 pt-4 text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground-subtle">
                 {g.label}
               </div>
               {g.items.map((it) => {
@@ -392,33 +403,38 @@ export function CommandPalette({ open, onOpenChange }: Props) {
                     onMouseEnter={() => setActiveIdx(it._idx)}
                     onClick={() => executeItem(it)}
                     className={cn(
-                      "flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition-colors",
+                      "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors duration-fast",
                       isActive
-                        ? "bg-brand/10 text-foreground dark:bg-brand/20"
-                        : "text-foreground-muted hover:bg-muted hover:text-foreground",
+                        ? "bg-brand/10 text-foreground dark:bg-brand/15"
+                        : "text-foreground hover:bg-muted",
                     )}
                   >
-                    <Icon
-                      className={cn(
-                        "h-4 w-4 shrink-0",
-                        isActive ? "text-brand dark:text-brand-light" : "",
-                      )}
+                    <span
                       aria-hidden="true"
-                    />
+                      className={cn(
+                        "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors duration-fast",
+                        isActive
+                          ? "bg-brand/15 text-brand dark:bg-brand/25 dark:text-brand-light"
+                          : "bg-muted text-foreground-muted",
+                      )}
+                    >
+                      <Icon className="h-4 w-4" />
+                    </span>
                     <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium">{it.title}</div>
+                      <div className="truncate font-medium leading-5">{it.title}</div>
                       {it.subtitle && (
-                        <div className="truncate text-[11px] text-foreground-subtle">
+                        <div className="truncate text-xs leading-4 text-foreground-muted">
                           {it.subtitle}
                         </div>
                       )}
                     </div>
-                    {isActive && (
-                      <ChevronRight
-                        className="h-3.5 w-3.5 shrink-0 text-foreground-muted"
-                        aria-hidden="true"
-                      />
-                    )}
+                    <ChevronRight
+                      className={cn(
+                        "h-4 w-4 shrink-0 text-foreground-muted transition-opacity duration-fast",
+                        isActive ? "opacity-100" : "opacity-0",
+                      )}
+                      aria-hidden="true"
+                    />
                   </button>
                 );
               })}
@@ -427,13 +443,27 @@ export function CommandPalette({ open, onOpenChange }: Props) {
         </div>
 
         {/* Footer com atalhos */}
-        <div className="flex items-center justify-between border-t border-border bg-surface-2 px-3 py-1.5 text-[10px] text-foreground-subtle">
-          <span className="flex items-center gap-2">
-            <KeyboardIcon className="h-3 w-3" aria-hidden="true" />
-            <Kbd>↑</Kbd> <Kbd>↓</Kbd> navegar · <Kbd>↵</Kbd> abrir
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-border bg-surface-2/60 px-5 py-2.5 text-xs text-foreground-muted">
+          <span className="flex items-center gap-4">
+            <KeyboardIcon className="h-3.5 w-3.5 text-foreground-subtle" aria-hidden="true" />
+            <span className="flex items-center gap-1.5">
+              <Kbd>↑</Kbd>
+              <Kbd>↓</Kbd>
+              navegar
+            </span>
+            <span className="flex items-center gap-1.5">
+              <Kbd>↵</Kbd>
+              abrir
+            </span>
+            <span className="flex items-center gap-1.5">
+              <Kbd>Esc</Kbd>
+              fechar
+            </span>
           </span>
-          <span className="flex items-center gap-1">
-            <Kbd>Ctrl</Kbd>+<Kbd>K</Kbd> abre
+          <span className="hidden items-center gap-1.5 sm:flex">
+            <Kbd>Ctrl</Kbd>
+            <Kbd>K</Kbd>
+            abre de qualquer tela
           </span>
         </div>
       </div>
@@ -443,7 +473,7 @@ export function CommandPalette({ open, onOpenChange }: Props) {
 
 function Kbd({ children }: { children: React.ReactNode }) {
   return (
-    <kbd className="inline-flex items-center rounded border border-border bg-surface-1 px-1 py-0.5 font-mono text-[9px] text-foreground-muted">
+    <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded border border-border-strong bg-surface-1 px-1 font-mono text-[10px] font-medium leading-none text-foreground-muted">
       {children}
     </kbd>
   );

@@ -13,7 +13,7 @@ usuário.
 Ele descreve dois caminhos independentes:
 
 1. **API M2M em tempo real** — `/api/v2/integracao/pagamentos/*`: criar
-   débito, liquidar, e ler débitos/ordens/baixas por cursor.
+   débito, liquidar, devolver o empenho, e ler débitos/ordens/baixas por cursor.
 2. **Export contábil em lote** — arquivo CSV `neutro-csv-v1` gerado sob
    demanda pela prefeitura (tela **Pagamentos → Export contábil**) e baixado
    uma vez por lote.
@@ -58,7 +58,7 @@ Cada chave tem dois escopos independentes, escolhidos na criação:
 | Escopo | Libera |
 |---|---|
 | `escopo_leitura` | `GET /debitos`, `GET /ordens`, `GET /baixas` |
-| `escopo_escrita` | `POST /debitos`, `POST /debitos/{id}/liquidar` |
+| `escopo_escrita` | `POST /debitos`, `POST /debitos/{id}/liquidar`, `POST /debitos/{id}/empenho` |
 
 Uma chave pode ter os dois, um só, ou (sem sentido prático, mas permitido)
 nenhum — nesse último caso todo endpoint devolve 403.
@@ -95,7 +95,7 @@ de uma chave de idempotência antiga.
 
 ```bash
 curl -X POST https://<tenant>.<host>/api/v2/integracao/pagamentos/debitos \
-  -H "X-Api-Key: apy_ab12cd34.6f1e9c...segredo" \
+  -H "X-Api-Key: <prefixo>.<segredo>" \
   -H "Idempotency-Key: 8f14e45f-ceea-4f1a-8c8e-0a1b2c3d4e5f" \
   -H "Content-Type: application/json" \
   -d '{
@@ -129,13 +129,20 @@ acontecer no fluxo normal — a resposta é **409**.
 
 ```bash
 curl -X POST https://<tenant>.<host>/api/v2/integracao/pagamentos/debitos/42/liquidar \
-  -H "X-Api-Key: apy_ab12cd34.6f1e9c...segredo" \
+  -H "X-Api-Key: <prefixo>.<segredo>" \
   -H "Idempotency-Key: 3b6a9f2e-1111-4c22-9999-abcdef012345" \
   -H "Content-Type: application/json" \
-  -d '{}'
+  -d '{"valor_liquidado": "980.00"}'
 ```
 
-Resposta `200`, mesmo `DebitoOut`. **Esta rota espelha
+Resposta `200`, mesmo `DebitoOut`.
+
+`valor_liquidado` e `data_liquidacao` são **opcionais**: `-d '{}'` (ou corpo
+ausente) continua valendo e se comporta exatamente como antes da 0144 —
+confirma a liquidação e não escreve valor nenhum. Quando `valor_liquidado`
+vem, ele é gravado e o débito passa a `revisado: true`.
+
+**Esta rota espelha
 `POST /debitos/{id}/confirmar-liquidacao` da API administrativa — e não exige
 empenho (`numero_ne`) preenchido.** A regra "empenho obrigatório" pertence à
 etapa de *autorização* (`autorizar_lote`), que a porta M2M não expõe nesta
@@ -151,6 +158,46 @@ dá certo pela tela administrativa.
 > a categoria vem do contrato. Débito sem contrato criado **antes** da F3
 > (sem `categoria` preenchida) precisa ser editado para receber uma
 > categoria válida antes de poder ser liquidado pela API M2M.
+
+### Exemplo — devolver o empenho
+
+```bash
+curl -X POST https://<tenant>.<host>/api/v2/integracao/pagamentos/debitos/42/empenho \
+  -H "X-Api-Key: <prefixo>.<segredo>" \
+  -H "Idempotency-Key: 7c2b1a44-2222-4d33-8888-0123456789ab" \
+  -H "Content-Type: application/json" \
+  -d '{"valor_empenhado": "980.00", "numero_ne": "2026NE000123"}'
+```
+
+Resposta `200`, mesmo `DebitoOut`. É por aqui que o sistema financeiro devolve
+**quanto** foi empenhado — até a 0144 o Aprimora só guardava o *número* do
+empenho, nunca o valor.
+
+- `valor_empenhado` é obrigatório e não pode ser negativo (`422`).
+- `numero_ne` é opcional: quando vem, atualiza o número junto; quando não vem,
+  o número que já estava no débito é preservado.
+- Regravar o **mesmo** valor é no-op e não gera linha de trilha. Valor
+  **diferente** sobrescreve e grava `EMPENHO_REGISTRADO` no histórico dizendo
+  de quanto para quanto — a conciliação pode corrigir quantas vezes precisar.
+- O débito passa a `revisado: true`.
+
+**O que esta rota NÃO faz:** não muda nenhuma das três situações do débito, não
+exige etapa do rito e **não altera saldo**. O valor comprometido de uma conta
+continua sendo a soma das parcelas em aberto de débitos **autorizados**
+(`services/pagamentos_caixa.py`), não do empenhado. Empenho e liquidação são,
+aqui, informação de conferência.
+
+### O campo `revisado`
+
+`DebitoOut.revisado` responde "estes valores vieram do sistema financeiro?".
+
+- `false` no débito novo, e `valor_empenhado`/`valor_liquidado` vêm `null` —
+  **`null` não é zero**: significa "a origem ainda não respondeu".
+- `true` depois de `POST /empenho` ou de um `liquidar` com valor.
+- **Volta a `false`** se o débito for editado na tela em `valor_total` ou
+  `numero_ne`. Os valores devolvidos **não** são apagados; o que cai é a marca
+  de conferido, para a divergência entre as duas pontas aparecer em vez de
+  passar em silêncio. Nesse caso, reenvie o retorno para reconciliar.
 
 ## 3. Leitura por cursor
 
@@ -184,7 +231,7 @@ usa `criado_em`).
 CURSOR=""
 while :; do
   RESP=$(curl -s "https://<tenant>.<host>/api/v2/integracao/pagamentos/debitos?limite=100&alterado_desde=2026-08-01T00:00:00${CURSOR:+&cursor=$CURSOR}" \
-    -H "X-Api-Key: apy_ab12cd34.6f1e9c...segredo")
+    -H "X-Api-Key: <prefixo>.<segredo>")
   echo "$RESP" | jq -c '.items[]'
   CURSOR=$(echo "$RESP" | jq -r '.proximo_cursor')
   [ "$CURSOR" = "null" ] && break

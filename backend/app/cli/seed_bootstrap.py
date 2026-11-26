@@ -7,7 +7,9 @@ Idempotente. Cria (get_or_create):
   4. utils.grupo (nível 0, sistema do app_name) + utils.usuario_grupo (tenant 1)
   5. Segredo KEY_LOGIN_GLOBAL_JWT em utils.sistema_constante
   6. Catálogo global protocolos.acao (ABERTURA/ENCAMINHAMENTO/RECEBIMENTO) —
-     sem ele não se abre nem tramita processo
+     sem ele não se abre nem tramita processo — e protocolos.prioridade
+     (Normal/Alta/Urgente), sem o qual não se ENCAMINHA: o encaminhamento
+     exige uma prioridade, e o catálogo nasce vazio
   7. Contratação inicial de módulos do tenant (aprimora_py.tenant_modulo) —
      só se o tenant não tiver NENHUMA linha ainda; não ressuscita
      descontratação deliberada do platform admin (ver
@@ -45,6 +47,7 @@ from ..models import (
     WorkflowDefinition,
 )
 from ..services.modulos import contratar_modulos_iniciais
+from ..services.provisioning_tenant import garantir_unidade_padrao
 
 APP = get_settings().app_name
 
@@ -64,6 +67,11 @@ MODULO_TRANSACOES: dict[str, tuple[str, ...]] = {
     "protocolo": (
         "processo", "catalogo", "assunto", "manifestante", "servico",
         "minuta_template", "cidade", "endereco",
+        # SI-60 (0139): reabrir processo encerrado é poder à parte do
+        # `processo`/`atualizar` de quem tramita.
+        "processo_desarquivar",
+        # SI-61 (0140): desfazer recebimento por engano, idem.
+        "processo_cancelar_recebimento",
     ),
     "pagamentos": (
         "pagamento_cadastro", "pagamento_solicitar", "pagamento_autorizar",
@@ -278,6 +286,50 @@ async def garantir_workflows_transporte(db: AsyncSession) -> list[str]:
     return criadas
 
 
+# Prioridades padrão de encaminhamento: (nome, fator, cor). `fator` ordena
+# a lista da tela (`/catalogo/prioridades` devolve por fator crescente), então
+# a primeira opção do seletor é a Normal.
+PRIORIDADES_PADRAO: tuple[tuple[str, int, str], ...] = (
+    ("Normal", 1, "#6B7280"),
+    ("Alta", 2, "#D97706"),
+    ("Urgente", 3, "#DC2626"),
+)
+
+
+async def garantir_prioridades(db: AsyncSession) -> int:
+    """Garante o catálogo global `protocolos.prioridade`. Devolve quantas criou.
+
+    `protocolos.encaminhamento.id_prioridade` é NOT NULL com FK para cá, e a
+    tela de encaminhar lista as prioridades ATIVAS num seletor obrigatório. O
+    catálogo vem vazio do schema e nenhum seed o preenchia: em banco limpo
+    ninguém conseguia tramitar processo — a homologação passou meses sem um
+    único encaminhamento por causa disso, e o sintoma era só um seletor vazio.
+
+    Só semeia quando não há NENHUMA prioridade ativa. Se o município já tem as
+    suas (ou desativou alguma destas de propósito), nada é recriado — mesmo
+    critério de `garantir_contratacao_inicial`.
+    """
+    existe = (
+        await db.execute(
+            text(
+                "SELECT 1 FROM protocolos.prioridade "
+                "WHERE excluido = false AND ativo = true LIMIT 1"
+            )
+        )
+    ).first()
+    if existe is not None:
+        return 0
+    for nome, fator, cor in PRIORIDADES_PADRAO:
+        await db.execute(
+            text(
+                "INSERT INTO protocolos.prioridade (prioridade, fator, cor, ativo, excluido) "
+                "VALUES (:n, :f, :c, true, false)"
+            ),
+            {"n": nome, "f": fator, "c": cor},
+        )
+    return len(PRIORIDADES_PADRAO)
+
+
 async def seed(db: AsyncSession) -> dict:
     # 1. Catálogo global (sistema app=aprimora + nível 0). O stub
     # sistema_chamados.tipo_chamado (Task 1) deixa o trigger legado passar.
@@ -326,10 +378,15 @@ async def seed(db: AsyncSession) -> dict:
             )
         )
     ).scalars().first()
+    # A unidade padrão vem antes do admin porque ele nasce lotado nela. É a
+    # mesma `garantir_unidade_padrao` do provisionamento, pelas mesmas chaves
+    # naturais — o tenant do seed não é um tenant de segunda classe.
+    unidade = await garantir_unidade_padrao(db, tenant_id=tenant_id)
+
     if usuario is None:
         usuario = Usuario(
             tenant_id=tenant_id,
-            nome="Admin Sobral",
+            nome="Administrador",
             email=ADMIN_EMAIL,
             senha="",
             senha_bcrypt=hash_password(ADMIN_SENHA),
@@ -339,8 +396,17 @@ async def seed(db: AsyncSession) -> dict:
             app=APP,
             nivel_acesso_sigilo="interno",
             must_change_password=False,
+            id_unidade_trabalho=unidade.id,
         )
         db.add(usuario)
+        await db.flush()
+    elif usuario.id_unidade_trabalho is None:
+        # Repara o admin que JÁ existe sem lotação: todo banco criado antes
+        # desta correção tem um. O seed roda a cada deploy justamente para
+        # consertar pré-requisito faltante, e sem isso o conserto exigiria
+        # UPDATE à mão em cada ambiente. Só preenche quando está nulo —
+        # lotação escolhida por alguém não é sobrescrita.
+        usuario.id_unidade_trabalho = unidade.id
         await db.flush()
 
     # 4. Grupo SU + vínculo
@@ -430,6 +496,21 @@ async def seed(db: AsyncSession) -> dict:
         # mão porque o seed não a garantia.
         ("ARQUIVAMENTO", "Arquivamento", "arquivado", "final",
          "Processo arquivado"),
+        # SI-60 — `recebido` e não `inicial`/`final`: a partir do
+        # desarquivamento o processo volta a estar EM ANÁLISE na unidade onde
+        # foi arquivado, e é assim que `services/permanencia.py` passa a
+        # contar o tempo dele de novo.
+        ("DESARQUIVAMENTO", "Desarquivamento", "aberto", "recebido",
+         "Processo desarquivado"),
+        # SI-61 — `encaminhado`: desfeito o recebimento, o processo volta a
+        # estar EM TRÂNSITO, aguardando a unidade de destino, e
+        # `services/permanencia.py` conta esse trecho como espera.
+        ("CANCELAMENTO_RECEBIMENTO", "Cancelamento de recebimento", "aberto",
+         "encaminhado", "Recebimento cancelado"),
+        # SI-62 — despacho sem encaminhar: o processo fica na unidade.
+        # `despacho` não é `encaminhado` nem `final`, então a permanência
+        # (`services/permanencia.py`) conta o trecho como tempo de análise.
+        ("DESPACHO", "Despacho", "aberto", "despacho", "Despacho registrado"),
     ]:
         existe = (
             await db.execute(
@@ -476,6 +557,8 @@ async def seed(db: AsyncSession) -> dict:
             )
         )
 
+    prioridades_criadas = await garantir_prioridades(db)
+
     vinculos_sistema = await garantir_sistema_transacao(db)
     resultado_modulos = await semear_modulos(db)
     contratados = await garantir_contratacao_inicial(db, tenant_id)
@@ -485,10 +568,12 @@ async def seed(db: AsyncSession) -> dict:
         "tenant_id": tenant_id,
         "usuario_id": usuario.id,
         "is_super": True,
+        "unidade_lotacao_id": usuario.id_unidade_trabalho,
         "vinculos_sistema": vinculos_sistema,
         "modulos": resultado_modulos,
         "modulos_contratados": contratados,
         "workflows_transporte_criados": workflows_transporte,
+        "prioridades_criadas": prioridades_criadas,
     }
 
 

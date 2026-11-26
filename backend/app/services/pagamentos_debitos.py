@@ -6,7 +6,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Debito, DebitoHistorico, Fornecedor, Parcela, Usuario
@@ -174,17 +174,33 @@ async def obter_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
     return d
 
 
-async def listar_debitos(db: AsyncSession, *, tenant_id: int,
-                         tramitacao_f: str | None = None,
-                         solicitante_id: int | None = None, id_fonte: int | None = None,
-                         id_natureza: int | None = None, id_fornecedor: int | None = None,
-                         id_contrato: int | None = None, urgente: bool | None = None,
-                         competencia: str | None = None) -> list[Debito]:
-    """Lista débitos com filtros do painel (RF-PNL-02): fonte, categoria (natureza),
-    credor, contrato, tramitação, urgência e competência."""
+def _filtro_debitos(*, tenant_id: int, tramitacao_f: str | None = None,
+                    tramitacoes: list[str] | None = None, q: str | None = None,
+                    solicitante_id: int | None = None, id_fonte: int | None = None,
+                    id_natureza: int | None = None, id_fornecedor: int | None = None,
+                    id_contrato: int | None = None, urgente: bool | None = None,
+                    competencia: str | None = None):
+    """O `SELECT` de débitos com os filtros do painel (RF-PNL-02), sem ordem
+    nem corte. Fonte única da listagem inteira, da página e da contagem — três
+    consultas com `WHERE` copiado divergiriam, e o sintoma seria total que não
+    bate com a lista."""
     stmt = select(Debito).where(Debito.tenant_id == tenant_id, Debito.excluido.is_(False))
     if tramitacao_f:
         stmt = stmt.where(Debito.situacao_tramitacao == tramitacao_f)
+    if tramitacoes:
+        stmt = stmt.where(Debito.situacao_tramitacao.in_(tramitacoes))
+    termo = (q or "").strip()
+    if termo:
+        # Mesmos campos que a tela buscava no navegador: descrição, fornecedor,
+        # NF e NE. `%` e `_` do usuário valem como texto, não como curinga.
+        like = "%" + termo.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        fornecedores = select(Fornecedor.id).where(
+            Fornecedor.tenant_id == tenant_id, Fornecedor.nome.ilike(like, escape="\\"))
+        stmt = stmt.where(or_(
+            Debito.descricao.ilike(like, escape="\\"),
+            Debito.numero_nf.ilike(like, escape="\\"),
+            Debito.numero_ne.ilike(like, escape="\\"),
+            Debito.id_fornecedor.in_(fornecedores)))
     if solicitante_id is not None:
         stmt = stmt.where(Debito.id_usuario_solicitante == solicitante_id)
     if id_fonte is not None:
@@ -199,7 +215,38 @@ async def listar_debitos(db: AsyncSession, *, tenant_id: int,
         stmt = stmt.where(Debito.urgente.is_(urgente))
     if competencia:
         stmt = stmt.where(Debito.competencia == competencia)
+    return stmt
+
+
+async def listar_debitos(db: AsyncSession, *, tenant_id: int, **filtros) -> list[Debito]:
+    """Lista débitos com filtros do painel (RF-PNL-02): fonte, categoria (natureza),
+    credor, contrato, tramitação, urgência e competência. Sem corte — é o que a
+    exportação e as filas por etapa usam."""
+    stmt = _filtro_debitos(tenant_id=tenant_id, **filtros)
     return list((await db.execute(stmt.order_by(Debito.id.desc()))).scalars().all())
+
+
+async def pagina_de_debitos(db: AsyncSession, *, tenant_id: int, page: int, page_size: int,
+                            **filtros) -> tuple[list[Debito], int]:
+    """Uma página da listagem e o total do recorte. Mais novos primeiro."""
+    stmt = _filtro_debitos(tenant_id=tenant_id, **filtros)
+    total = (await db.execute(
+        select(func.count()).select_from(stmt.subquery()))).scalar_one()
+    rows = (await db.execute(
+        stmt.order_by(Debito.id.desc()).offset((page - 1) * page_size).limit(page_size)
+    )).scalars().all()
+    return list(rows), int(total)
+
+
+async def contar_por_tramitacao(db: AsyncSession, *, tenant_id: int, **filtros) -> dict[str, int]:
+    """Quantos débitos há em cada situação de tramitação, no recorte dado. É o
+    que alimenta os cartões por etapa da tela — que antes contavam o que o
+    navegador tinha baixado."""
+    sub = _filtro_debitos(tenant_id=tenant_id, **filtros).subquery()
+    rows = (await db.execute(
+        select(sub.c.situacao_tramitacao, func.count()).group_by(sub.c.situacao_tramitacao)
+    )).all()
+    return {situacao: int(n) for situacao, n in rows}
 
 
 async def listar_parcelas(db: AsyncSession, *, tenant_id: int, debito_id: int) -> list[Parcela]:
@@ -263,6 +310,16 @@ async def atualizar_debito(db: AsyncSession, *, tenant_id: int, debito_id: int,
                 payload={"campos_alterados": sorted(alterados), "versao": d.versao})
     data_liquidacao_mudou = ("data_liquidacao" in dados
                              and dados["data_liquidacao"] != d.data_liquidacao)
+    # O retorno do sistema financeiro deixa de valer quando o débito muda por
+    # baixo dele (0144): mexer no valor ou no número do empenho derruba o
+    # `revisado`, para a divergência com a origem aparecer na tela em vez de
+    # ficar com cara de conferido. Os VALORES não são apagados — apagá-los
+    # perderia o que a origem disse; o que cai é a marca de conferência.
+    if d.revisado and any(
+        campo in dados and dados[campo] != getattr(d, campo)
+        for campo in ("valor_total", "numero_ne")
+    ):
+        d.revisado = False
     for k, v in dados.items():
         setattr(d, k, v)
     if parcelas_novas is not None:
@@ -627,31 +684,6 @@ async def validar(db: AsyncSession, *, tenant_id: int, debito_id: int,
     return d
 
 
-async def autoridade_aprovar(db: AsyncSession, *, tenant_id: int, debito_id: int,
-                             usuario_id: int, lock_version: int,
-                             ip: str | None = None) -> Debito:
-    """Autoridade competente aprova a despesa; segue para o pagador.
-
-    AGUARDANDO_AUTORIDADE → AUTORIZADA + ELEGIVEL."""
-    d = await _carregar_para_decisao(db, tenant_id=tenant_id, debito_id=debito_id,
-                                     lock_version=lock_version)
-    if d.situacao_tramitacao != est.AGUARDANDO_AUTORIDADE:
-        raise PagamentoDebitoError(
-            f"Esta solicitação não está aguardando autorização "
-            f"(está em '{d.situacao_tramitacao}').", status.HTTP_409_CONFLICT)
-    grd.assert_segregacao(d, usuario_id=usuario_id, ato="AUTORIZAR")
-    # A dimensão fila NÃO muda nesta linha (ruling do review, Task 4): quem
-    # decide o rótulo verdadeiro é `reavaliar_debito`, logo abaixo — senão a
-    # linha AUTORIZADO fica com ELEGIVEL mesmo quando a reavaliação corrige
-    # para AGUARDANDO_DISPONIBILIDADE/BLOQUEADA, e no caminho feliz gera uma
-    # FILA_REAVALIADA redundante (anterior==nova).
-    _registrar_transicao(db, debito=d, acao="AUTORIZADO", usuario_id=usuario_id,
-                         tramitacao=est.AUTORIZADA, ip=ip)
-    await cron.reavaliar_debito(db, tenant_id=tenant_id, debito_id=d.id, usuario_id=usuario_id)
-    d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
-    return d
-
-
 async def autoridade_indeferir(db: AsyncSession, *, tenant_id: int, debito_id: int,
                                usuario_id: int, lock_version: int, justificativa: str,
                                ip: str | None = None) -> Debito:
@@ -704,8 +736,45 @@ async def cancelar(db: AsyncSession, *, tenant_id: int, debito_id: int, usuario_
     return d
 
 
+async def registrar_empenho(db: AsyncSession, *, tenant_id: int, debito_id: int,
+                            usuario_id: int, valor_empenhado: Decimal,
+                            numero_ne: str | None = None,
+                            ip: str | None = None) -> Debito:
+    """Grava o retorno do sistema financeiro sobre o empenho (migration 0144).
+
+    Não é ato de rito: não muda nenhuma das três dimensões, não valida etapa e
+    não mexe em saldo. O comprometido continua sendo do solicitado e autorizado
+    (`pagamentos_caixa.comprometido_conta`) — empenho aqui é informação de
+    conferência, decisão do Jorge em 2026-11-24.
+
+    Idempotente por valor: regravar o MESMO valor (e mesmo número) é no-op e não
+    polui a trilha. Valor diferente sobrescreve — "se mudar na conciliação vai
+    vir o novo falar e a gente atualiza" — e deixa linha de histórico dizendo de
+    quanto para quanto.
+    """
+    d = await obter_debito(db, tenant_id=tenant_id, debito_id=debito_id)
+    if valor_empenhado is None or valor_empenhado < 0:
+        raise PagamentoDebitoError("Valor empenhado deve ser maior ou igual a zero.",
+                                   status.HTTP_422_UNPROCESSABLE_ENTITY)
+    numero_novo = numero_ne if numero_ne is not None else d.numero_ne
+    if d.valor_empenhado == valor_empenhado and d.numero_ne == numero_novo and d.revisado:
+        return d
+    anterior = d.valor_empenhado
+    d.valor_empenhado = valor_empenhado
+    d.numero_ne = numero_novo
+    d.revisado = True
+    de = "—" if anterior is None else f"{anterior}"
+    _registrar_transicao(
+        db, debito=d, acao="EMPENHO_REGISTRADO", usuario_id=usuario_id,
+        justificativa=f"Empenho do sistema financeiro: {de} → {valor_empenhado}", ip=ip)
+    d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
+    return d
+
+
 async def confirmar_liquidacao(db: AsyncSession, *, tenant_id: int, debito_id: int,
-                               usuario_id: int, data_liquidacao=None, ip: str | None = None) -> Debito:
+                               usuario_id: int, data_liquidacao=None,
+                               valor_liquidado: Decimal | None = None,
+                               ip: str | None = None) -> Debito:
     """Confirma a liquidação (recebimento/atesto) — pré-requisito para validar/autorizar
     (RF-VAL-02/RN-01). Permitido nas etapas pré-validação; não muda o status.
 
@@ -735,12 +804,24 @@ async def confirmar_liquidacao(db: AsyncSession, *, tenant_id: int, debito_id: i
             "de liquidação, use a edição material do débito (fluxo de ajuste).",
             status.HTTP_409_CONFLICT)
 
+    if valor_liquidado is not None and valor_liquidado < 0:
+        raise PagamentoDebitoError("Valor liquidado deve ser maior ou igual a zero.",
+                                   status.HTTP_422_UNPROCESSABLE_ENTITY)
+
     d.liquidacao_confirmada = True
     d.data_liquidacao = data_liquidacao
+    # Retorno do sistema financeiro (0144): só escreve quando veio valor —
+    # liquidar sem valor continua valendo e não apaga o que já estava lá.
+    sufixo_valor = ""
+    if valor_liquidado is not None:
+        d.valor_liquidado = valor_liquidado
+        d.revisado = True
+        sufixo_valor = f"; valor liquidado {valor_liquidado}"
     await cron.registrar_na_fila(db, tenant_id=tenant_id, debito=d, data_liquidacao=data_liquidacao)
     _registrar_transicao(db, debito=d, acao="LIQUIDADO", usuario_id=usuario_id,
                          fila=est.REGISTRADA,
-                         justificativa=f"Liquidação em {d.data_liquidacao.isoformat()}", ip=ip)
+                         justificativa=(f"Liquidação em {d.data_liquidacao.isoformat()}"
+                                        f"{sufixo_valor}"), ip=ip)
     d.atualizado_em = _utcnow(); await db.commit(); await db.refresh(d)
     return d
 
@@ -763,6 +844,8 @@ def debito_out(d: Debito, *, nome_fornecedor: str) -> dict:
         "id_gestor_decisor": d.id_gestor_decisor, "id_validador": d.id_validador,
         "id_usuario_solicitante": d.id_usuario_solicitante,
         "liquidacao_confirmada": d.liquidacao_confirmada, "data_liquidacao": d.data_liquidacao,
+        "valor_empenhado": d.valor_empenhado, "valor_liquidado": d.valor_liquidado,
+        "revisado": d.revisado,
         "categoria": d.categoria,
         "criado_em": d.criado_em, "atualizado_em": d.atualizado_em,
     }

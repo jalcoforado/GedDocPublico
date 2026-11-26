@@ -1,11 +1,17 @@
 from datetime import datetime
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response
 from sqlalchemy import select as _select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.deps import get_current_user, require_tenant_id, require_tenant_slug
+from ..auth.deps import (
+    get_current_user,
+    ler_unidade_contexto,
+    require_tenant_id,
+    require_tenant_slug,
+)
 from ..auth.modulos import require_modulo
 from ..auth.perms import require_permission
 from ..database import get_db
@@ -22,16 +28,27 @@ from ..schemas.complementacao_documental import (
 )
 from ..schemas.processo import (
     ArquivarRequest,
+    CancelarRecebimentoRequest,
+    DesarquivarRequest,
     AtribuirResponsavelRequest,
+    CaixaProcesso,
+    CaixasContagem,
+    LoteRequest,
+    LoteResultado,
+    PainelUnidade,
     CancelarEncaminhamentoRequest,
+    RecusarEncaminhamentoRequest,
     ClassificarSigiloRequest,
     DestinosPermitidosOut,
     EncaminharRequest,
     EscopoProcesso,
     EncaminhamentoOut as _EncaminhamentoOut,
+    OrdemProcesso,
+    OrdenarProcesso,
     ProcessoCreate,
     ProcessoDetail,
     ProcessoListItem,
+    RascunhoUpdate,
 )
 from ..schemas.marcador import DefinirMarcadoresRequest
 from ..services.marcadores import MarcadorError, definir_marcadores, desfavoritar, favoritar
@@ -41,7 +58,14 @@ from ..services.acoes_processo import (
     _get_processo,
     arquivar,
     atribuir_responsavel,
+    ForaDaUnidadeError,
+    ProcessoNaoEncontradoError,
+    avisar_cancelamento_recebimento,
+    avisar_recusa,
     cancelar_encaminhamento,
+    cancelar_recebimento,
+    desarquivar,
+    recusar_encaminhamento,
     encaminhar,
     receber,
 )
@@ -54,7 +78,12 @@ from ..services.pdf_montagem import gerar_processo_completo_pdf
 from ..services.checklist_documentos import calcular_checklist
 from ..services import complementacao_documental as _comp_svc
 from ..services.complementacao_documental import ComplementacaoError
-from ..services.processos import get_processo_detail, list_processos
+from ..services.processos import (
+    contar_caixas,
+    get_processo_detail,
+    list_processos,
+    painel_unidade,
+)
 from ..schemas.ccd import TemporalidadeOut
 from ..services.temporalidade import calcular_temporalidade
 
@@ -130,6 +159,34 @@ async def acesso_niveis_dep(
     return await _niveis_acesso(db, user, tenant_id)
 
 
+async def unidade_ativa_dep(
+    request: Request,
+    user: Usuario = Depends(get_current_user),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> int | None:
+    """A "minha unidade" das caixas, do painel e do `escopo`: a lotação ATIVA
+    da sessão (o "alterar setor" do cabeçalho), caindo na principal.
+
+    Até a troca de lotação ser visível na tela, estes recortes usavam só a
+    principal, de propósito: com o seletor escondido no menu do avatar, contar
+    pela ativa faria os números mudarem sem que o usuário soubesse por quê.
+    Agora a unidade ativa aparece no cabeçalho, ao lado do nome, e é ela que
+    o usuário escolheu para trabalhar — contar pela principal mostraria a
+    caixa de um setor enquanto a tela diz que ele está em outro.
+
+    O recorte só REDUZ a lista (não concede acesso a nada que o gate e o
+    sigilo já não concedam), e `resolver_unidade_ativa` ainda reconfere a
+    claim contra as lotações vigentes.
+    """
+    from ..services.permissoes import resolver_unidade_ativa
+
+    return await resolver_unidade_ativa(
+        db, tenant_id=tenant_id, usuario=user,
+        id_unidade_contexto=await ler_unidade_contexto(request, db),
+    )
+
+
 async def require_acesso_processo(
     processo_id: int,
     user: Usuario = Depends(get_current_user),
@@ -175,6 +232,7 @@ async def list_endpoint(
     # depender do usuário. Continua sem gate novo: `require_permission` acima é
     # o mesmo de antes, e o recorte não concede acesso a nada — só reduz.
     usuario: Usuario = Depends(get_current_user),
+    unidade_ativa: int | None = Depends(unidade_ativa_dep),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     q: str | None = Query(None, description="Busca em número, manifestante, assunto"),
@@ -198,6 +256,30 @@ async def list_endpoint(
         None,
         description="rascunho | protocolado | todos. Ausente = exclui rascunho (E3).",
     ),
+    caixa: CaixaProcesso | None = Query(
+        None,
+        description=(
+            "Caixa de trabalho de quem consulta: entrada | saida | analise | "
+            "externos | aguardando_assinatura | enviado_para_assinatura | "
+            "arquivados. Ausente = sem recorte."
+        ),
+    ),
+    ordem: OrdemProcesso = Query(
+        OrdemProcesso.recentes,
+        description=(
+            "recentes (abertura, do mais novo — padrão) | parados (há mais "
+            "tempo sem movimentação primeiro)."
+        ),
+    ),
+    # SI-19 — ordenação pelo título da coluna. Com `ordenar`, `ordem` é ignorada.
+    ordenar: OrdenarProcesso | None = Query(
+        None,
+        description=(
+            "numero | abertura | manifestante | assunto | local_atual | "
+            "responsavel | parado. Ausente = segue `ordem`."
+        ),
+    ),
+    direcao: Literal["asc", "desc"] = Query("asc", description="asc | desc"),
 ) -> Paginated[ProcessoListItem]:
     items, total = await list_processos(
         db,
@@ -216,19 +298,98 @@ async def list_endpoint(
         favoritos=favoritos,
         id_marcador=id_marcador,
         situacao=situacao,
+        caixa=caixa,
+        ordem=ordem,
+        ordenar=ordenar,
+        direcao=direcao,
         id_usuario_contexto=usuario.id,
-        # A lotação PRINCIPAL. Lotação neste sistema tem duas representações
-        # simultâneas — esta e a N:N `utils.usuario_unidade_trabalho` —, então
-        # "minha unidade" é ambíguo para quem atua em dois setores.
-        #
-        # Escolher a principal é o padrão conservador: mantém o significado que
-        # a expressão já tem hoje. Somar todas as lotações mudaria o que o
-        # filtro quer dizer, e a decisão certa depende de existir um seletor de
-        # contexto ativo (o "alterar setor" do SUiTE), que ainda não existe
-        # aqui. Não resolver em silêncio é deliberado.
-        id_unidade_contexto=usuario.id_unidade_trabalho,
+        # A lotação ATIVA da sessão, caindo na principal. Lotação neste sistema
+        # tem duas representações simultâneas — a principal e a N:N
+        # `utils.usuario_unidade_trabalho` —, então "minha unidade" é ambíguo
+        # para quem atua em dois setores. Somar todas mudaria o que o filtro
+        # quer dizer; a resposta é a que o usuário escolheu no seletor do
+        # cabeçalho (o "alterar setor" do SUiTE). Ver `unidade_ativa_dep`.
+        id_unidade_contexto=unidade_ativa,
     )
     return Paginated(items=items, total=total, page=page, page_size=page_size)
+
+
+# Literal ANTES da paramétrica `/{processo_id}`: o FastAPI casa na ordem de
+# declaração, e a paramétrica engoliria "caixas" e morreria em 422
+# (`tests/test_guarda_ordem_rotas.py`).
+@router.get(
+    "/caixas",
+    response_model=CaixasContagem,
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
+)
+async def caixas_endpoint(
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+    niveis: list[str] | None = Depends(acesso_niveis_dep),
+    usuario: Usuario = Depends(get_current_user),
+    unidade_ativa: int | None = Depends(unidade_ativa_dep),
+) -> CaixasContagem:
+    """Contadores das caixas de trabalho de quem consulta.
+
+    Mesmo gate, mesmo recorte de sigilo e mesma unidade da listagem, de
+    propósito: o número de cada caixa é o `total` que
+    `GET /processos?caixa=...` devolve. A unidade é a lotação ATIVA
+    (`unidade_ativa_dep`) — se a lista e o contador lessem unidades
+    diferentes, o número da lateral deixaria de bater com a caixa aberta.
+    """
+    return await contar_caixas(
+        db,
+        tenant_id=tenant_id,
+        niveis_permitidos=niveis,
+        id_usuario_contexto=usuario.id,
+        id_unidade_contexto=unidade_ativa,
+    )
+
+
+@router.post("/lote", response_model=LoteResultado)
+async def lote_endpoint(
+    payload: LoteRequest,
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> LoteResultado:
+    """A mesma ação sobre vários processos selecionados na lista.
+
+    Mesmo gate das rotas individuais (`processo` com `atualizar`); o sigilo é
+    conferido processo a processo dentro do serviço, como o
+    `require_acesso_processo` faz em cada rota individual. Responde 200 mesmo
+    com falhas parciais: o corpo diz, um a um, o que foi feito.
+    """
+    from ..services.processos_lote import executar_lote
+
+    return await executar_lote(
+        db, payload, tenant_id=tenant_id, usuario=current,
+        is_super_usuario=await _is_super(db, current, tenant_id),
+    )
+
+
+@router.get(
+    "/painel",
+    response_model=PainelUnidade,
+    dependencies=[Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
+)
+async def painel_endpoint(
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+    niveis: list[str] | None = Depends(acesso_niveis_dep),
+    usuario: Usuario = Depends(get_current_user),
+    unidade_ativa: int | None = Depends(unidade_ativa_dep),
+) -> PainelUnidade:
+    """Painel de controle do protocolo (`/m/protocolo/painel`): as caixas, quem está com o quê e
+    os prazos da unidade ATIVA de quem consulta. Mesmo gate, recorte e
+    unidade de `/caixas`."""
+    return await painel_unidade(
+        db,
+        tenant_id=tenant_id,
+        niveis_permitidos=niveis,
+        id_usuario_contexto=usuario.id,
+        id_unidade_contexto=unidade_ativa,
+    )
 
 
 @router.get(
@@ -399,6 +560,91 @@ async def create_endpoint(
     return detail
 
 
+# ===== Rascunho: editar, abrir, excluir (SI-16) =====
+# Só o autor: `require_acesso_processo` já devolve 404 para rascunho alheio, e
+# o service confere de novo porque escreve. Ver `services/rascunho_processo.py`.
+
+
+def _erro_de_rascunho(e: Exception) -> HTTPException:
+    from ..services.rascunho_processo import RascunhoJaAbertoError, RascunhoNaoEncontradoError
+
+    if isinstance(e, RascunhoNaoEncontradoError):
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    if isinstance(e, RascunhoJaAbertoError):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+async def _detalhe_ou_404(db: AsyncSession, processo_id: int, *, tenant_id: int, usuario_id: int):
+    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id, usuario_id=usuario_id)
+    if detail is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
+    return detail
+
+
+@router.put(
+    "/{processo_id}/rascunho",
+    response_model=ProcessoDetail,
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
+)
+async def editar_rascunho_endpoint(
+    processo_id: int,
+    payload: RascunhoUpdate,
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ProcessoDetail:
+    from ..services.rascunho_processo import RascunhoError, editar_rascunho
+
+    try:
+        await editar_rascunho(db, processo_id, payload, tenant_id=tenant_id, usuario_id=current.id)
+    except RascunhoError as e:
+        raise _erro_de_rascunho(e)
+    return await _detalhe_ou_404(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
+
+
+@router.post(
+    "/{processo_id}/abrir",
+    response_model=ProcessoDetail,
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
+)
+async def abrir_rascunho_endpoint(
+    processo_id: int,
+    current: Usuario = Depends(require_permission("processo", "inserir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ProcessoDetail:
+    """Abre o processo a partir do rascunho: é aqui que ele ganha número.
+    `inserir`, e não `atualizar`, porque é o mesmo ato da abertura direta."""
+    from ..services.rascunho_processo import RascunhoError, abrir_rascunho
+
+    try:
+        await abrir_rascunho(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
+    except RascunhoError as e:
+        raise _erro_de_rascunho(e)
+    return await _detalhe_ou_404(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
+
+
+@router.delete(
+    "/{processo_id}/rascunho",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo"))],
+)
+async def excluir_rascunho_endpoint(
+    processo_id: int,
+    current: Usuario = Depends(require_permission("processo", "excluir")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    from ..services.rascunho_processo import RascunhoError, excluir_rascunho
+
+    try:
+        await excluir_rascunho(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
+    except RascunhoError as e:
+        raise _erro_de_rascunho(e)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get(
     "/{processo_id}/trail",
     dependencies=[Depends(require_acesso_processo), Depends(require_modulo("protocolo")), Depends(require_permission("processo"))],
@@ -490,6 +736,52 @@ async def arquivar_endpoint(
             tenant_id=tenant_id,
             usuario_id=current.id,
             is_super_usuario=is_super,
+        )
+    except AcaoError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
+    if detail is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado"
+        )
+    return detail
+
+
+@router.post(
+    "/{processo_id}/desarquivar",
+    response_model=ProcessoDetail,
+    dependencies=[Depends(require_acesso_processo)],
+)
+async def desarquivar_endpoint(
+    processo_id: int,
+    payload: DesarquivarRequest,
+    current: Usuario = Depends(require_permission("processo_desarquivar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ProcessoDetail:
+    """SI-60 (RF-01) — reabre um processo arquivado, com justificativa.
+
+    Transação própria, `processo_desarquivar`, e não `processo`/`atualizar`:
+    o RF-01 pede permissão específica, e quem tramita não ganha com isso o
+    poder de reabrir o que foi encerrado. Sem `action`, como
+    `pagamento_autorizar`: ter a transação é o que autoriza o ato.
+
+    Processo não arquivado, segundo clique e fluxo rígido sem regra de
+    retomada caem em 400 com o motivo (`AcaoError`). Processo de outro
+    tenant é 404: o guard de sigilo deixa passar o que não acha, e a resposta
+    é desta rota.
+    """
+    try:
+        await desarquivar(
+            db,
+            processo_id,
+            payload,
+            tenant_id=tenant_id,
+            usuario_id=current.id,
+        )
+    except ProcessoNaoEncontradoError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado"
         )
     except AcaoError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -666,11 +958,83 @@ async def receber_endpoint(
             is_super_usuario=is_super,
             override_motivo=override_motivo,
         )
+    except ForaDaUnidadeError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     except AcaoError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
+    return detail
+
+
+@router.post(
+    "/{processo_id}/recusar-encaminhamento",
+    response_model=ProcessoDetail,
+    dependencies=[Depends(require_acesso_processo)],
+)
+async def recusar_encaminhamento_endpoint(
+    processo_id: int,
+    payload: RecusarEncaminhamentoRequest,
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ProcessoDetail:
+    """O destino recusa o encaminhamento pendente. Mesmo gate de `receber`: é
+    a outra decisão de quem está com o processo chegando."""
+    try:
+        enc = await recusar_encaminhamento(
+            db, processo_id, payload, tenant_id=tenant_id, usuario_id=current.id,
+            is_super_usuario=await _is_super(db, current, tenant_id),
+        )
+    except ForaDaUnidadeError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except AcaoError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
+    if detail is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
+    await avisar_recusa(db, tenant_id=tenant_id, enc=enc, numero_processo=detail.numero_processo)
+    return detail
+
+
+@router.post(
+    "/{processo_id}/cancelar-recebimento",
+    response_model=ProcessoDetail,
+    dependencies=[Depends(require_acesso_processo)],
+)
+async def cancelar_recebimento_endpoint(
+    processo_id: int,
+    payload: CancelarRecebimentoRequest,
+    current: Usuario = Depends(require_permission("processo_cancelar_recebimento")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> ProcessoDetail:
+    """SI-61 (RF-02) — desfaz um recebimento feito por engano.
+
+    Transação própria, `processo_cancelar_recebimento`, sem `action` (como
+    `pagamento_autorizar`), mais a lotação na unidade que recebeu (403 sem
+    ela). Algo feito depois do recebimento bloqueia com 400 e o motivo.
+    Processo de outro tenant é 404.
+    """
+    try:
+        enc = await cancelar_recebimento(
+            db, processo_id, payload, tenant_id=tenant_id, usuario_id=current.id,
+            is_super_usuario=await _is_super(db, current, tenant_id),
+        )
+    except ProcessoNaoEncontradoError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
+    except ForaDaUnidadeError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except AcaoError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id, usuario_id=current.id)
+    if detail is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
+    await avisar_cancelamento_recebimento(
+        db, tenant_id=tenant_id, enc=enc, numero_processo=detail.numero_processo,
+        usuario_id=current.id, justificativa=payload.justificativa,
+    )
     return detail
 
 
@@ -703,9 +1067,11 @@ async def capa_pdf_endpoint(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     niveis: list[str] | None = Depends(acesso_niveis_dep),
+    user: Usuario = Depends(get_current_user),
 ):
     detail = await get_processo_detail(
-        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis
+        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis,
+        usuario_id=user.id,
     )
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
@@ -725,10 +1091,12 @@ async def folha_ocorrencias_pdf_endpoint(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     niveis: list[str] | None = Depends(acesso_niveis_dep),
+    user: Usuario = Depends(get_current_user),
 ):
     """F7 — PDF legível da trilha do processo, pra anexar a um procedimento."""
     detail = await get_processo_detail(
-        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis
+        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis,
+        usuario_id=user.id,
     )
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
@@ -748,9 +1116,11 @@ async def etiqueta_unica_pdf(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     niveis: list[str] | None = Depends(acesso_niveis_dep),
+    user: Usuario = Depends(get_current_user),
 ):
     detail = await get_processo_detail(
-        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis
+        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis,
+        usuario_id=user.id,
     )
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
@@ -771,9 +1141,11 @@ async def completo_pdf_endpoint(
     tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),
     niveis: list[str] | None = Depends(acesso_niveis_dep),
+    user: Usuario = Depends(get_current_user),
 ):
     detail = await get_processo_detail(
-        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis
+        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis,
+        usuario_id=user.id,
     )
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
@@ -793,9 +1165,11 @@ async def etiqueta_dupla_pdf(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     niveis: list[str] | None = Depends(acesso_niveis_dep),
+    user: Usuario = Depends(get_current_user),
 ):
     detail = await get_processo_detail(
-        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis
+        db, processo_id, tenant_id=tenant_id, niveis_permitidos=niveis,
+        usuario_id=user.id,
     )
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
@@ -817,6 +1191,7 @@ async def comprovante_pdf_endpoint(
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
     niveis: list[str] | None = Depends(acesso_niveis_dep),
+    user: Usuario = Depends(get_current_user),
 ):
     # Carrega encaminhamento + nomes via JOIN explícito.
     from sqlalchemy.orm import aliased
@@ -840,7 +1215,8 @@ async def comprovante_pdf_endpoint(
 
     enc, uo, ud, prio = row
     detail = await get_processo_detail(
-        db, enc.id_processo, tenant_id=tenant_id, niveis_permitidos=niveis
+        db, enc.id_processo, tenant_id=tenant_id, niveis_permitidos=niveis,
+        usuario_id=user.id,
     )
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
@@ -877,8 +1253,11 @@ async def cancelar_encaminhamento_endpoint(
 ) -> ProcessoDetail:
     try:
         enc = await cancelar_encaminhamento(
-            db, encaminhamento_id, payload, tenant_id=tenant_id, usuario_id=current.id
+            db, encaminhamento_id, payload, tenant_id=tenant_id, usuario_id=current.id,
+            is_super_usuario=await _is_super(db, current, tenant_id),
         )
+    except ForaDaUnidadeError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     except AcaoError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     detail = await get_processo_detail(db, enc.id_processo, tenant_id=tenant_id, usuario_id=current.id)

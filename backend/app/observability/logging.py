@@ -19,6 +19,28 @@ request_id_ctx: ContextVar[str | None] = ContextVar("request_id", default=None)
 tenant_id_ctx: ContextVar[int | None] = ContextVar("tenant_id", default=None)
 tenant_slug_ctx: ContextVar[str | None] = ContextVar("tenant_slug", default=None)
 usuario_id_ctx: ContextVar[int | None] = ContextVar("usuario_id", default=None)
+# IP de quem fez o request. Existe para a auditoria: o `audit.log` chamado de
+# dentro de um service não tem o `Request` em mãos, e sem isto a linha nascia
+# sem IP e sem `request_id`.
+client_ip_ctx: ContextVar[str | None] = ContextVar("client_ip", default=None)
+
+
+def ip_do_request(request: Any) -> str | None:
+    """De onde veio o request, para a trilha de auditoria.
+
+    `X-Real-IP` primeiro: o nginx o SOBRESCREVE com `$remote_addr`, então o
+    cliente não consegue forjá-lo. O `X-Forwarded-For` o nginx só ESTENDE
+    (`$proxy_add_x_forwarded_for`): o primeiro item é o que o cliente mandou,
+    e quem quisesse aparecer na trilha com outro IP bastava enviar o cabeçalho.
+    Ele fica como recurso para quando não houver `X-Real-IP`; sem nenhum dos
+    dois (acesso direto, testes), vale o cliente da conexão."""
+    real = request.headers.get("x-real-ip", "").strip()
+    if real:
+        return real
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip() or None
+    return request.client.host if request.client else None
 
 
 class JsonFormatter(logging.Formatter):

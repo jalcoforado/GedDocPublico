@@ -20,16 +20,21 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from uuid import uuid4
 
-from sqlalchemy import select, text
+from sqlalchemy import null, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.password import hash_password, verify_password
 from ..models import UsuarioExterno
 from ..schemas.cidadao import CadastroCidadaoRequest
+from .conta_email import conta_por_email_ativa
 
 
 class CidadaoAuthError(Exception):
     pass
+
+
+class EmailNaoConfirmadoError(CidadaoAuthError):
+    """Senha certa, mas o e-mail do autocadastro ainda não foi confirmado."""
 
 
 def _normaliza_cpf_cnpj(s: str) -> str:
@@ -75,6 +80,11 @@ async def cadastrar(
         app=app,
         telefone=payload.telefone,
         telefone_whatsapp=payload.telefone_whatsapp,
+        # 0137 — o cadastro só vale depois de o cidadão confirmar o e-mail
+        # (link enviado pelo router). `null()` e não `None`: com `None` o ORM
+        # usaria o server_default NOW() e o cadastro nasceria confirmado.
+        # Com a conta por e-mail desligada, nasce confirmado (não há link).
+        email_verificado_em=null() if conta_por_email_ativa() else datetime.utcnow(),
     )
     db.add(cidadao)
     await db.commit()
@@ -103,6 +113,15 @@ async def login(
     )
     if not ok:
         raise CidadaoAuthError("CPF/CNPJ ou senha inválidos")
+    # Só depois da senha certa: dizer "e-mail não confirmado" a quem errou a
+    # senha contaria que aquele CPF/CNPJ tem cadastro.
+    # Com a conta por e-mail desligada a confirmação não existe: nem quem se
+    # cadastrou enquanto ela estava ligada fica preso esperando um link.
+    if cidadao.email_verificado_em is None and conta_por_email_ativa():
+        raise EmailNaoConfirmadoError(
+            "Confirme o seu e-mail para entrar: abra o link que enviamos quando "
+            "você se cadastrou."
+        )
     if needs_rehash:
         # Conversão da credencial legada no primeiro uso: grava bcrypt e APAGA o
         # MD5 no mesmo ato. Sem o zerar, a linha ficaria para sempre com um hash

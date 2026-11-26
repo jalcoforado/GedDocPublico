@@ -2,17 +2,21 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from .relatorio import RelatorioFiltro
+from .relatorio import RelatorioFiltro, Situacao
 
 
 class TramitacaoEtapa(BaseModel):
-    """Uma 'estação' do processo numa unidade: chegou, ficou X tempo, saiu."""
+    """Uma 'estação' do processo numa unidade: chegou, ficou X tempo, saiu.
+
+    Datas em hora local (Brasília), sem fuso."""
     id_unidade: int | None
     unidade: str | None
     chegou_em: datetime | None  # data_hora_recebimento ou abertura
     saiu_em: datetime | None  # data_hora_movimentacao do próximo encaminhamento (None se ainda lá)
     minutos_no_local: int | None  # None se ainda lá
-    prazo_estipulado: datetime | None  # da data_prazo do encaminhamento que trouxe o processo
+    # Fim do dia do prazo do encaminhamento que trouxe o processo.
+    prazo_estipulado: datetime | None
+    # Saiu (ou segue lá) depois do fim do dia do prazo.
     atrasou: bool
 
 
@@ -20,7 +24,7 @@ class TramitacaoProcesso(BaseModel):
     id: int
     numero_processo: str
     data_hora_abertura: datetime
-    ativo: bool
+    situacao: Situacao
     manifestante: str | None
     assunto: str | None
     qtd_encaminhamentos: int
@@ -44,8 +48,12 @@ class TramitacaoPorUnidade(BaseModel):
 
 class RelatorioTramitacaoResposta(BaseModel):
     filtros_aplicados: RelatorioFiltro
+    descricao_filtros: list[str]
     nome_unidade: str | None
+    # Total do recorte; a lista e as médias abaixo cobrem os `qtd_listados`.
     qtd_processos: int
+    qtd_listados: int
+    cortado: bool
     qtd_processos_com_atraso: int
     minutos_medio_por_processo: float
     por_unidade: list[TramitacaoPorUnidade]

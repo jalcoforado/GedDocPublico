@@ -130,6 +130,12 @@ class Processo(Base):
     prazo_servico_dias_snapshot: Mapped[int | None] = mapped_column(
         Integer, nullable=True
     )
+    # SI-60 (0139) — desarquivar reinicia a contagem do prazo do serviço a
+    # partir daqui. Nula = nunca desarquivado: o prazo conta da abertura.
+    # Quem lê é `prazos.inicio_do_prazo` (e o espelho SQL dele).
+    data_reinicio_prazo: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
 
 
 class Movimentacao(Base):
@@ -176,6 +182,9 @@ class Despacho(Base):
     ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     excluido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     id_movimentacao: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # SI-62: PDF assinado do despacho avulso. Nulo nos despachos de
+    # encaminhar/recusar/cancelar/arquivar, que são só texto.
+    id_anexo: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class Encaminhamento(Base):
@@ -204,6 +213,15 @@ class Encaminhamento(Base):
     recebido: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     data_hora_recebimento: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     cancelado: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Recusa pelo destino (migration 0135). Recusado é sempre também
+    # `cancelado` — é o que tira o processo do trânsito para todo predicado de
+    # "pendente" já existente; este campo diz QUEM desfez.
+    recusado: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    data_hora_recusa: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    id_usuario_recusa: Mapped[int | None] = mapped_column(
+        ForeignKey("utils.usuario.id"), nullable=True
+    )
+    motivo_recusa: Mapped[str | None] = mapped_column(Text, nullable=True)
     id_usuario: Mapped[int] = mapped_column(
         ForeignKey("utils.usuario.id"), nullable=False
     )
@@ -323,3 +341,8 @@ class AnexoProcesso(Base):
     )
     motivo_desentranhamento: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     autoridade_desentranhamento: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # SI-62: documento que este arquivo acompanha (ex.: os anexos do despacho
+    # são filhos do PDF assinado). Nulo no anexo avulso. Migration 0142.
+    id_anexo_principal: Mapped[int | None] = mapped_column(
+        ForeignKey("protocolos.anexo.id"), nullable=True
+    )

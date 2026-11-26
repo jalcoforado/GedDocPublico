@@ -105,7 +105,7 @@ describe("Export contábil — lotes", () => {
     fireEvent.change(within(dialog).getByLabelText(/data-limite/i), {
       target: { value: "2026-08-20" },
     });
-    fireEvent.click(within(dialog).getByRole("button", { name: /^Gerar$/i }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Gerar lote" }));
 
     await waitFor(() => expect(gerarLoteMock).toHaveBeenCalledWith("2026-08-20"));
     await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
@@ -123,7 +123,7 @@ describe("Export contábil — lotes", () => {
     const dialog = (await screen.findByText("Gerar lote de export contábil")).closest(
       "[role=dialog]",
     ) as HTMLElement;
-    fireEvent.click(within(dialog).getByRole("button", { name: /^Gerar$/i }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Gerar lote" }));
 
     await waitFor(() =>
       expect(toastError).toHaveBeenCalledWith(

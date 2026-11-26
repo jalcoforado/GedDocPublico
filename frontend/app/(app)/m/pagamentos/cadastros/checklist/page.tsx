@@ -1,12 +1,18 @@
 "use client";
 
+import { ListChecks } from "lucide-react";
+
 import { CrudPage } from "@/components/CrudPage";
+import { AtivoBadge } from "@/components/pagamentos/Rotulos";
 import { api, type ChecklistItemTemplate } from "@/lib/api";
 
 export default function ChecklistItensPage() {
   return (
     <CrudPage<ChecklistItemTemplate>
       title="Checklist documental"
+      icon={ListChecks}
+      description="Documentos que a validação financeira confere em toda solicitação."
+      novoLabel="Novo item do checklist"
       queryKey={["pag-checklist-itens"]}
       fetchList={() => api.pagamentos.cadastros.checklistItens.list()}
       createFn={api.pagamentos.cadastros.checklistItens.create}
@@ -16,13 +22,31 @@ export default function ChecklistItensPage() {
       columns={[
         { header: "Descrição", render: (r) => r.descricao },
         { header: "Obrigatório", render: (r) => (r.obrigatorio ? "Sim" : "Não") },
-        { header: "Ordem", render: (r) => String(r.ordem) },
-        { header: "Ativo", render: (r) => (r.ativo ? "Sim" : "Não") },
+        { header: "Ordem", render: (r) => String(r.ordem), className: "tabular-nums" },
+        { header: "Situação", render: (r) => <AtivoBadge ativo={r.ativo} /> },
       ]}
       fields={[
-        { name: "descricao", label: "Descrição", type: "textarea", required: true, colSpan: 2 },
-        { name: "obrigatorio", label: "Obrigatório para validar", type: "checkbox" },
-        { name: "ativo", label: "Ativo", type: "checkbox" },
+        {
+          name: "descricao",
+          label: "Documento a conferir",
+          type: "textarea",
+          required: true,
+          colSpan: 2,
+          placeholder: "Ex.: Certidão negativa de débitos federais válida",
+          dica: "Escreva como o validador vai ler na lista de conferência.",
+        },
+        {
+          name: "obrigatorio",
+          label: "Obrigatório",
+          type: "checkbox",
+          textoAoLado: "A validação só conclui com este item marcado",
+        },
+        {
+          name: "ativo",
+          label: "Situação",
+          type: "checkbox",
+          textoAoLado: "Ativo — entra no checklist das solicitações",
+        },
       ]}
     />
   );

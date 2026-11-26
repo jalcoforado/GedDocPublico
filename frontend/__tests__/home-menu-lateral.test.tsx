@@ -1,0 +1,85 @@
+/**
+ * Menu único (2026-11-05, no modelo do IAnalisys): a barra lateral está em
+ * TODA tela — Início, perfil e dentro dos módulos —, com todos os módulos
+ * contratados. Antes ela só existia dentro de um módulo e mostrava só ele, e
+ * este teste travava o contrário (`/home` sem menu).
+ */
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const estado: { caminho: string; perms: string[] } = { caminho: "/home", perms: [] };
+
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => estado.caminho,
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
+}));
+vi.mock("@/lib/auth", () => ({
+  AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  useAuth: () => ({
+    user: { nome: "Teste", is_super_usuario: false },
+    perms: [],
+    loading: false,
+    can: (codigo: string) => estado.perms.includes(codigo),
+    logout: vi.fn(),
+  }),
+}));
+vi.mock("@/lib/api", () => ({
+  api: {
+    admin: { me: () => Promise.resolve({ is_platform_admin: false }) },
+    modulos: () => Promise.resolve({ itens: [{ slug: "protocolo", nome: "Protocolo", icone: "FileText", ordem: 1 }] }),
+    branding: () => Promise.resolve(null),
+    // O Panorama do painel (2026-11-14) lê o gerencial; aqui só não pode quebrar.
+    relatorios: { gerencial: () => Promise.reject(new Error("sem dados no teste")) },
+    processos: {
+      caixas: () => Promise.resolve({
+        entrada: 0, saida: 0, analise: 12, externos: 0, aguardando_assinatura: 0,
+        enviado_para_assinatura: 0, arquivados: 0, recusados: 0,
+      }),
+    },
+  },
+  notificacoesApi: {
+    listarMinhas: () => Promise.resolve({ nao_lidas: 0, itens: [] }),
+  },
+  gerencialPdfUrl: () => "/api/v2/relatorios/gerencial.pdf",
+}));
+
+import AppLayout from "@/app/(app)/layout";
+import { ThemeProvider } from "@/lib/theme";
+
+function abrir(caminho: string, perms: string[]) {
+  estado.caminho = caminho;
+  estado.perms = perms;
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <ThemeProvider>
+        <AppLayout>
+          <p>conteúdo</p>
+        </AppLayout>
+      </ThemeProvider>
+    </QueryClientProvider>,
+  );
+}
+
+afterEach(cleanup);
+
+describe("menu único: a barra lateral está em toda tela", () => {
+  it("o Início tem o menu lateral, com o Protocolo contratado", async () => {
+    abrir("/home", ["processo"]);
+    expect((await screen.findAllByRole("link", { name: /Caixas de trabalho/ })).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: /Painel de controle/ }).length).toBeGreaterThan(0);
+  });
+
+  it("o painel do protocolo mostra o mesmo menu", async () => {
+    abrir("/m/protocolo/painel", ["processo"]);
+    expect((await screen.findAllByRole("link", { name: /Painel de controle/ })).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: /Caixas de trabalho/ }).length).toBeGreaterThan(0);
+  });
+
+  it("as outras telas gerais também têm o menu", async () => {
+    abrir("/perfil", ["processo"]);
+    expect((await screen.findAllByRole("link", { name: /Caixas de trabalho/ })).length).toBeGreaterThan(0);
+  });
+});

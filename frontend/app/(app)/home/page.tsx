@@ -1,686 +1,573 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { Carregando } from "@/components/ui/carregando";
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AlertTriangle,
-  Archive,
   ArrowRight,
-  Bell,
-  Building2,
-  FileSignature,
-  Inbox,
-  Loader2,
-  PenSquare,
-  RefreshCw,
-  Search,
-  Sparkles,
-  TrendingUp,
+  Banknote,
+  Bus,
+  CheckCheck,
+  FileText,
+  Home,
+  type LucideIcon,
+  PenLine,
+  Star,
+  Truck,
 } from "lucide-react";
 import Link from "next/link";
-import { useMemo } from "react";
 
-import {
-  api,
-  assinaturasApi,
-  notificacoesApi,
-  temporalidadeApi,
-  workflowApi,
-} from "@/lib/api";
+import { Panorama } from "@/components/home/Panorama";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/ui/page-header";
+import { Skeleton } from "@/components/ui/skeleton";
+import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
+import { api, notificacoesApi } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { useBranding } from "@/lib/branding";
+import { hrefDaCaixa } from "@/lib/caixas-processos";
+import { MENUS } from "@/lib/menus";
+import { PERMS_LEITURA_PAGAMENTOS } from "@/lib/menus/pagamentos";
 import { cn } from "@/lib/utils";
 
-const DIAS_SEMANA = [
-  "domingo",
-  "segunda-feira",
-  "terça-feira",
-  "quarta-feira",
-  "quinta-feira",
-  "sexta-feira",
-  "sábado",
-];
-const MESES = [
-  "janeiro",
-  "fevereiro",
-  "março",
-  "abril",
-  "maio",
-  "junho",
-  "julho",
-  "agosto",
-  "setembro",
-  "outubro",
-  "novembro",
-  "dezembro",
-];
+/**
+ * Início — a tela que atravessa os módulos: o que pede a pessoa HOJE, em
+ * todos os módulos que a prefeitura contratou e que ela alcança.
+ *
+ * Até 2026-11-05 a `/home` empurrava quem opera processos para o painel do
+ * Protocolo (decisão de 2026-10-21, PR 142 do repositório). Na prática "Início" virou um
+ * segundo link para "Painel de controle": clicado no painel, recarregava a
+ * mesma tela; clicado em Pagamentos, jogava a pessoa no Protocolo. O painel
+ * de cada módulo responde "como está a minha unidade NESTE módulo"; o Início
+ * responde "o que precisa de mim agora, em qualquer lugar".
+ *
+ * Cada cartão só aparece se o módulo está contratado E a pessoa tem a
+ * leitura dele — as mesmas regras do menu —, e cada número leva à lista que
+ * o conta, na tela do próprio módulo. Número que não carregou diz isso, em
+ * vez de mostrar zero.
+ */
 
-function dataExtensa(d: Date): string {
-  return `${DIAS_SEMANA[d.getDay()]}, ${d.getDate()} de ${MESES[d.getMonth()]}`;
+interface LinhaDef {
+  rotulo: string;
+  valor: number | undefined;
+  href: string;
+  /** Só pinta quando há algo: zero nunca é alarme. */
+  tom?: "danger" | "warning";
 }
 
-function saudacaoPorHora(d: Date): string {
-  const h = d.getHours();
-  if (h < 6) return "Boa madrugada";
+function saudacao(agora: Date): string {
+  const h = agora.getHours();
   if (h < 12) return "Bom dia";
   if (h < 18) return "Boa tarde";
   return "Boa noite";
 }
 
-function fmtDataCurta(s: string | null): string {
-  if (!s) return "—";
-  const d = new Date(s);
-  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
-}
-
 export default function HomePage() {
-  const { user, perms } = useAuth();
-  const branding = useBranding();
+  const { user, can } = useAuth();
+  const primeiroNome = (user?.nome ?? "").split(/\s+/)[0] || "";
+  const agora = new Date();
+  const data = agora.toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long" });
+  const hoje = data.charAt(0).toUpperCase() + data.slice(1);
 
-  const idUnidadeUser = user?.id_unidade_trabalho;
-  const agora = useMemo(() => new Date(), []);
+  // Mesma queryKey do guard de módulo e do menu lateral.
+  const modulosQ = useQuery({ queryKey: ["modulos-me"], queryFn: api.modulos });
+  const contratado = (slug: string) => !!modulosQ.data?.itens.some((i) => i.slug === slug);
 
-  // ---- Action counters --------------------------------------------------
-  const assinaturasQ = useQuery({
-    queryKey: ["home-assinaturas-pendentes"],
-    queryFn: () => assinaturasApi.minhasPendentes(),
-    staleTime: 60_000,
-  });
-
-  const alertasQ = useQuery({
-    queryKey: ["home-alertas-sla"],
-    queryFn: () => workflowApi.listAlertas({ apenas_pendentes: true }),
-    staleTime: 60_000,
-  });
-
-  const vencendoQ = useQuery({
-    queryKey: ["home-vencendo-prazo"],
-    queryFn: () => temporalidadeApi.vencendoPrazo({ dias: 365 }),
-    staleTime: 60_000,
-  });
-
-  const notifQ = useQuery({
-    queryKey: ["home-notif-unread"],
-    queryFn: () =>
-      notificacoesApi.listarMinhas({ apenas_nao_lidas: true, limit: 1 }),
-    staleTime: 30_000,
-  });
-
-  const processosUnidadeQ = useQuery({
-    queryKey: ["home-processos-unidade", idUnidadeUser],
-    queryFn: () =>
-      api.processos.list({
-        id_unidade: idUnidadeUser!,
-        apenas_ativos: true,
-        page_size: 6,
-      }),
-    enabled: !!idUnidadeUser,
-    staleTime: 60_000,
-  });
-
-  const naoLidas = notifQ.data?.nao_lidas ?? 0;
-  const assinaturasPendentes = assinaturasQ.data?.length ?? 0;
-  const alertasPendentes = alertasQ.data?.length ?? 0;
-  const vencendoPrazo = vencendoQ.data?.length ?? 0;
-
-  const algumaPendencia =
-    assinaturasPendentes > 0 ||
-    alertasPendentes > 0 ||
-    vencendoPrazo > 0 ||
-    naoLidas > 0;
-
-  // Com qualquer contador falho, "sem pendências" seria uma afirmação falsa:
-  // o número pode existir e não ter carregado.
-  const algumaFalha =
-    assinaturasQ.isError || alertasQ.isError || vencendoQ.isError || notifQ.isError;
+  const veProtocolo = contratado("protocolo") && can("processo");
+  const vePagamentos = contratado("pagamentos") && PERMS_LEITURA_PAGAMENTOS.some((p) => can(p));
+  const veFrota = contratado("frota") && can("frota");
+  const veTransporte = contratado("transporte") && can("transporte_regulado");
 
   return (
-    <div className="space-y-7">
-      <GreetingSection
-        userName={user?.nome ?? "—"}
-        isSuperUser={perms?.is_super_usuario ?? false}
-        tenantName={branding?.nome ?? null}
-        agora={agora}
-        algumaPendencia={algumaPendencia}
-        algumaFalha={algumaFalha}
+    <div className="space-y-6">
+      <PageHeader
+        icon={Home}
+        title="Início"
+        description={
+          <>
+            {saudacao(agora)}
+            {primeiroNome && `, ${primeiroNome}`} — {hoje}.
+          </>
+        }
+        actions={
+          // A lista de módulos mora no menu lateral, que desde o menu único
+          // também aparece aqui.
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="secondary">
+              <Link href="/para-assinar">
+                <PenLine className="h-4 w-4" aria-hidden="true" />
+                Para assinar
+              </Link>
+            </Button>
+          </div>
+        }
       />
 
-      {/* Ações pendentes */}
-      <section>
-        <header className="mb-3 flex items-baseline justify-between">
-          <h2 className="font-display text-lg font-semibold tracking-tight text-foreground">
-            O que precisa de você
-          </h2>
-          <span
-            className={cn(
-              "text-[10px] uppercase tracking-[0.15em]",
-              algumaFalha ? "text-warning" : "text-foreground-subtle",
-            )}
-          >
-            {algumaFalha ? "alguns dados não carregaram" : "atualizado agora"}
-          </span>
-        </header>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <ActionCard
-            href="/para-assinar"
-            label="Para assinar"
-            count={assinaturasPendentes}
-            hint={
-              assinaturasPendentes === 1
-                ? "1 documento aguardando sua assinatura digital"
-                : "documentos aguardando sua assinatura digital"
-            }
-            icon={FileSignature}
-            intent="primary"
-            loading={assinaturasQ.isLoading}
-            error={assinaturasQ.isError}
-            onRetry={() => assinaturasQ.refetch()}
+      <section aria-labelledby="pendencias-titulo" className="space-y-4">
+        <h2 id="pendencias-titulo" className="font-display text-base font-semibold text-foreground">
+          O que precisa de você hoje
+        </h2>
+        {modulosQ.isError ? (
+          <p role="alert" className="text-sm text-danger-soft-foreground">
+            Não foi possível saber quais módulos a prefeitura contratou, então os resumos não
+            aparecem. As notificações abaixo continuam valendo.
+          </p>
+        ) : !modulosQ.data ? (
+          <div role="status" className="grid gap-4 animate-aparece-depois motion-reduce:animate-none lg:grid-cols-2">
+            <span className="sr-only">Carregando…</span>
+            <Skeleton aria-hidden="true" role="presentation" className="h-44 rounded-card" variant="shimmer" />
+            <Skeleton aria-hidden="true" role="presentation" className="h-44 rounded-card" variant="shimmer" />
+          </div>
+        ) : !veProtocolo && !vePagamentos && !veFrota && !veTransporte ? (
+          <EmptyState
+            icon={CheckCheck}
+            title="Nenhum módulo com pendências para o seu perfil"
+            description="Os módulos que você alcança estão no menu ao lado."
           />
-          <ActionCard
-            href="/m/protocolo/workflow"
-            label="Alertas SLA"
-            count={alertasPendentes}
-            hint={
-              alertasPendentes === 1
-                ? "1 processo ultrapassou prazo de etapa"
-                : "processos ultrapassaram prazo de etapa"
-            }
-            icon={AlertTriangle}
-            intent="warning"
-            loading={alertasQ.isLoading}
-            error={alertasQ.isError}
-            onRetry={() => alertasQ.refetch()}
-          />
-          <ActionCard
-            href="/m/protocolo/protocolo/vencendo-prazo"
-            label="Vencendo guarda"
-            count={vencendoPrazo}
-            hint={
-              vencendoPrazo === 1
-                ? "1 processo próximo do fim do prazo TTD (12m)"
-                : "processos próximos do fim do prazo TTD (12m)"
-            }
-            icon={Archive}
-            intent="success"
-            loading={vencendoQ.isLoading}
-            error={vencendoQ.isError}
-            onRetry={() => vencendoQ.refetch()}
-          />
-          <ActionCard
-            href="/perfil"
-            label="Não lidas"
-            count={naoLidas}
-            hint={
-              naoLidas === 1
-                ? "1 notificação nova no seu inbox"
-                : "notificações novas no seu inbox"
-            }
-            icon={Bell}
-            intent="info"
-            loading={notifQ.isLoading}
-            error={notifQ.isError}
-            onRetry={() => notifQ.refetch()}
-          />
-        </div>
+        ) : (
+          (() => {
+            // Um módulo só vira faixa de largura inteira: um cartão sozinho
+            // ocupava meia tela e deixava a outra metade em branco.
+            const faixa = [veProtocolo, vePagamentos, veFrota, veTransporte].filter(Boolean).length === 1;
+            return (
+              <div className={cn("grid gap-5", !faixa && "lg:grid-cols-2 2xl:grid-cols-4")}>
+                {veProtocolo && <CartaoProtocolo faixa={faixa} />}
+                {vePagamentos && <CartaoPagamentos faixa={faixa} />}
+                {veFrota && <CartaoFrota faixa={faixa} />}
+                {veTransporte && <CartaoTransporte faixa={faixa} />}
+              </div>
+            );
+          })()
+        )}
       </section>
 
-      {/* 2 colunas: Atividade da unidade + Atalhos rápidos */}
-      <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
-        <UnidadeSection
-          idUnidade={idUnidadeUser}
-          processos={processosUnidadeQ.data?.items ?? []}
-          total={processosUnidadeQ.data?.total ?? 0}
-          loading={processosUnidadeQ.isLoading}
-          error={processosUnidadeQ.isError}
-          onRetry={() => processosUnidadeQ.refetch()}
+      {modulosQ.data && (
+        <Panorama
+          acesso={{
+            // O panorama do Protocolo vem do dashboard executivo, que tem
+            // permissão própria (`dashboard`) além da de processos.
+            protocolo: contratado("protocolo") && can("dashboard"),
+            pagamentos: vePagamentos,
+            frota: veFrota,
+            transporte: veTransporte,
+          }}
         />
-        <AtalhosSection />
+      )}
+
+      <div className="grid gap-5 lg:grid-cols-2">
+        <Notificacoes />
+        {veProtocolo && <Acompanhando />}
       </div>
     </div>
   );
 }
 
-// ============================================================================
-// GreetingSection — Cabeçalho hero com saudação + meta
-// ============================================================================
+/* ------------------------------------------------------------ cartões ---- */
 
-function GreetingSection({
-  userName,
-  isSuperUser,
-  tenantName,
-  agora,
-  algumaPendencia,
-  algumaFalha,
+function Cartao({
+  titulo,
+  icone: Icone,
+  href,
+  linhas,
+  carregando,
+  erro,
+  faixa = false,
 }: {
-  userName: string;
-  isSuperUser: boolean;
-  tenantName: string | null;
-  agora: Date;
-  algumaPendencia: boolean;
-  algumaFalha: boolean;
+  titulo: string;
+  icone: LucideIcon;
+  href: string;
+  linhas: LinhaDef[];
+  carregando: boolean;
+  erro: boolean;
+  /** Largura inteira: as linhas viram blocos lado a lado (número em destaque). */
+  faixa?: boolean;
 }) {
-  const primeiroNome = userName.split(/\s+/)[0] || userName;
-  const saudacao = saudacaoPorHora(agora);
-  const dataStr = dataExtensa(agora);
-
   return (
     <section
-      className={cn(
-        "relative overflow-hidden rounded-2xl border border-border",
-        "bg-gradient-to-br from-brand/10 via-card to-surface-1",
-        "px-6 py-7 shadow-xs",
-      )}
+      aria-label={titulo}
+      className="flex flex-col rounded-card border border-border bg-surface-1 shadow-card"
     >
-      {/* Mesh decoration sutil */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute -right-32 -top-32 h-72 w-72 rounded-full bg-brand/15 blur-3xl"
-      />
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute -bottom-20 -left-10 h-44 w-44 rounded-full bg-accent/10 blur-2xl"
-      />
-
-      <div className="relative flex flex-wrap items-end justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <p className="text-[11px] uppercase tracking-[0.18em] text-foreground-muted">
-            {dataStr}
-          </p>
-          <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-            {saudacao},{" "}
-            <span className="bg-gradient-to-r from-brand to-accent bg-clip-text text-transparent">
-              {primeiroNome}
-            </span>
-            <span className="text-foreground-muted">.</span>
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm text-foreground-muted">
-            {algumaPendencia
-              ? "Algumas coisas precisam de você hoje. Comece por onde fizer sentido."
-              : algumaFalha
-                ? "Não foi possível carregar algumas pendências. Verifique os cartões abaixo."
-                : "Sem pendências críticas no momento. Bom trabalho."}
-          </p>
-        </div>
-
-        <div className="flex flex-col items-end gap-1.5">
-          {isSuperUser && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-accent/15 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-accent-dark">
-              <Sparkles className="h-3 w-3" aria-hidden="true" />
-              Super usuário
-            </span>
-          )}
-          {tenantName && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2.5 py-1 text-[10px] font-medium text-brand">
-              <Building2 className="h-3 w-3" aria-hidden="true" />
-              {tenantName}
-            </span>
-          )}
-        </div>
+      <div className="flex items-center justify-between gap-2 border-b border-border px-5 py-4">
+        <h3 className="inline-flex items-center gap-2 font-display text-sm font-semibold text-foreground">
+          <Icone className="h-4 w-4 text-primary" aria-hidden="true" />
+          {titulo}
+        </h3>
+        <Link
+          href={href}
+          className="-mx-1.5 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground"
+        >
+          Abrir módulo
+          <ArrowRight className="h-3 w-3" aria-hidden="true" />
+        </Link>
       </div>
+      {erro ? (
+        <p className="px-5 py-4 text-sm text-danger-soft-foreground">
+          Não foi possível carregar os números deste módulo agora.
+        </p>
+      ) : faixa ? (
+        <ul className="grid grid-cols-2 divide-border lg:grid-cols-4 lg:divide-x">
+          {linhas.map((l) => {
+            const ativo = !carregando && l.valor !== undefined && l.valor > 0;
+            const conteudo = (
+              <>
+                <span
+                  className={cn(
+                    "text-xs uppercase tracking-wide text-foreground-subtle",
+                    ativo && l.tom === "danger" && "font-medium text-danger-soft-foreground",
+                    ativo && l.tom === "warning" && "font-medium text-warning-soft-foreground",
+                  )}
+                >
+                  {l.rotulo}
+                </span>
+                <span
+                  className={cn(
+                    "font-display text-2xl tabular-nums",
+                    !ativo && "text-foreground-subtle",
+                    ativo && "font-semibold",
+                    ativo && l.tom === "danger" && "text-danger-soft-foreground",
+                    ativo && l.tom === "warning" && "text-warning-soft-foreground",
+                    ativo && !l.tom && "text-foreground",
+                  )}
+                >
+                  {carregando || l.valor === undefined ? "…" : l.valor}
+                </span>
+              </>
+            );
+            return (
+              <li key={l.rotulo}>
+                {ativo ? (
+                  <Link
+                    href={l.href}
+                    aria-label={`${l.rotulo}: ${l.valor} — abrir a lista`}
+                    className="flex h-full flex-col gap-1.5 px-5 py-4 transition-colors duration-fast hover:bg-muted/60 focus-visible:bg-muted/60"
+                  >
+                    {conteudo}
+                  </Link>
+                ) : (
+                  <div className="flex flex-col gap-1.5 px-5 py-4">{conteudo}</div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <ul className="divide-y divide-border">
+          {linhas.map((l) => {
+            const pronto = !carregando && l.valor !== undefined;
+            // O rótulo fica neutro: a cor do alerta vai só na contagem. Rótulo
+            // e número tingidos juntos, em âmbar e vermelho, viravam uma
+            // coluna colorida que brigava com o resto da tela.
+            const conteudo = (
+              <>
+                <span className="text-foreground">{l.rotulo}</span>
+                {!pronto ? (
+                  <span className="text-foreground-subtle">…</span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5">
+                    <span
+                      className={cn(
+                        "min-w-8 rounded-full px-2 text-center tabular-nums",
+                        l.valor! > 0 && "font-semibold",
+                        l.valor! > 0 && l.tom === "danger" && "bg-danger-soft text-danger-soft-foreground",
+                        l.valor! > 0 && l.tom === "warning" && "bg-warning-soft text-warning-soft-foreground",
+                        l.valor! > 0 && !l.tom && "bg-muted text-foreground",
+                        l.valor === 0 && "text-foreground-subtle",
+                      )}
+                    >
+                      {l.valor}
+                    </span>
+                    {l.valor! > 0 && (
+                      <ArrowRight
+                        className="h-3.5 w-3.5 text-foreground-subtle transition-transform duration-fast group-hover:translate-x-0.5 group-hover:text-foreground"
+                        aria-hidden="true"
+                      />
+                    )}
+                  </span>
+                )}
+              </>
+            );
+            return (
+              <li key={l.rotulo}>
+                {pronto && l.valor! > 0 ? (
+                  // A linha inteira é o alvo do clique (antes só o número, um
+                  // alvo de 30px num cartão de 600px).
+                  <Link
+                    href={l.href}
+                    aria-label={`${l.rotulo}: ${l.valor} — abrir a lista`}
+                    className="group flex items-center justify-between gap-3 px-5 py-3.5 text-sm transition-colors duration-fast hover:bg-muted/60 focus-visible:bg-muted/60"
+                  >
+                    {conteudo}
+                  </Link>
+                ) : (
+                  // Zero não leva a lugar nenhum: não há lista para abrir.
+                  <div className="flex items-center justify-between gap-3 px-5 py-3.5 text-sm">{conteudo}</div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </section>
   );
 }
 
-// ============================================================================
-// ActionCard — KPI clicável com count, hint e intent
-// ============================================================================
-
-type Intent = "primary" | "warning" | "success" | "info";
-
-const INTENT_STYLES: Record<Intent, { ring: string; iconBg: string; accent: string; countActive: string }> = {
-  primary: {
-    ring: "hover:border-brand/40 hover:shadow-brand/10",
-    iconBg: "bg-brand/10 text-brand",
-    accent: "bg-brand",
-    countActive: "text-brand",
-  },
-  warning: {
-    ring: "hover:border-warning/40 hover:shadow-warning/10",
-    iconBg: "bg-warning/10 text-warning",
-    accent: "bg-warning",
-    countActive: "text-warning",
-  },
-  success: {
-    ring: "hover:border-success/40 hover:shadow-success/10",
-    iconBg: "bg-success/10 text-success",
-    accent: "bg-success",
-    countActive: "text-success",
-  },
-  info: {
-    ring: "hover:border-info/40 hover:shadow-info/10",
-    iconBg: "bg-info/10 text-info",
-    accent: "bg-info",
-    countActive: "text-info",
-  },
-};
-
-function ActionCard({
-  href,
-  label,
-  count,
-  hint,
-  icon: Icon,
-  intent,
-  loading,
-  error,
-  onRetry,
-}: {
-  href: string;
-  label: string;
-  count: number;
-  hint: string;
-  icon: React.ComponentType<{ className?: string }>;
-  intent: Intent;
-  loading?: boolean;
-  error?: boolean;
-  onRetry?: () => void;
-}) {
-  const style = INTENT_STYLES[intent];
-  const zerado = count === 0;
-
-  // Falhou: sem número confiável, o card vira aviso com retry — não Link,
-  // para não aninhar botão dentro de âncora.
-  if (error) {
-    return (
-      <div className="relative flex flex-col gap-3 overflow-hidden rounded-xl border border-danger/40 bg-card p-4 shadow-xs">
-        <span
-          aria-hidden="true"
-          className="absolute left-0 top-0 h-full w-1 bg-danger opacity-100"
-        />
-        <div className="flex items-start justify-between gap-2">
-          <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-danger/10 text-danger">
-            <Icon className="h-4 w-4" aria-hidden="true" />
-          </span>
-        </div>
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground-subtle">
-            {label}
-          </p>
-          <p className="mt-0.5 font-display text-4xl font-semibold leading-none text-foreground-subtle">
-            —
-          </p>
-        </div>
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-xs text-danger">Não foi possível carregar.</p>
-          {onRetry && (
-            <button
-              type="button"
-              onClick={onRetry}
-              className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground hover:bg-muted"
-            >
-              <RefreshCw className="h-3 w-3" aria-hidden="true" />
-              Tentar novamente
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  }
-
+function CartaoProtocolo({ faixa }: { faixa: boolean }) {
+  // Sob `protocolo-painel`, a mesma chave do painel: o cache é um só, e trocar
+  // de unidade ativa invalida os dois juntos.
+  const q = useQuery({ queryKey: ["protocolo-painel"], queryFn: () => api.processos.painel(), staleTime: 60_000 });
+  const p = q.data;
   return (
-    <Link
-      href={href}
-      className={cn(
-        "group relative flex flex-col gap-3 overflow-hidden rounded-xl border border-border bg-card p-4 shadow-xs",
-        "transition-all duration-base ease-out-expo",
-        "hover:-translate-y-0.5 hover:shadow-md",
-        style.ring,
-      )}
-    >
-      {/* Barra de accent à esquerda (mais opaca quando há count) */}
-      <span
-        aria-hidden="true"
-        className={cn(
-          "absolute left-0 top-0 h-full w-1 transition-opacity",
-          style.accent,
-          zerado ? "opacity-20" : "opacity-100",
-        )}
-      />
-
-      <div className="flex items-start justify-between gap-2">
-        <span
-          className={cn(
-            "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors",
-            zerado ? "bg-surface-3 text-foreground-muted" : style.iconBg,
-          )}
-        >
-          <Icon className="h-4 w-4" aria-hidden="true" />
-        </span>
-        <ArrowRight
-          className="h-4 w-4 text-foreground-muted opacity-0 transition-all duration-fast group-hover:translate-x-0.5 group-hover:opacity-100"
-          aria-hidden="true"
-        />
-      </div>
-
-      <div>
-        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground-subtle">
-          {label}
-        </p>
-        <p
-          className={cn(
-            "mt-0.5 font-display text-4xl font-semibold leading-none tabular-nums",
-            loading
-              ? "animate-pulse text-foreground-subtle/50"
-              : zerado
-                ? "text-foreground-subtle"
-                : style.countActive,
-          )}
-        >
-          {loading ? "—" : count}
-        </p>
-      </div>
-
-      <p className="text-xs text-foreground-muted">
-        {loading ? "carregando…" : count === 0 ? "tudo em dia" : hint}
-      </p>
-    </Link>
+    <Cartao
+      titulo="Protocolo"
+      icone={FileText}
+      href={MENUS.protocolo.raiz}
+      carregando={q.isLoading}
+      erro={q.isError}
+      faixa={faixa}
+      linhas={[
+        { rotulo: "A receber na unidade", valor: p?.caixas.entrada, href: hrefDaCaixa("entrada"), tom: "warning" },
+        { rotulo: "Na mesa da unidade", valor: p?.caixas.analise, href: hrefDaCaixa("analise") },
+        { rotulo: "Com prazo vencido", valor: p?.prazos.vencidos, href: hrefDaCaixa("analise"), tom: "danger" },
+        { rotulo: "Esperando a sua assinatura", valor: p?.caixas.aguardando_assinatura, href: "/para-assinar", tom: "warning" },
+      ]}
+    />
   );
 }
 
-// ============================================================================
-// UnidadeSection — Processos da sua unidade
-// ============================================================================
-
-interface ProcessoMin {
-  id: number;
-  /** E3 — null enquanto o processo é rascunho (lista já exclui por padrão) */
-  numero_processo: string | null;
-  nup?: string | null;
-  data_hora_abertura: string;
-  manifestante: string | null;
-  assunto: string | null;
-  local_atual: string | null;
+function CartaoPagamentos({ faixa }: { faixa: boolean }) {
+  const q = useQuery({
+    // A mesma chave do dashboard financeiro (com 12 meses, o padrão dele).
+    queryKey: ["pag-dashboard", 12],
+    queryFn: () => api.pagamentos.dashboard(12),
+    staleTime: 60_000,
+  });
+  const k = q.data?.kpis;
+  return (
+    <Cartao
+      titulo="Despesa"
+      icone={Banknote}
+      href={MENUS.pagamentos.raiz}
+      carregando={q.isLoading}
+      erro={q.isError}
+      faixa={faixa}
+      linhas={[
+        // Os mesmos destinos do dashboard financeiro ("ver fila →").
+        { rotulo: "Aguardando aprovação", valor: k?.aguardando_aprovacao_qtd, href: "/m/pagamentos", tom: "warning" },
+        { rotulo: "Aguardando autorização", valor: k?.aguardando_autorizacao_qtd, href: "/m/pagamentos", tom: "warning" },
+        { rotulo: "Parcelas vencidas", valor: k?.vencidas_qtd, href: "/m/pagamentos/dashboard", tom: "danger" },
+      ]}
+    />
+  );
 }
 
-function UnidadeSection({
-  idUnidade,
-  processos,
-  total,
-  loading,
-  error,
-  onRetry,
-}: {
-  idUnidade: number | null | undefined;
-  processos: ProcessoMin[];
-  total: number;
-  loading: boolean;
-  error?: boolean;
-  onRetry?: () => void;
-}) {
+function CartaoFrota({ faixa }: { faixa: boolean }) {
+  // A lista de solicitações não tem contagem própria nem filtro por situação
+  // no backend; é a mesma consulta da tela de Solicitações (cache comum).
+  const q = useQuery({ queryKey: ["frota-solicitacoes"], queryFn: () => api.solicitacoes.listAll(), staleTime: 60_000 });
+  const aguardando = q.data?.filter((s) => s.status === "solicitada").length;
   return (
-    <section className="rounded-xl border border-border bg-card shadow-xs">
-      <header className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
-        <div className="flex items-start gap-3">
-          <span
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand/8 text-brand"
-            aria-hidden="true"
+    <Cartao
+      titulo="Frota"
+      icone={Truck}
+      href={MENUS.frota.raiz}
+      carregando={q.isLoading}
+      erro={q.isError}
+      faixa={faixa}
+      linhas={[
+        { rotulo: "Solicitações aguardando aprovação", valor: aguardando, href: "/m/frota/solicitacoes", tom: "warning" },
+      ]}
+    />
+  );
+}
+
+function CartaoTransporte({ faixa }: { faixa: boolean }) {
+  const q = useQuery({
+    queryKey: ["/transporte-regulado/alvaras/relatorio/kpis"],
+    queryFn: () => api.alvaras.relatorio.kpis(),
+    staleTime: 60_000,
+  });
+  const k = q.data;
+  return (
+    <Cartao
+      titulo="Transporte Regulado"
+      icone={Bus}
+      href={MENUS.transporte.raiz}
+      carregando={q.isLoading}
+      erro={q.isError}
+      faixa={faixa}
+      linhas={[
+        { rotulo: "Alvarás vencidos", valor: k?.vencidos, href: "/m/transporte/relatorio", tom: "danger" },
+        { rotulo: "Alvarás a renovar em 30 dias", valor: k?.a_renovar_30d, href: "/m/transporte/relatorio", tom: "warning" },
+      ]}
+    />
+  );
+}
+
+/* ------------------------------------------------------ notificações ---- */
+
+function Notificacoes() {
+  const qc = useQueryClient();
+  const notifQ = useQuery({
+    // Sob `["notificacoes", "me"]`, o prefixo que o sino invalida: marcar
+    // como lida lá atualiza esta lista, e vice-versa.
+    queryKey: ["notificacoes", "me", "home-nao-lidas"],
+    queryFn: () => notificacoesApi.listarMinhas({ apenas_nao_lidas: true, limit: 5 }),
+    staleTime: 30_000,
+  });
+  const naoLidas = notifQ.data?.nao_lidas ?? 0;
+  const itens = notifQ.data?.items ?? [];
+
+  const recarregar = () => qc.invalidateQueries({ queryKey: ["notificacoes", "me"] });
+  // Abrir a notificação é lê-la, como no sino.
+  const marcarLida = useMutation({
+    mutationFn: (id: number) => notificacoesApi.marcarLida(id),
+    onSuccess: recarregar,
+  });
+  const marcarTodas = useMutation({
+    mutationFn: () => notificacoesApi.marcarTodasLidas(),
+    onSuccess: recarregar,
+  });
+
+  return (
+    <section aria-label="Notificações não lidas" className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-display text-base font-semibold text-foreground">
+          Notificações não lidas
+          {naoLidas > 0 && (
+            <Badge intent="danger" className="ml-2 tabular-nums">
+              {naoLidas}
+            </Badge>
+          )}
+        </h2>
+        {itens.length > 0 && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => marcarTodas.mutate()}
+            disabled={marcarTodas.isPending}
           >
-            <Inbox className="h-4 w-4" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-semibold tracking-tight">
-              Sua unidade
-            </h2>
-            <p className="mt-0.5 text-xs text-foreground-muted">
-              Processos ativos passando pela unidade {idUnidade ? `#${idUnidade}` : "(sem unidade)"}.
-            </p>
-          </div>
-        </div>
-        {idUnidade && (
+            <CheckCheck className="h-4 w-4" aria-hidden="true" />
+            Marcar todas como lidas
+          </Button>
+        )}
+      </div>
+      {notifQ.isError ? (
+        <p role="alert" className="text-sm text-danger-soft-foreground">
+          Não foi possível carregar as notificações.
+        </p>
+      ) : !notifQ.data ? (
+        <Carregando className="text-sm text-foreground-muted" />
+      ) : itens.length === 0 ? (
+        <p className="rounded-card border border-border bg-surface-1 px-5 py-4 text-sm text-foreground-muted">
+          Nenhuma notificação nova.
+        </p>
+      ) : (
+        <ul className="divide-y divide-border rounded-card border border-border bg-surface-1">
+          {itens.map((n) => (
+            <li key={n.id} className="px-5 py-3.5 text-sm">
+              {n.link_url ? (
+                <Link
+                  href={n.link_url}
+                  onClick={() => marcarLida.mutate(n.id)}
+                  className="font-medium text-foreground underline-offset-2 hover:underline"
+                >
+                  {n.titulo}
+                </Link>
+              ) : (
+                <span className="font-medium text-foreground">{n.titulo}</span>
+              )}
+              <p className="mt-0.5 text-foreground-muted">{n.mensagem}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/* ------------------------------------------------------ acompanhando ---- */
+
+/** Quantos favoritos aparecem; o resto está na lista filtrada. */
+const QUANTOS_ACOMPANHANDO = 5;
+
+/**
+ * Os processos que a pessoa marcou com estrela, e onde cada um está AGORA —
+ * inclusive os que já saíram da unidade dela. É o "Favoritos" do SUITE (CE):
+ * acompanhar sem precisar abrir um por um.
+ */
+function Acompanhando() {
+  const q = useQuery({
+    queryKey: ["processos", "home-favoritos"],
+    queryFn: () =>
+      api.processos.list({ favoritos: true, apenas_ativos: false, page: 1, page_size: QUANTOS_ACOMPANHANDO }),
+    staleTime: 60_000,
+  });
+  const itens = q.data?.items ?? [];
+  const total = q.data?.total ?? 0;
+
+  return (
+    <section aria-labelledby="acompanhando-titulo" className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 id="acompanhando-titulo" className="font-display text-base font-semibold text-foreground">
+          Processos que você acompanha
+        </h2>
+        {total > QUANTOS_ACOMPANHANDO && (
           <Link
-            href={`/m/protocolo/processos?id_unidade=${idUnidade}`}
-            className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+            href="/m/protocolo/processos?favoritos=1&ativos=0"
+            className="inline-flex items-center gap-1 rounded text-sm font-medium text-foreground underline underline-offset-2 hover:no-underline"
           >
-            ver todos {total > 0 && <span className="font-mono">({total})</span>}
-            <ArrowRight className="h-3 w-3" aria-hidden="true" />
+            Ver todos ({total})
+            <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
           </Link>
         )}
-      </header>
-
-      <div className="p-2">
-        {!idUnidade && (
-          <p className="px-3 py-6 text-center text-sm text-foreground-muted">
-            Você não está lotado em uma unidade. Atualize seu perfil.
-          </p>
-        )}
-        {idUnidade && loading && (
-          <p className="px-3 py-6 text-center text-sm text-foreground-muted">
-            <Loader2 className="mr-1 inline h-4 w-4 animate-spin" /> Carregando…
-          </p>
-        )}
-        {idUnidade && !loading && error && (
-          <div className="flex flex-col items-center gap-3 px-3 py-6 text-center">
-            <p className="text-sm text-danger">
-              Não foi possível carregar os processos da sua unidade.
-            </p>
-            {onRetry && (
-              <button
-                type="button"
-                onClick={onRetry}
-                className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
-              >
-                <RefreshCw className="h-3 w-3" aria-hidden="true" />
-                Tentar novamente
-              </button>
-            )}
-          </div>
-        )}
-        {idUnidade && !loading && !error && processos.length === 0 && (
-          <p className="px-3 py-6 text-center text-sm text-foreground-muted">
-            Nenhum processo ativo passando agora.
-          </p>
-        )}
-        {!error && processos.length > 0 && (
-          <ul className="divide-y divide-border">
-            {processos.map((p) => (
-              <li key={p.id}>
-                <Link
-                  href={`/m/protocolo/processos/${p.id}`}
-                  className="group flex items-center gap-3 rounded-md px-3 py-2 transition-colors hover:bg-surface-2"
-                >
-                  <span className="text-[10px] font-mono text-foreground-subtle tabular-nums">
-                    {fmtDataCurta(p.data_hora_abertura)}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs font-semibold text-primary group-hover:underline">
-                        {p.nup ?? p.numero_processo ?? "Rascunho"}
-                      </span>
-                      {p.nup && (
-                        <span className="font-mono text-[10px] text-foreground-subtle">
-                          ({p.numero_processo})
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-0.5 truncate text-xs text-foreground-muted">
-                      {p.manifestante ?? "—"}{" "}
-                      <span className="text-foreground-subtle">·</span>{" "}
-                      {p.assunto ?? "—"}
-                    </div>
-                  </div>
-                  <ArrowRight
-                    className="h-3.5 w-3.5 shrink-0 text-foreground-subtle opacity-0 transition-all group-hover:translate-x-0.5 group-hover:opacity-100"
-                    aria-hidden="true"
-                  />
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
       </div>
-    </section>
-  );
-}
-
-// ============================================================================
-// AtalhosSection — Tiles de ação rápida
-// ============================================================================
-
-const ATALHOS = [
-  {
-    href: "/m/protocolo/protocolo/balcao",
-    label: "Protocolar",
-    sub: "Receber documento físico",
-    icon: Inbox,
-  },
-  {
-    href: "/m/protocolo/processos/novo",
-    label: "Novo processo",
-    sub: "Abrir processo interno",
-    icon: PenSquare,
-  },
-  {
-    href: "/m/protocolo/processos",
-    label: "Buscar processo",
-    sub: "Listagem completa",
-    icon: Search,
-  },
-  {
-    href: "/dashboard",
-    label: "Dashboard",
-    sub: "Visão executiva",
-    icon: TrendingUp,
-  },
-];
-
-function AtalhosSection() {
-  return (
-    <section className="rounded-xl border border-border bg-card shadow-xs">
-      <header className="border-b border-border px-5 py-4">
-        <h2 className="text-sm font-semibold tracking-tight">Atalhos</h2>
-        <p className="mt-0.5 text-xs text-foreground-muted">
-          As ações que você mais usa, a um clique.
+      {q.isError ? (
+        <p role="alert" className="text-sm text-danger-soft-foreground">
+          Não foi possível carregar os processos acompanhados.
         </p>
-      </header>
-      <div className="grid grid-cols-2 gap-2 p-3">
-        {ATALHOS.map((a) => {
-          const Icon = a.icon;
-          return (
-            <Link
-              key={a.href}
-              href={a.href}
-              className="
-                group relative flex flex-col gap-2 overflow-hidden rounded-lg
-                border border-border bg-surface-1 p-3 transition-all duration-base
-                hover:-translate-y-0.5 hover:border-brand/30 hover:bg-brand/5 hover:shadow-sm
-              "
-            >
-              <span
-                className="
-                  inline-flex h-8 w-8 items-center justify-center rounded-md
-                  bg-surface-3 text-foreground-muted transition-colors
-                  group-hover:bg-brand/15 group-hover:text-brand
-                "
-              >
-                <Icon className="h-4 w-4" aria-hidden="true" />
-              </span>
-              <div>
-                <p className="text-sm font-medium text-foreground">{a.label}</p>
-                <p className="text-[11px] text-foreground-muted">{a.sub}</p>
-              </div>
-            </Link>
-          );
-        })}
-      </div>
+      ) : !q.data ? (
+        <Carregando className="text-sm text-foreground-muted" />
+      ) : itens.length === 0 ? (
+        <p className="rounded-card border border-border bg-surface-1 px-5 py-4 text-sm text-foreground-muted">
+          <Star className="mr-1.5 inline h-4 w-4 align-[-3px]" aria-hidden="true" />
+          Nenhum processo acompanhado. Marque a estrela de um processo — na lista ou no detalhe — para
+          ver aqui onde ele está.
+        </p>
+      ) : (
+        // A Table já é um cartão (borda, fundo, sombra): sem casca em volta.
+        <Table>
+          <THead>
+            <TR>
+              <TH>Processo</TH>
+              <TH>Assunto</TH>
+              <TH>Onde está agora</TH>
+            </TR>
+          </THead>
+          <TBody>
+            {itens.map((p) => (
+              <TR key={p.id}>
+                <TD className="font-mono text-xs tabular-nums">
+                  <Link
+                    href={`/m/protocolo/processos/${p.id}`}
+                    className="font-medium text-primary underline-offset-2 hover:underline"
+                  >
+                    {p.nup ?? p.numero_processo}
+                  </Link>
+                </TD>
+                <TD>
+                  <div className="line-clamp-1 text-sm">{p.assunto ?? "—"}</div>
+                </TD>
+                <TD className="text-sm">
+                  {p.local_atual ?? <span className="text-foreground-muted">sem unidade registrada</span>}
+                  {!p.ativo && <span className="ml-1 text-xs text-foreground-muted">(inativo)</span>}
+                </TD>
+              </TR>
+            ))}
+          </TBody>
+        </Table>
+      )}
     </section>
   );
 }

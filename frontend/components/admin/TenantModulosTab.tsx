@@ -1,5 +1,7 @@
 "use client";
 
+import { Carregando } from "@/components/ui/carregando";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
@@ -107,7 +109,7 @@ export function TenantModulosTab({ tenantId }: { tenantId: number }) {
   }
 
   if (q.isLoading) {
-    return <p className="text-sm text-muted-foreground" role="status">Carregando…</p>;
+    return <Carregando className="text-sm text-muted-foreground" />;
   }
   if (q.isError) {
     return (
@@ -155,8 +157,8 @@ export function TenantModulosTab({ tenantId }: { tenantId: number }) {
         })}
       </ul>
 
-      <Button type="button" onClick={handleSalvar} disabled={salvar.isPending}>
-        {salvar.isPending ? "Salvando…" : "Salvar"}
+      <Button type="button" onClick={handleSalvar} loading={salvar.isPending}>
+        {salvar.isPending ? "Salvando…" : "Salvar módulos"}
       </Button>
     </div>
   );

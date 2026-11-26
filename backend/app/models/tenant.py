@@ -20,7 +20,22 @@ class Tenant(Base):
     ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     plano: Mapped[str] = mapped_column(String(20), nullable=False, default="basico")
     cor_primaria: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    # 0131 — com `cor_primaria`, formam o tema do município (`#RRGGBB`):
+    # destaque = acento e painel do login; lateral = fundo da barra lateral.
+    cor_destaque: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    cor_lateral: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    # 0132 — títulos: cor (`#RRGGBB`) e fonte, esta de uma lista fechada
+    # (`schemas/tenant.py::FONTES_DE_TITULO`), com CHECK no banco.
+    cor_titulos: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    fonte_titulos: Mapped[str | None] = mapped_column(String(20), nullable=True)
     logo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # 0129 — identidade da tela de login: marca (qualquer proporção) e foto do
+    # painel esquerdo. Definidas pela plataforma; o runtime municipal não tem
+    # UPDATE nelas.
+    logo_login_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    imagem_login_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # 0130 — atribuição da foto, quando a licença dela exigir.
+    imagem_login_credito: Mapped[str | None] = mapped_column(String(200), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Fase P2 — NUP federal (Decreto 8.539/2015). Opt-in por tenant.

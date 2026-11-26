@@ -20,6 +20,7 @@ vi.mock("@/lib/api", () => ({
         sugestoes: vi.fn(),
         baixaAutomatica: vi.fn(),
         conciliar: vi.fn(),
+        desfazer: vi.fn(),
       },
     },
   },
@@ -40,6 +41,7 @@ const lancamentosMock = api.pagamentos.conciliacao.lancamentos as ReturnType<typ
 const sugestoesMock = api.pagamentos.conciliacao.sugestoes as ReturnType<typeof vi.fn>;
 const baixaAutoMock = api.pagamentos.conciliacao.baixaAutomatica as ReturnType<typeof vi.fn>;
 const conciliarMock = api.pagamentos.conciliacao.conciliar as ReturnType<typeof vi.fn>;
+const desfazerMock = api.pagamentos.conciliacao.desfazer as ReturnType<typeof vi.fn>;
 
 const CONTA = {
   id_conta: 7, nome: "Conta Movimento", banco: "BB", grupo_despesa: "CUSTEIO",
@@ -101,6 +103,7 @@ beforeEach(() => {
   sugestoesMock.mockResolvedValue([SUGESTAO_EXATA, SUGESTAO_PROVAVEL]);
   baixaAutoMock.mockResolvedValue({ baixas: 1 });
   conciliarMock.mockResolvedValue({ id: 1 });
+  desfazerMock.mockResolvedValue({ ...LANC_CONCILIADO, conciliado: false });
 });
 
 describe("Conciliação bancária", () => {
@@ -154,6 +157,32 @@ describe("Conciliação bancária", () => {
     expect(botoes).toHaveLength(1);
   });
 
+  it("desfaz só o lançamento conciliado, e só com justificativa", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByText("extrato-julho.csv"));
+    await screen.findByText("TARIFA MANUTENCAO");
+
+    // Um conciliado na lista → um único "Desfazer"; o pendente não oferece.
+    const botoes = screen.getAllByRole("button", { name: /^Desfazer conciliação de /i });
+    expect(botoes).toHaveLength(1);
+    fireEvent.click(botoes[0]);
+
+    const dialogo = within(await screen.findByRole("dialog"));
+    const confirmar = dialogo.getByRole("button", { name: "Desfazer conciliação" });
+    // Sem justificativa, o clique não desfaz: mostra o que falta.
+    fireEvent.click(confirmar);
+    expect(desfazerMock).not.toHaveBeenCalled();
+    expect(await dialogo.findByText(/Explique por que desfazer/)).toBeInTheDocument();
+
+    fireEvent.change(dialogo.getByLabelText(/Justificativa/), {
+      target: { value: "Casado com a movimentação errada" },
+    });
+    fireEvent.click(confirmar);
+    await waitFor(() =>
+      expect(desfazerMock).toHaveBeenCalledWith(12, "Casado com a movimentação errada"),
+    );
+  });
+
   it("concilia a sugestão ligando lançamento e movimentação", async () => {
     renderPage();
     fireEvent.click(await screen.findByText("extrato-julho.csv"));
@@ -188,18 +217,16 @@ describe("Importação de extrato — upload e relato (C2.2)", () => {
       "[role=dialog]",
     ) as HTMLElement;
 
-    fireEvent.change(within(dialog).getByLabelText("Conta"), {
+    fireEvent.change(within(dialog).getByLabelText(/^Conta/), {
       target: { value: "7" },
     });
-    fireEvent.change(within(dialog).getByLabelText(/Formato/i), {
-      target: { value: "OFX" },
-    });
+    fireEvent.click(within(dialog).getByRole("radio", { name: "OFX" }));
 
     const arquivo = new File(["conteudo-ofx-fake"], "extrato.ofx", { type: "text/plain" });
-    const inputArquivo = screen.getByLabelText("Arquivo") as HTMLInputElement;
+    const inputArquivo = screen.getByLabelText(/^Arquivo/) as HTMLInputElement;
     fireEvent.change(inputArquivo, { target: { files: [arquivo] } });
 
-    await waitFor(() => expect(screen.getByLabelText(/Nome do arquivo/i)).toHaveValue("extrato.ofx"));
+    await waitFor(() => expect(screen.getByLabelText(/Nome do extrato/i)).toHaveValue("extrato.ofx"));
 
     fireEvent.click(screen.getByRole("button", { name: /^Importar$/i }));
 
@@ -212,5 +239,23 @@ describe("Importação de extrato — upload e relato (C2.2)", () => {
     expect(await screen.findByText(/3 importado/i)).toBeInTheDocument();
     expect(screen.getByText(/1 ignorado/i)).toBeInTheDocument();
     expect(screen.getByText(/1 possível duplicata/i)).toBeInTheDocument();
+  });
+
+  it("sem conta nem arquivo, não importa: diz o que falta e foca a conta", async () => {
+    importarMock.mockClear();
+    renderPage();
+    fireEvent.click(await screen.findByText("Importar extrato"));
+    const dialog = (await screen.findByText("Importar extrato bancário")).closest(
+      "[role=dialog]",
+    ) as HTMLElement;
+
+    // Nada de erro ao abrir.
+    expect(within(dialog).queryByText("Escolha a conta do extrato.")).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Importar$/i }));
+
+    expect(await within(dialog).findByText("Escolha a conta do extrato.")).toBeInTheDocument();
+    expect(within(dialog).getByText(/Escolha o arquivo ou cole o conteúdo/)).toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/^Conta/)).toHaveFocus();
+    expect(importarMock).not.toHaveBeenCalled();
   });
 });

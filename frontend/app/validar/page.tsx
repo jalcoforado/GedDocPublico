@@ -1,54 +1,69 @@
 "use client";
 
+import { FileCheck2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+
+import { normalizarCodigoValidacao } from "@/components/cidadao/codigo-validacao";
+import { Button } from "@/components/ui/button";
+import { FormField } from "@/components/ui/form-field";
+import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/ui/page-header";
 
 export default function ValidarFormPage() {
   const router = useRouter();
   const [codigo, setCodigo] = useState("");
+  const [erro, setErro] = useState<string | null>(null);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    const c = codigo.trim();
-    if (c) router.push(`/validar/${encodeURIComponent(c)}`);
+    // Aceita o código com espaços/quebras (cópia do PDF) e o link inteiro do QR.
+    const c = normalizarCodigoValidacao(codigo);
+    if (!c) {
+      setErro("Digite ou cole o código que está no comprovante.");
+      document.getElementById("codigo")?.focus();
+      return;
+    }
+    router.push(`/validar/${encodeURIComponent(c)}`);
   }
 
   return (
     <div className="space-y-6">
-      <div className="space-y-2">
-        <h1 className="text-2xl font-bold text-foreground">
-          Validar assinatura eletrônica
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Informe o código de validação impresso no comprovante para verificar a
-          autenticidade e a integridade da assinatura.
-        </p>
-      </div>
+      <PageHeader
+        icon={FileCheck2}
+        title="Validar documento assinado"
+        description="Confira se uma assinatura eletrônica é verdadeira e se o documento não foi mudado depois de assinado."
+      />
 
-      <form onSubmit={submit} className="space-y-3">
-        <label htmlFor="codigo" className="block text-sm font-medium text-foreground">
-          Código de validação
-        </label>
-        <input
-          id="codigo"
-          name="codigo"
-          value={codigo}
-          onChange={(e) => setCodigo(e.target.value)}
-          autoComplete="off"
-          spellCheck={false}
-          placeholder="ex.: aBc123-XyZ..."
-          className="h-11 w-full rounded-md border border-border bg-card px-3 font-mono text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        />
-        <button
-          type="submit"
-          disabled={!codigo.trim()}
-          className="h-11 rounded-md bg-primary px-5 text-sm font-medium text-primary-foreground transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+      <form onSubmit={submit} className="space-y-4 rounded-card border border-border bg-card p-4 shadow-card sm:p-6" noValidate>
+        <FormField
+          label="Código de validação"
+          required
+          error={erro ?? undefined}
+          hint="Está no comprovante da assinatura, perto do QR code. Pode colar o código ou o link inteiro — maiúsculas e minúsculas contam."
         >
+          <Input
+            id="codigo"
+            name="codigo"
+            value={codigo}
+            onChange={(e) => {
+              setCodigo(e.target.value);
+              if (erro) setErro(null);
+            }}
+            autoComplete="off"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            placeholder="Ex.: aB3dE-fG7h_iJ9kLmN0pQr"
+            className="font-mono"
+          />
+        </FormField>
+        <Button type="submit" size="lg" className="w-full sm:w-auto">
           Validar
-        </button>
+        </Button>
       </form>
 
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs text-foreground-muted">
         Assinatura eletrônica interna com evidências — não é assinatura
         qualificada ICP-Brasil.
       </p>

@@ -7,7 +7,8 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { CampoComUnidade } from "@/components/ui/campo-com-unidade";
+import { FormField } from "@/components/ui/form-field";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
@@ -75,6 +76,22 @@ export function ClassificarSigiloDialog({
     onError: (e: Error) => setErr(e.message),
   });
 
+  // Graus legais exigem fundamento e autoridade (services/sigilo.py). A
+  // checagem aqui só antecipa o erro do servidor para debaixo do campo.
+  const [tentou, setTentou] = useState(false);
+  const faltaFundamento = exigeTci && !fundamento.trim();
+  const faltaAutoridade = exigeTci && !autoridade.trim();
+
+  function salvar() {
+    setErr(null);
+    setTentou(true);
+    if (faltaFundamento || faltaAutoridade) {
+      document.getElementById(faltaFundamento ? "fundamento" : "autoridade")?.focus();
+      return;
+    }
+    mut.mutate();
+  }
+
   return (
     <>
       <Button
@@ -82,6 +99,7 @@ export function ClassificarSigiloDialog({
         size="sm"
         onClick={() => {
           reset();
+          setTentou(false);
           setOpen(true);
         }}
         title="Classificar sigilo (LAI)"
@@ -94,30 +112,25 @@ export function ClassificarSigiloDialog({
         open={open}
         onClose={() => setOpen(false)}
         title="Classificar sigilo"
+        description={`Hoje: ${NIVEL_SIGILO_LABEL[processo.nivel_sigilo]}.`}
         size="md"
         footer={
           <>
             <Button variant="ghost" onClick={() => setOpen(false)} disabled={mut.isPending}>
               Cancelar
             </Button>
-            <Button onClick={() => mut.mutate()} disabled={mut.isPending}>
-              {mut.isPending ? "Salvando..." : "Salvar classificação"}
+            <Button onClick={salvar} loading={mut.isPending}>
+              {mut.isPending ? "Salvando…" : "Salvar classificação"}
             </Button>
           </>
         }
       >
         <div className="space-y-4">
-          <p className="text-sm text-foreground-muted">
-            Nível atual:{" "}
-            <strong className="text-foreground">
-              {NIVEL_SIGILO_LABEL[processo.nivel_sigilo]}
-            </strong>
-            . Graus de sigilo legal (Reservado/Secreto/Ultrassecreto) exigem
-            fundamento, autoridade e prazo (LAI, Lei 12.527/2011).
-          </p>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="nivel-sigilo">Nível</Label>
+          <FormField
+            label="Nível"
+            required
+            hint="Reservado, Secreto e Ultrassecreto são graus da LAI (Lei 12.527/2011): pedem fundamento, autoridade e prazo."
+          >
             <Select
               id="nivel-sigilo"
               value={nivel}
@@ -132,12 +145,20 @@ export function ClassificarSigiloDialog({
                 </option>
               ))}
             </Select>
-          </div>
+          </FormField>
 
           {exigeTci && (
             <>
-              <div className="space-y-1.5">
-                <Label htmlFor="fundamento">Fundamento legal</Label>
+              <FormField
+                label="Fundamento legal"
+                required
+                hint="O artigo da lei que justifica o sigilo."
+                error={
+                  tentou && faltaFundamento
+                    ? "Informe o fundamento legal, ex.: Art. 23, VIII da Lei 12.527/2011."
+                    : undefined
+                }
+              >
                 <Textarea
                   id="fundamento"
                   value={fundamento}
@@ -145,34 +166,50 @@ export function ClassificarSigiloDialog({
                   placeholder="Ex.: Art. 23, VIII da Lei 12.527/2011"
                   rows={2}
                 />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="autoridade">Autoridade classificadora</Label>
+              </FormField>
+              <FormField
+                label="Autoridade classificadora"
+                required
+                error={
+                  tentou && faltaAutoridade
+                    ? "Informe quem classifica: cargo e nome."
+                    : undefined
+                }
+              >
                 <Input
                   id="autoridade"
                   value={autoridade}
                   onChange={(e) => setAutoridade(e.target.value)}
-                  placeholder="Cargo/nome de quem classifica"
+                  placeholder="Ex.: Secretária de Saúde — Maria Souza"
                 />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="prazo">
-                  Prazo de restrição (anos) — máximo {prazoMax}
-                </Label>
-                <Input
+              </FormField>
+              <FormField
+                label="Prazo de restrição"
+                opcional
+                hint={`No máximo ${prazoMax} anos. Em branco, vale o máximo.`}
+              >
+                <CampoComUnidade
                   id="prazo"
                   type="number"
                   min={1}
                   max={prazoMax}
+                  sufixo="anos"
                   value={prazo}
                   onChange={(e) => setPrazo(e.target.value)}
-                  placeholder={`Padrão: ${prazoMax} anos`}
+                  placeholder={String(prazoMax)}
                 />
-              </div>
+              </FormField>
             </>
           )}
 
-          {err && <p className="text-sm text-danger">{err}</p>}
+          {err && (
+            <p
+              role="alert"
+              className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
+            >
+              {err}
+            </p>
+          )}
         </div>
       </Dialog>
     </>

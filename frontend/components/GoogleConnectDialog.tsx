@@ -47,14 +47,31 @@ export function GoogleConnectDialog({
         </div>
       }
     >
-      <div className="space-y-4">
-        <p>Autorize o acesso a sua conta Google Docs para redigir minutas com integração de documentos.</p>
-        <div className="space-y-2">
-          <p>✓ Você mantém controle total sobre suas credenciais.</p>
-          <p>✓ Apenas leitura e criação de documentos autorizados.</p>
-          <p>✓ Sua conta não é armazenada em nossos servidores.</p>
-          <p>✓ Você pode revogar acesso a qualquer momento.</p>
-        </div>
+      {/* SI-32: o texto diz o que de fato acontece. O anterior afirmava que
+          "a conta não é armazenada" — mas a autorização (token) fica guardada,
+          cifrada, para o sistema abrir o documento depois. */}
+      <div className="space-y-3 text-sm">
+        <p>
+          Você vai para a página do Google para autorizar o Aprimora a criar e editar documentos no
+          seu Google Docs. Depois, volta para cá.
+        </p>
+        <ul className="list-disc space-y-1.5 pl-5 text-foreground-muted">
+          <li>O Aprimora só enxerga os documentos que ele mesmo criar — não o resto do seu Drive.</li>
+          <li>Sua senha do Google não passa pelo Aprimora.</li>
+          <li>A autorização fica guardada, cifrada, para os documentos abrirem sem pedir de novo.</li>
+          <li>
+            Você pode cancelar quando quiser em{" "}
+            <a
+              href="https://myaccount.google.com/permissions"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-brand hover:underline"
+            >
+              myaccount.google.com/permissions
+            </a>
+            .
+          </li>
+        </ul>
       </div>
     </Dialog>
   );

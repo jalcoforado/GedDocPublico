@@ -8,7 +8,9 @@ import { UnidadePicker } from "@/components/UnidadePicker";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { CampoComUnidade } from "@/components/ui/campo-com-unidade";
+import { FormField } from "@/components/ui/form-field";
+import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
   workflowApi,
@@ -42,9 +44,9 @@ export function WorkflowEditPanel({ dsl, selection, onChange }: Props) {
   }
   return (
     <div className="rounded-md border border-border bg-card p-4 text-sm text-muted-foreground">
-      Clique num estado ou transição pra editar. Use o botão{" "}
-      <strong>+ Estado</strong> pra adicionar; arraste de um nodo a outro pra criar
-      transição. Backspace exclui o item selecionado.
+      Clique num estado ou numa transição para editar os detalhes aqui. Use{" "}
+      <strong>+ Estado</strong> para adicionar; arraste de um estado a outro para criar
+      uma transição. Backspace exclui o item selecionado.
     </div>
   );
 }
@@ -91,11 +93,11 @@ function EstadoEditor({
     dsl.estados.filter((e) => e.slug === est.slug).length > 1;
 
   return (
-    <div className="space-y-3 rounded-md border border-border bg-card p-4">
+    <div className="space-y-4 rounded-md border border-border bg-card p-4">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">Estado</h3>
+        <h3 className="text-sm font-semibold text-foreground">Estado</h3>
         {dsl.estado_inicial === slug ? (
-          <span className="text-xs font-medium text-blue-700">● inicial</span>
+          <span className="text-xs font-medium text-info-soft-foreground">● inicial</span>
         ) : (
           <Button size="sm" variant="ghost" onClick={definirComoInicial}>
             Definir como inicial
@@ -103,69 +105,78 @@ function EstadoEditor({
         )}
       </div>
 
-      <div className="space-y-1">
-        <Label htmlFor="est-slug">Slug</Label>
-        <Input
-          id="est-slug"
-          value={est.slug}
-          onChange={(e) => patch({ slug: e.target.value })}
-          aria-invalid={slugInvalido || slugDuplicado}
-        />
-        {(slugInvalido || slugDuplicado) && (
-          <p className="text-xs text-danger-soft-foreground">
-            {slugInvalido
-              ? "Use só [a-z0-9_], começando com letra."
-              : "Slug duplicado."}
-          </p>
-        )}
-      </div>
-
-      <div className="space-y-1">
-        <Label htmlFor="est-nome">Nome</Label>
+      <FormField label="Nome" required hint="Como o estado aparece no processo.">
         <Input
           id="est-nome"
           value={est.nome}
           onChange={(e) => patch({ nome: e.target.value })}
+          placeholder="Ex.: Em análise"
         />
-      </div>
+      </FormField>
 
-      <div className="space-y-1">
-        <Label htmlFor="est-desc">Descrição</Label>
+      <FormField
+        label="Identificador"
+        required
+        hint="Minúsculas, números e _, começando com letra."
+        error={
+          slugInvalido
+            ? "Use só minúsculas, números e _, começando com letra (ex.: em_analise)."
+            : slugDuplicado
+              ? "Outro estado já usa este identificador. Escolha outro."
+              : undefined
+        }
+      >
+        <Input
+          id="est-slug"
+          value={est.slug}
+          onChange={(e) => patch({ slug: e.target.value })}
+          className="font-mono"
+        />
+      </FormField>
+
+      <FormField label="Descrição" opcional>
         <Textarea
           id="est-desc"
           rows={2}
           value={est.descricao ?? ""}
           onChange={(e) => patch({ descricao: e.target.value || null })}
+          placeholder="Ex.: O técnico confere os documentos."
         />
-      </div>
+      </FormField>
 
-      <div className="space-y-1">
-        <Label htmlFor="est-sla">SLA (dias)</Label>
-        <Input
+      <FormField
+        label="Prazo no estado"
+        opcional
+        hint="Passou disso, o processo gera alerta. Em branco, sem prazo."
+      >
+        <CampoComUnidade
           id="est-sla"
           type="number"
           min={1}
           max={365}
+          sufixo="dias"
           value={est.sla_dias ?? ""}
           onChange={(e) =>
             patch({
               sla_dias: e.target.value === "" ? null : Number(e.target.value),
             })
           }
-          placeholder="Sem SLA"
+          placeholder="Ex.: 15"
         />
-        <p className="text-xs text-muted-foreground">
-          Se preenchido, dispara alerta quando processo ficar mais de N dias neste
-          estado.
-        </p>
-      </div>
+      </FormField>
 
-      <label className="flex items-center gap-2 text-sm">
+      <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-border bg-surface-1 px-3 py-2.5 transition-colors duration-fast hover:bg-surface-2">
         <Checkbox
           checked={est.final}
           onChange={(e) => patch({ final: e.target.checked })}
+          className="mt-0.5 h-4 w-4"
         />
-        Estado final (encerra a instance)
+        <span className="text-sm">
+          <span className="block font-medium text-foreground">Estado final</span>
+          <span className="block text-xs text-foreground-muted">
+            Chegar aqui encerra o fluxo do processo.
+          </span>
+        </span>
       </label>
 
       <UnidadeResponsavelField
@@ -184,21 +195,38 @@ function UnidadeResponsavelField({
   onChange: (v: number | null) => void;
 }) {
   return (
-    <div className="space-y-1 border-t border-border pt-3">
-      <Label>Unidade responsável</Label>
-      <UnidadePicker
-        value={value}
-        onChange={onChange}
-        placeholder="Nenhuma — qualquer usuário pode avançar"
-      />
-      <p className="text-xs text-muted-foreground">
-        Quando o processo entra neste estado, é{" "}
-        <strong>auto-encaminhado</strong> pra esta unidade. A transição também
-        passa a aparecer só pros usuários lotados nela.
-      </p>
+    <div className="border-t border-border pt-4">
+      <FormField
+        label="Unidade responsável"
+        opcional
+        hint={
+          <>
+            Ao entrar neste estado, o processo é <strong>encaminhado sozinho</strong> para
+            esta unidade, e a transição só aparece para quem é lotado nela.
+          </>
+        }
+      >
+        <UnidadePicker
+          id="est-unidade"
+          value={value}
+          onChange={onChange}
+          placeholder="Nenhuma: qualquer usuário pode avançar"
+        />
+      </FormField>
     </div>
   );
 }
+
+/** Rótulo e efeito de cada evento — o `<select>` mostrava o valor cru ("encaminhamento"). */
+const EVENTO_INFO: Record<(typeof EVENTOS)[number], { rotulo: string; descricao: string }> = {
+  manual: { rotulo: "Manual", descricao: "Alguém aciona a transição (pela tela ou pela API)." },
+  abertura: { rotulo: "Ao abrir o processo", descricao: "Dispara sozinha quando o processo é criado." },
+  encaminhamento: {
+    rotulo: "Ao encaminhar",
+    descricao: "Dispara sozinha quando o processo é encaminhado.",
+  },
+  recebimento: { rotulo: "Ao receber", descricao: "Dispara sozinha quando o processo é recebido." },
+};
 
 function TransicaoEditor({
   dsl,
@@ -218,53 +246,56 @@ function TransicaoEditor({
   }
 
   return (
-    <div className="space-y-3 rounded-md border border-border bg-card p-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Transição</h3>
-        <span className="font-mono text-xs text-muted-foreground">
+    <div className="space-y-4 rounded-md border border-border bg-card p-4">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-foreground">Transição</h3>
+        <span className="truncate font-mono text-xs text-foreground-muted">
           {t.de} → {t.para}
         </span>
       </div>
 
-      <div className="space-y-1">
-        <Label htmlFor="tr-label">Label</Label>
+      <FormField
+        label="Rótulo"
+        required
+        hint="O nome da ação, como aparece para quem avança o processo."
+      >
         <Input
           id="tr-label"
           value={t.label}
           onChange={(e) => patch({ label: e.target.value })}
+          placeholder="Ex.: Aprovar"
         />
-      </div>
+      </FormField>
 
-      <div className="space-y-1">
-        <Label htmlFor="tr-evento">Evento gatilho</Label>
-        <select
+      <FormField
+        label="Quando acontece"
+        hint={EVENTO_INFO[t.evento as (typeof EVENTOS)[number]]?.descricao}
+      >
+        <Select
           id="tr-evento"
           value={t.evento}
           onChange={(e) =>
             patch({ evento: e.target.value as WorkflowTransicao["evento"] })
           }
-          className="h-11 w-full rounded-md border border-input bg-card px-3 text-sm"
         >
           {EVENTOS.map((ev) => (
             <option key={ev} value={ev}>
-              {ev}
+              {EVENTO_INFO[ev].rotulo}
             </option>
           ))}
-        </select>
-        <p className="text-xs text-muted-foreground">
-          <code>manual</code>: só via API. <code>abertura</code>: dispara ao criar
-          processo. <code>encaminhamento</code>/<code>recebimento</code>: hooks de
-          movimentação.
-        </p>
-      </div>
+        </Select>
+      </FormField>
 
       <CondicaoEditor
         condicao={t.condicao}
         onChange={(c) => patch({ condicao: c })}
       />
 
-      <div className="space-y-1">
-        <Label htmlFor="tr-grupos">Grupos permitidos (slugs separados por vírgula)</Label>
+      <FormField
+        label="Grupos permitidos"
+        opcional
+        hint="Identificadores separados por vírgula. Em branco, qualquer um pode acionar."
+      >
         <Input
           id="tr-grupos"
           value={t.grupos_permitidos.join(", ")}
@@ -276,9 +307,10 @@ function TransicaoEditor({
                 .filter(Boolean),
             })
           }
-          placeholder="Vazio = qualquer um"
+          placeholder="Ex.: juridico, gabinete"
+          className="font-mono"
         />
-      </div>
+      </FormField>
     </div>
   );
 }
@@ -329,41 +361,48 @@ function CondicaoEditor({
   }
 
   return (
-    <div className="space-y-1">
-      <Label htmlFor="tr-cond">Condição (expressão SAFE)</Label>
-      <Textarea
-        id="tr-cond"
-        rows={2}
-        value={condicao ?? ""}
-        onChange={(e) => onChange(e.target.value || null)}
-        placeholder="ex: dias_aberto < 30"
-        className="font-mono text-xs"
-      />
-      <p className="text-xs text-muted-foreground">
-        Vazio = sempre permite. Vars disponíveis: <code>dias_aberto</code>,{" "}
-        <code>estado_atual</code>, <code>estado_anterior</code>,{" "}
-        <code>numero_processo</code>, <code>externo</code>, <code>publico</code>, +
-        funções: <code>len</code>, <code>min</code>, <code>max</code>,{" "}
-        <code>dias_entre</code>.
-      </p>
+    <div className="space-y-2">
+      <FormField
+        label="Condição"
+        opcional
+        hint={
+          <>
+            Em branco, sempre permite. Variáveis: <code>dias_aberto</code>,{" "}
+            <code>estado_atual</code>, <code>estado_anterior</code>,{" "}
+            <code>numero_processo</code>, <code>externo</code>, <code>publico</code>; funções:{" "}
+            <code>len</code>, <code>min</code>, <code>max</code>, <code>dias_entre</code>.
+          </>
+        }
+      >
+        <Textarea
+          id="tr-cond"
+          rows={2}
+          value={condicao ?? ""}
+          onChange={(e) => onChange(e.target.value || null)}
+          placeholder="Ex.: dias_aberto < 30"
+          className="font-mono text-xs"
+        />
+      </FormField>
 
       {condicao && condicao.trim() && (
         <details className="text-xs">
-          <summary className="cursor-pointer text-primary">Testar condição</summary>
-          <div className="mt-2 space-y-2 rounded border border-border bg-muted/30 p-2">
-            <Label htmlFor="ctx-test">Contexto JSON</Label>
-            <Textarea
-              id="ctx-test"
-              rows={5}
-              value={contextoStr}
-              onChange={(e) => setContextoStr(e.target.value)}
-              className="font-mono text-xs"
-            />
-            {parseError && (
-              <p className="text-danger-soft-foreground">JSON inválido: {parseError}</p>
-            )}
-            <Button size="sm" variant="secondary" onClick={runTest} disabled={test.isPending}>
-              <FlaskConical className="mr-1 h-3.5 w-3.5" aria-hidden="true" />
+          <summary className="cursor-pointer font-medium text-primary">Testar condição</summary>
+          <div className="mt-2 space-y-2 rounded border border-border bg-surface-1 p-2">
+            <FormField
+              label="Dados de teste (JSON)"
+              hint="Valores das variáveis para simular um processo."
+              error={parseError ? `JSON inválido: ${parseError}` : undefined}
+            >
+              <Textarea
+                id="ctx-test"
+                rows={5}
+                value={contextoStr}
+                onChange={(e) => setContextoStr(e.target.value)}
+                className="font-mono text-xs"
+              />
+            </FormField>
+            <Button size="sm" variant="secondary" onClick={runTest} loading={test.isPending}>
+              {!test.isPending && <FlaskConical className="h-3.5 w-3.5" aria-hidden="true" />}
               {test.isPending ? "Testando…" : "Avaliar"}
             </Button>
             {test.data && (
@@ -378,7 +417,7 @@ function CondicaoEditor({
                     className={
                       test.data.truthy
                         ? "flex items-center gap-1 text-success-soft-foreground"
-                        : "flex items-center gap-1 text-muted-foreground"
+                        : "flex items-center gap-1 text-foreground-muted"
                     }
                   >
                     {test.data.truthy ? (
@@ -388,7 +427,7 @@ function CondicaoEditor({
                     )}
                     Resultado: <code>{JSON.stringify(test.data.resultado)}</code>
                     {" — "}
-                    {test.data.truthy ? "permite" : "bloqueia"} transição.
+                    {test.data.truthy ? "permite" : "bloqueia"} a transição.
                   </div>
                 )}
               </div>

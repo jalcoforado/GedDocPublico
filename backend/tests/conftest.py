@@ -69,6 +69,11 @@ WORKER_URL = f"postgresql+asyncpg://aprimora_worker:{DB_PASS}@{DB_HOST}:{DB_PORT
 if not os.environ.get("MIGRATOR_DATABASE_URL"):
     os.environ["MIGRATOR_DATABASE_URL"] = MIGRATOR_URL
 
+# 2FA por e-mail (0136) desligado na suíte: os testes que entram por
+# `/auth/login` esperam a sessão na resposta, e não há caixa de e-mail para
+# ler o código. Os testes do próprio 2FA o religam (`test_conta_email_2fa.py`).
+os.environ.setdefault("DOIS_FATORES_EMAIL", "false")
+
 
 # --------------------------------------------------------------------------
 # Contador de tenants vazados (item 1.1.6)

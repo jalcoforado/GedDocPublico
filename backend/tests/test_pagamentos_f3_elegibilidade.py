@@ -136,6 +136,17 @@ async def _debito_ate_autoridade(engine, tenant_id, forn, nat, fonte, conta, uni
     return d, autoridade
 
 
+async def _aprovar(engine, tenant_id, d, autoridade, conta):
+    """A autoridade aprova pelo detalhe (um lote de um), com a alçada que isso exige."""
+    async with _sm(engine)() as s:
+        await cad.criar_alcada(s, tenant_id=tenant_id, payload=AlcadaCreate(
+            id_usuario=autoridade, id_natureza=None, valor_maximo="999999.00"))
+    async with _sm(engine)() as s:
+        return await aut.autorizar_debito(
+            s, tenant_id=tenant_id, debito_id=d.id, usuario_id=autoridade,
+            lock_version=d.lock_version, id_conta_pagadora=conta.id)
+
+
 # ---------------------------------------------------------------------------
 # Função pura — tabela de todos os ramos
 # ---------------------------------------------------------------------------
@@ -187,7 +198,7 @@ def test_avaliar_elegibilidade_e_pura_nao_importa_sqlalchemy():
 
 @pytest.mark.asyncio
 async def test_autorizacao_torna_elegivel(admin_engine):
-    """autoridade_aprovar: AGUARDANDO_AUTORIDADE -> AUTORIZADA + ELEGIVEL, e a
+    """autorizar_debito: AGUARDANDO_AUTORIDADE -> AUTORIZADA + ELEGIVEL, e a
     posição da fila (criada REGISTRADA na liquidação) passa a espelhar isso."""
     t = await _provisionar(admin_engine)
     forn, nat, fonte, conta, unidade = await _base(admin_engine, t.id)
@@ -196,9 +207,7 @@ async def test_autorizacao_torna_elegivel(admin_engine):
     posicao_antes = await _posicao(admin_engine, t.id, d.id)
     assert posicao_antes.situacao == est.REGISTRADA
 
-    async with _sm(admin_engine)() as s:
-        d = await svc.autoridade_aprovar(s, tenant_id=t.id, debito_id=d.id,
-                                         usuario_id=autoridade, lock_version=d.lock_version)
+    d = await _aprovar(admin_engine, t.id, d, autoridade, conta)
     assert d.situacao_fila == est.ELEGIVEL
 
     posicao = await _posicao(admin_engine, t.id, d.id)
@@ -217,9 +226,7 @@ async def test_fornecedor_irregular_bloqueia_na_fila(admin_engine):
     t = await _provisionar(admin_engine)
     forn, nat, fonte, conta, unidade = await _base(admin_engine, t.id)
     d, autoridade = await _debito_ate_autoridade(admin_engine, t.id, forn, nat, fonte, conta, unidade)
-    async with _sm(admin_engine)() as s:
-        d = await svc.autoridade_aprovar(s, tenant_id=t.id, debito_id=d.id,
-                                         usuario_id=autoridade, lock_version=d.lock_version)
+    d = await _aprovar(admin_engine, t.id, d, autoridade, conta)
     assert (await _posicao(admin_engine, t.id, d.id)).situacao == est.ELEGIVEL
 
     async with _sm(admin_engine)() as s:
@@ -246,11 +253,9 @@ async def test_bloqueio_de_saldo_bloqueia_debitos_da_conta(admin_engine):
     t = await _provisionar(admin_engine)
     forn, nat, fonte, conta, unidade = await _base(admin_engine, t.id)
     d, autoridade = await _debito_ate_autoridade(admin_engine, t.id, forn, nat, fonte, conta, unidade)
-    async with _sm(admin_engine)() as s:
-        d = await svc.autoridade_aprovar(s, tenant_id=t.id, debito_id=d.id,
-                                         usuario_id=autoridade, lock_version=d.lock_version)
-    # Rito singular não grava conta pagadora — grava manualmente para o teste
-    # exercitar o caminho de bloqueio (o rito em lote é quem grava de verdade).
+    d = await _aprovar(admin_engine, t.id, d, autoridade, conta)
+    # A aprovação já grava a conta pagadora; a regravação abaixo é inócua e
+    # fica só para o teste não depender de qual conta a aprovação escolheu.
     async with _sm(admin_engine)() as s:
         dd = await svc.obter_debito(s, tenant_id=t.id, debito_id=d.id)
         dd.id_conta_pagadora = conta.id

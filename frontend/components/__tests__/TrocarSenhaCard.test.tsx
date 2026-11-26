@@ -60,8 +60,30 @@ describe("TrocarSenhaCard", () => {
     await u.type(screen.getByLabelText(/^Nova senha/i), "nova-senha-1");
     await u.type(screen.getByLabelText(/^Confirmar/i), "diferente-1");
     await u.click(screen.getByRole("button", { name: /alterar senha/i }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(/confere/i);
+    // O erro mora sob o campo da confirmação (padrão de formulário), e o
+    // foco vai para ele.
+    const confirma = screen.getByLabelText(/^Confirmar/i);
+    expect(await screen.findByText(/não confere/i)).toBeInTheDocument();
+    expect(confirma).toHaveAttribute("aria-invalid", "true");
+    expect(document.activeElement).toBe(confirma);
     expect(api.alterarSenha).not.toHaveBeenCalled();
+  });
+
+  it("regras da nova senha se marcam ao vivo; erro de tamanho só depois de sair do campo", async () => {
+    const u = userEvent.setup();
+    renderCard();
+    const regras = screen.getByRole("list", { name: /Regras da nova senha/i });
+    expect(regras).toHaveTextContent(/Pelo menos 8 caracteres — pendente/);
+
+    await u.type(screen.getByLabelText(/^Nova senha/i), "curta");
+    expect(screen.queryByText(/ao menos 8 caracteres/i)).not.toBeInTheDocument();
+    await u.tab();
+    expect(await screen.findByText(/ao menos 8 caracteres/i)).toBeInTheDocument();
+
+    await u.type(screen.getByLabelText(/^Nova senha/i), "-mais");
+    expect(regras).toHaveTextContent(/Pelo menos 8 caracteres — atendida/);
+    await u.type(screen.getByLabelText(/^Confirmar/i), "curta-mais");
+    expect(regras).toHaveTextContent(/igual à nova senha — atendida/);
   });
 
   // SEC-1 Commit 5 — props opcionais.

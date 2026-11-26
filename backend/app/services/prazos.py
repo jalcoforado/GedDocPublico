@@ -16,12 +16,18 @@ Conceito (D-SNAPSHOT, D-NOME, D-CONCLUSAO, D-VENCENDO do PR 5b):
 - Fim do processo (`data_conclusao`) = data da ÚLTIMA `Movimentacao` ativa
   com `id_arquivamento IS NOT NULL`. Caller resolve antes de chamar o
   helper; quando não há, passa `None` → tratado como "em andamento".
+  Desarquivar (SI-60) desativa aquela movimentação, então processo
+  desarquivado volta a ser "em andamento" sem nada mudar aqui.
+- Início da contagem = `inicio_do_prazo(...)`: a abertura, ou o último
+  desarquivamento (SI-60, decisão do PO em 22/11/2026: o prazo REINICIA). O
+  parâmetro continua chamado `data_abertura` porque é isso em quase todo
+  processo; quem chama passa o início já resolvido.
 - "Vencendo" = restante ≤ 20% do prazo, com mínimo de 1 dia, sem teto.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from math import ceil
 from typing import Literal
 
@@ -51,6 +57,75 @@ class PrazoCalculado:
     dias_restantes: int | None  # >0 quando há folga; None quando sem_prazo/atrasado
     dias_atraso: int | None  # >0 quando em atraso; None se não atrasado
     concluido_em: datetime | None
+
+
+StatusPrazoCaixa = Literal["sem_prazo", "dentro_do_prazo", "vencendo", "atrasado"]
+
+# Com quantos dias de antecedência o prazo de um ENCAMINHAMENTO passa a pedir
+# atenção. O do serviço usa 20% do prazo total (`limiar_vencendo_dias`); o do
+# encaminhamento é uma data solta, sem "total" de onde tirar proporção.
+AVISO_ENCAMINHAMENTO_DIAS = 2
+
+
+@dataclass(frozen=True)
+class PrazoDaCaixa:
+    status: StatusPrazoCaixa
+    vence_em: datetime | None
+    origem: Literal["encaminhamento", "servico"] | None
+
+
+def prazo_da_caixa(
+    *,
+    data_abertura: datetime,
+    prazo_snapshot_dias: int | None,
+    prazo_encaminhamento: date | None,
+    arquivado: bool,
+    now: datetime,
+) -> PrazoDaCaixa:
+    """O prazo que decide o destaque de uma linha na caixa de trabalho.
+
+    Precedência: o prazo do ENCAMINHAMENTO vigente, quando quem enviou fixou
+    um — é o compromisso de quem está com o processo agora. Sem ele, o prazo
+    do SERVIÇO, contado da abertura (o mesmo do detalhe do processo).
+
+    Processo arquivado não tem o que cobrar: `sem_prazo`, mesmo que tenha
+    encerrado atrasado. Quem mede isso é o detalhe e o relatório, não a fila.
+
+    O prazo do encaminhamento vale até o FIM do dia marcado.
+    """
+    if arquivado:
+        return PrazoDaCaixa("sem_prazo", None, None)
+
+    if prazo_encaminhamento is not None:
+        vence = datetime.combine(prazo_encaminhamento, time(23, 59, 59))
+        if now > vence:
+            status: StatusPrazoCaixa = "atrasado"
+        elif (prazo_encaminhamento - now.date()).days <= AVISO_ENCAMINHAMENTO_DIAS:
+            status = "vencendo"
+        else:
+            status = "dentro_do_prazo"
+        return PrazoDaCaixa(status, vence, "encaminhamento")
+
+    calc = calcular_prazo(
+        data_abertura=data_abertura,
+        prazo_snapshot_dias=prazo_snapshot_dias,
+        data_conclusao=None,
+        now=now,
+    )
+    if calc.status == "sem_prazo":
+        return PrazoDaCaixa("sem_prazo", None, None)
+    # Sem `data_conclusao`, `calcular_prazo` só devolve os três estados em
+    # andamento.
+    return PrazoDaCaixa(calc.status, calc.prazo_previsto_em, "servico")  # type: ignore[arg-type]
+
+
+def inicio_do_prazo(
+    data_abertura: datetime, data_reinicio_prazo: datetime | None
+) -> datetime:
+    """De quando o prazo do serviço conta: o último desarquivamento, se houve,
+    senão a abertura. Espelho SQL em `relatorios_comum.inicio_do_prazo_sql` e
+    nas consultas cruas de `dashboard.py` — mudou aqui, mude lá."""
+    return data_reinicio_prazo or data_abertura
 
 
 def limiar_vencendo_dias(prazo_snapshot_dias: int) -> int:

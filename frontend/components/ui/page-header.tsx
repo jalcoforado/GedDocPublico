@@ -1,9 +1,11 @@
 "use client";
 
-import { ChevronRight, Home } from "lucide-react";
+import { ArrowLeft, ChevronRight, Home } from "lucide-react";
 import Link from "next/link";
 import * as React from "react";
 
+import { useModuloAtual } from "@/lib/modulo-atual";
+import { comFiltrosLembrados, destinoDeVolta, useTrilha } from "@/lib/trilha-navegacao";
 import { cn } from "@/lib/utils";
 
 export interface BreadcrumbItem {
@@ -48,6 +50,30 @@ export function PageHeader({
   className,
 }: PageHeaderProps) {
   const isHero = variant === "hero";
+  const modulo = useModuloAtual();
+  // Dentro de um módulo o SHELL já desenha "Início › Módulo" (`TrilhaDoModulo`). Daqui sai o que repetiria aquilo: a migalha
+  // da raiz do módulo ("Frota Pública" → /m/frota) e o atalho de Início. E se
+  // o que sobra é só o nome da própria tela, não sobra nada a mostrar — o
+  // título logo abaixo já diz isso. Fica a trilha quando há um nível
+  // intermediário de verdade (um link de volta para a lista, por exemplo).
+  const raizes = modulo ? [modulo.raiz, `/m/${modulo.slug}`] : [];
+  const migalhas = (breadcrumbs ?? []).filter((bc) => !bc.href || !raizes.includes(bc.href));
+  const mostrarMigalhas = modulo ? migalhas.some((bc) => bc.href) : migalhas.length > 0;
+
+  // SI-17/18 — seta de voltar nas telas internas: as que têm um nível acima
+  // de verdade na trilha (o processo tem a lista; a lista, não). Ela leva à
+  // página de onde se veio, com os filtros como estavam; sem histórico na
+  // aba, à tela-mãe. É um <Link>, e não `router.back()`: este componente
+  // está em toda tela, e os testes de página simulam `next/navigation` só com
+  // o que cada página usa (ver `lib/modulo-atual.tsx`).
+  const trilha = useTrilha();
+  const telaMae = [...migalhas].reverse().find((bc) => bc.href)?.href;
+  // Só lido depois da hidratação: `trilha` começa vazia no servidor e no
+  // primeiro render do cliente, e só então a URL importa.
+  const caminhoAtual = trilha.length > 0 ? window.location.pathname : "";
+  const voltarPara = telaMae
+    ? (destinoDeVolta(trilha, caminhoAtual) ?? comFiltrosLembrados(trilha, telaMae))
+    : null;
 
   // document.title por rota (fatia 3.5): o PageHeader está em toda tela — é o
   // lugar natural do título da aba enquanto o PageShell (UX-04) não existe.
@@ -71,27 +97,31 @@ export function PageHeader({
       )}
     >
       {/* Breadcrumb */}
-      {(breadcrumbs?.length ?? 0) > 0 && (
+      {mostrarMigalhas && (
         <nav
-          aria-label="Trilha"
+          aria-label={modulo ? "Trilha da tela" : "Trilha"}
           className="mb-2 flex items-center gap-1 pt-2 text-xs text-foreground-muted"
         >
-          <Link
-            href="/home"
-            className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground transition-colors duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-            aria-label="Início"
-          >
-            <Home className="h-3 w-3" aria-hidden="true" />
-          </Link>
-          {breadcrumbs!.map((bc, i) => (
+          {!modulo && (
+            <Link
+              href="/home"
+              className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted hover:text-foreground transition-colors duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              aria-label="Início"
+            >
+              <Home className="h-3 w-3" aria-hidden="true" />
+            </Link>
+          )}
+          {migalhas.map((bc, i) => (
             <React.Fragment key={i}>
-              <ChevronRight
-                className="h-3 w-3 shrink-0 text-foreground-subtle"
-                aria-hidden="true"
-              />
+              {(i > 0 || !modulo) && (
+                <ChevronRight
+                  className="h-3 w-3 shrink-0 text-foreground-subtle"
+                  aria-hidden="true"
+                />
+              )}
               {bc.href ? (
                 <Link
-                  href={bc.href}
+                  href={comFiltrosLembrados(trilha, bc.href)}
                   className="rounded px-1 py-0.5 hover:bg-muted hover:text-foreground transition-colors duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 >
                   {bc.label}
@@ -107,6 +137,16 @@ export function PageHeader({
       {/* Title row */}
       <div className="flex flex-wrap items-start justify-between gap-3 py-[var(--density-gap)]">
         <div className="flex min-w-0 items-start gap-3">
+          {voltarPara && (
+            <Link
+              href={voltarPara}
+              aria-label="Voltar"
+              title="Voltar para a página anterior"
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <ArrowLeft className="h-5 w-5" aria-hidden="true" />
+            </Link>
+          )}
           {Icon && (
             <div
               className={cn(
@@ -120,7 +160,7 @@ export function PageHeader({
             </div>
           )}
           <div className="min-w-0">
-            <h1 className="text-xl font-semibold tracking-tight text-foreground">
+            <h1 className="text-xl font-semibold tracking-tight text-titulo">
               {title}
             </h1>
             {description && (

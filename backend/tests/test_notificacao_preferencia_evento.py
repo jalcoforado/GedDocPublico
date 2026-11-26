@@ -27,6 +27,7 @@ from app.config import get_settings
 from app.main import app
 from app.models import Usuario
 from app.services.notificacoes import (
+    EVENTOS_NOTIFICACAO,
     Destinatario,
     EventoDesconhecidoError,
     enviar,
@@ -83,7 +84,8 @@ async def test_listar_preferencias_traz_defaults_sem_row(admin_engine):
         admin = await _admin_do_tenant(admin_engine, tenant.id)
         async with _sm(admin_engine)() as s:
             linhas = await listar_preferencias(s, tenant_id=tenant.id, id_usuario=admin.id)
-        assert len(linhas) == 1  # só o catálogo real: sla_estourado
+        # Uma linha por evento do catálogo, na ordem dele.
+        assert [l["evento"] for l in linhas] == list(EVENTOS_NOTIFICACAO)
         linha = linhas[0]
         assert linha["evento"] == "sla_estourado"
         assert linha["in_app"] is True
@@ -204,7 +206,7 @@ async def test_http_get_preferencias_lista_o_catalogo(admin_engine):
             r = await client.get("/api/v2/notificacoes/preferencias")
             assert r.status_code == 200, r.text
             body = r.json()
-            assert len(body) == 1
+            assert [b["evento"] for b in body] == list(EVENTOS_NOTIFICACAO)
             assert body[0]["evento"] == "sla_estourado"
             assert body[0]["label"]
     finally:

@@ -55,6 +55,25 @@ const nextConfig = {
   async redirects() {
     return redirectsModulo;
   },
+  // Arquivos de marca (`public/brand/`: logos e a foto do login). O Next os
+  // servia com `max-age=0`, então toda visita revalidava cada um — na
+  // homologação, com o link lento, só o ida-e-volta custava perto de 1 s por
+  // arquivo. Um dia de cache, e o navegador ainda pode usar a cópia antiga por
+  // uma semana enquanto busca a nova. Trocar a imagem de um município pede
+  // NOME de arquivo novo, que é o que invalida o cache na hora.
+  async headers() {
+    return [
+      {
+        source: '/brand/:arquivo*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=86400, stale-while-revalidate=604800',
+          },
+        ],
+      },
+    ];
+  },
 };
 
 module.exports = nextConfig;
