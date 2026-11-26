@@ -2700,6 +2700,15 @@ export interface MinutaUpdateInput {
   versao?: number;
 }
 
+/** SI-67 — `POST /minutas/{id}/aplicar-modelo`. */
+export interface MinutaAplicarModeloInput {
+  /** `null` = documento em branco. */
+  id_template: number | null;
+  /** Alimenta `{{destinatario.nome}}` e fica gravado na minuta. */
+  destinatario?: string | null;
+  versao?: number;
+}
+
 type QsValue = string | number | boolean | undefined | null;
 
 /** Lista vira o parâmetro repetido (`k=a&k=b`), que é como o FastAPI lê
@@ -5066,6 +5075,14 @@ export const api = {
         body: JSON.stringify(data),
       }),
     remove: (id: number) => request<void>(`/minutas/${id}`, { method: "DELETE" }),
+    /** SI-67 — troca o modelo do rascunho ("Modelos de documentos" no editor).
+     * `id_template: null` = documento em branco. Substitui o texto atual; o
+     * anterior fica no histórico da minuta. */
+    aplicarModelo: (id: number, data: MinutaAplicarModeloInput) =>
+      request<Minuta>(`/minutas/${id}/aplicar-modelo`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
     finalizar: (id: number) =>
       request<Minuta>(`/minutas/${id}/finalizar`, { method: "POST" }),
     // Google Docs (PR-F)

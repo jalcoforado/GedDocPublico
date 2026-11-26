@@ -21,6 +21,7 @@ from ..database import get_db
 from ..models import Tenant, Usuario
 from ..schemas.minuta import (
     DespachoConcluidoOut,
+    MinutaAplicarModelo,
     MinutaCreate,
     MinutaHistoricoListResponse,
     MinutaListItem,
@@ -286,6 +287,28 @@ async def update_minuta(
         db, tenant_id=tenant_id, minuta_id=minuta_id, usuario=usuario
     )
     m = await svc.atualizar_minuta(
+        db,
+        tenant_id=tenant_id,
+        minuta_id=minuta_id,
+        usuario=usuario,
+        payload=payload,
+    )
+    return MinutaOut.model_validate(m)
+
+
+@minutas_router.post("/minutas/{minuta_id}/aplicar-modelo", response_model=MinutaOut)
+async def aplicar_modelo_na_minuta(
+    minuta_id: int,
+    payload: MinutaAplicarModelo,
+    usuario: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> MinutaOut:
+    """SI-67 — "Modelos de documentos" no editor: troca o modelo do rascunho."""
+    await svc.obter_minuta_autorizada(
+        db, tenant_id=tenant_id, minuta_id=minuta_id, usuario=usuario
+    )
+    m = await svc.aplicar_modelo_na_minuta(
         db,
         tenant_id=tenant_id,
         minuta_id=minuta_id,

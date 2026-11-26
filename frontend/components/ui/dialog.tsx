@@ -14,7 +14,7 @@ interface DialogProps {
   description?: string;
   children: React.ReactNode;
   footer?: React.ReactNode;
-  size?: "sm" | "md" | "lg" | "xl" | "2xl";
+  size?: "sm" | "md" | "lg" | "xl" | "2xl" | "tela";
 }
 
 const SIZES = {
@@ -25,7 +25,18 @@ const SIZES = {
   // Editor e pré-visualização lado a lado (SI-30): duas colunas que precisam
   // de largura de verdade cada uma.
   "2xl": "max-w-[min(96rem,calc(100vw-2rem))]",
+  // SI-67 — o editor de documento ocupa a tela inteira, como o Google Docs:
+  // o conteúdo é quem rola (a folha), não o diálogo.
+  tela: "flex h-[100dvh] max-w-none flex-col sm:h-[calc(100dvh-2rem)] sm:max-w-[calc(100vw-2rem)]",
 };
+
+/**
+ * Diálogos abertos, do mais antigo ao mais novo. Só o de cima responde a
+ * Escape e prende o Tab: com um diálogo aberto sobre outro (o editor e, por
+ * cima, a lista de modelos ou a confirmação), os dois escutavam a mesma tecla
+ * na `window` e o Escape fechava os dois de uma vez.
+ */
+const pilhaDeDialogos: symbol[] = [];
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -100,8 +111,15 @@ export function Dialog({ open, onClose, title, description, children, footer, si
       alvo?.focus();
     }
 
+    const eu = Symbol("dialog");
+    pilhaDeDialogos.push(eu);
+
     function onKey(e: KeyboardEvent) {
+      if (pilhaDeDialogos[pilhaDeDialogos.length - 1] !== eu) return;
       if (e.key === "Escape") {
+        // Um menu aberto dentro do diálogo (Popover em portal) já tratou o
+        // Escape para fechar a si mesmo: não é pedido para fechar o diálogo.
+        if (e.defaultPrevented) return;
         e.stopPropagation();
         onCloseRef.current();
         return;
@@ -127,6 +145,8 @@ export function Dialog({ open, onClose, title, description, children, footer, si
 
     return () => {
       window.removeEventListener("keydown", onKey);
+      const i = pilhaDeDialogos.indexOf(eu);
+      if (i >= 0) pilhaDeDialogos.splice(i, 1);
       document.body.style.overflow = prevOverflow;
       // Lido no CLEANUP (não no corpo do efeito): a captura pode acontecer
       // depois do efeito rodar (evento de foco do autoFocus/StrictMode).
@@ -190,7 +210,15 @@ export function Dialog({ open, onClose, title, description, children, footer, si
             <X className="h-5 w-5" aria-hidden="true" />
           </button>
         </header>
-        <div className="max-h-[70vh] overflow-y-auto p-5">{children}</div>
+        <div
+          className={
+            size === "tela"
+              ? "flex min-h-0 flex-1 flex-col overflow-hidden"
+              : "max-h-[70vh] overflow-y-auto p-5"
+          }
+        >
+          {children}
+        </div>
         {footer && (
           <footer className="flex flex-wrap justify-end gap-2 border-t border-border px-5 py-3 pb-safe">
             {footer}

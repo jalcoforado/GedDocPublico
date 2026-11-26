@@ -28,6 +28,7 @@ from ..models import (
     Usuario,
 )
 from ..schemas.minuta import (
+    MinutaAplicarModelo,
     MinutaCreate,
     MinutaUpdate,
     TemplateDocumentoCreate,
@@ -536,6 +537,90 @@ async def atualizar_minuta(
         entidade="minuta",
         id_entidade=m.id,
         payload={"id_processo": m.id_processo},
+    )
+    await db.commit()
+
+    return m
+
+
+async def aplicar_modelo_na_minuta(
+    db: AsyncSession,
+    *,
+    tenant_id: int,
+    minuta_id: int,
+    usuario: Usuario,
+    payload: MinutaAplicarModelo,
+) -> Minuta:
+    """Troca o modelo de um rascunho a qualquer momento (SI-67).
+
+    Até aqui o modelo só era escolhido ao CRIAR a minuta: para trocar, a
+    pessoa apagava o rascunho e começava outro. Agora o editor tem o botão
+    "Modelos de documentos", como no Suite. O corpo é refeito a partir do
+    modelo com os campos automáticos do processo (`services/placeholders.py`)
+    e SUBSTITUI o texto atual — a tela avisa antes. Nada se perde: a troca
+    sobe a versão e o texto anterior fica em `minuta_historico`.
+
+    A rota chama `obter_minuta_autorizada` antes (sigilo do processo e
+    rascunho de despacho alheio); aqui ficam as regras do rascunho.
+    """
+    m = await obter_minuta(db, tenant_id=tenant_id, minuta_id=minuta_id)
+    if m.status != "rascunho":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Minuta finalizada/cancelada não pode ser editada.",
+        )
+    if m.origem != "interno":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Documento do Google Docs é editado lá; o modelo não se troca por aqui.",
+        )
+    if payload.versao is not None and payload.versao != m.versao:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A minuta foi alterada por outra pessoa. Recarregue antes de trocar o modelo.",
+        )
+
+    dados = payload.model_dump(exclude_unset=True)
+    if "destinatario" in dados:
+        m.destinatario = dados["destinatario"]
+
+    if payload.id_template is None:
+        corpo_html = ""
+    else:
+        template = await obter_template(db, tenant_id=tenant_id, template_id=payload.id_template)
+        processo = await _obter_processo(db, tenant_id=tenant_id, processo_id=m.id_processo)
+        contexto = await ph.build_context(
+            db, tenant_id=tenant_id, processo=processo, usuario=usuario,
+            destinatario=m.destinatario,
+        )
+        corpo_html = sanitizar_html(ph.resolve(template.corpo_html, contexto))
+
+    agora = _utcnow()
+    m.id_template_origem = payload.id_template
+    m.corpo_html = corpo_html
+    m.atualizado_em = agora
+    m.versao += 1
+    db.add(
+        MinutaHistorico(
+            tenant_id=tenant_id,
+            id_minuta=m.id,
+            versao=m.versao,
+            corpo_html=corpo_html,
+            id_usuario=usuario.id,
+            criado_em=agora,
+        )
+    )
+    await db.commit()
+    await db.refresh(m)
+
+    await audit_log(
+        db,
+        tenant_id=tenant_id,
+        id_usuario=usuario.id,
+        acao="minuta.modelo_trocado",
+        entidade="minuta",
+        id_entidade=m.id,
+        payload={"id_processo": m.id_processo, "id_template": payload.id_template},
     )
     await db.commit()
 

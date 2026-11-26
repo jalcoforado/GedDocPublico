@@ -74,7 +74,7 @@ def _funcoes_de_rota():
 SERVICOS_POR_MINUTA = {
     "atualizar_minuta", "excluir_minuta", "finalizar_minuta", "listar_historico_minuta",
     "criar_google_doc_para_minuta", "sincronizar_google_doc_para_minuta",
-    "arquivar_google_doc_para_minuta",
+    "arquivar_google_doc_para_minuta", "aplicar_modelo_na_minuta",
 }
 
 
@@ -287,6 +287,8 @@ ROTAS_DA_MINUTA = [
     ("GET", "/api/v2/minutas/{id}", None),
     ("GET", "/api/v2/minutas/{id}/historico", None),
     ("PUT", "/api/v2/minutas/{id}", {"titulo": "Alterado", "versao": 1}),
+    # SI-67 — trocar o modelo reescreve o corpo: não pode alcançar minuta alheia.
+    ("POST", "/api/v2/minutas/{id}/aplicar-modelo", {"id_template": None, "versao": 1}),
     ("DELETE", "/api/v2/minutas/{id}", None),
     ("POST", "/api/v2/minutas/{id}/finalizar", None),
     ("GET", "/api/v2/minutas/{id}/google-editor-url", None),

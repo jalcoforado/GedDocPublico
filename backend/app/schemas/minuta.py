@@ -84,6 +84,21 @@ class MinutaUpdate(BaseModel):
     versao: int | None = None
 
 
+class MinutaAplicarModelo(BaseModel):
+    """SI-67 — trocar o modelo de um rascunho já aberto no editor.
+
+    `id_template` nulo = documento em branco. O texto atual é SUBSTITUÍDO (a
+    tela avisa antes); a versão anterior continua no histórico da minuta.
+    """
+
+    id_template: int | None = None
+    # Alimenta {{destinatario.nome}} na resolução e fica gravado na minuta: a
+    # pessoa pode ter mudado o destinatário na tela sem salvar.
+    destinatario: str | None = Field(default=None, max_length=300)
+    # Lock otimista, como no salvar.
+    versao: int | None = None
+
+
 class MinutaOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

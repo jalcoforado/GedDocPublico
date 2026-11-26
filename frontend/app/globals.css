@@ -725,3 +725,88 @@
     transform: none;
   }
 }
+
+/* ------------------------------------------------------------------------
+   SI-67 — editor de documento com cara de Google Docs
+   (`components/ui/editor-documento.tsx`). A folha é o DOCUMENTO: papel
+   branco e texto escuro em qualquer tema, como a pré-visualização (SI-30).
+   Tipografia do texto vem do CSS do PDF (`estilo-impressao`), aplicado só
+   dentro de `.folha-doc`; aqui fica só a moldura.
+   ------------------------------------------------------------------------ */
+.editor-doc-folha {
+  box-sizing: border-box;
+  width: 21cm;
+  min-height: 29.7cm;
+  margin: 0 auto;
+  padding: 2.5cm 2cm;
+  background: #fff;
+  color: #1a1a1a;
+  box-shadow: 0 1px 3px rgba(60, 64, 67, 0.3), 0 4px 8px 3px rgba(60, 64, 67, 0.15);
+  display: flex;
+  flex-direction: column;
+}
+.editor-doc-folha > .editor-doc-miolo {
+  flex: 1 0 auto;
+}
+.editor-doc-folha > footer.timbre-rodape {
+  margin-top: 24px;
+}
+.editor-doc-folha .ProseMirror {
+  outline: none;
+  min-height: 14cm;
+  caret-color: #1a1a1a;
+}
+.editor-doc-folha .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: #9aa0a6;
+  pointer-events: none;
+  height: 0;
+}
+.editor-doc-folha .ProseMirror ul {
+  list-style: disc;
+}
+.editor-doc-folha .ProseMirror ol {
+  list-style: decimal;
+}
+.editor-doc-folha .ProseMirror li > p {
+  margin: 0;
+}
+.editor-doc-folha .ProseMirror img.ProseMirror-selectednode {
+  outline: 2px solid #1a73e8;
+}
+.editor-doc-folha .ProseMirror .selectedCell {
+  background: rgba(26, 115, 232, 0.12);
+}
+.editor-doc-folha h1.doc-titulo {
+  cursor: text;
+}
+
+/* Régua em centímetros, alinhada à folha: traço fino a cada 0,25 cm, traço
+   maior a cada centímetro, margens (2 cm) sombreadas. */
+.editor-doc-regua {
+  position: relative;
+  width: 21cm;
+  height: 20px;
+  margin: 0 auto;
+  background:
+    repeating-linear-gradient(90deg, #9aa0a6 0 1px, transparent 1px 0.25cm) left bottom / 100% 4px no-repeat,
+    repeating-linear-gradient(90deg, #5f6368 0 1px, transparent 1px 1cm) left bottom / 100% 7px no-repeat,
+    #fff;
+  border-bottom: 1px solid #dadce0;
+  font: 10px/1 Arial, sans-serif;
+  color: #5f6368;
+  user-select: none;
+}
+.editor-doc-regua-margem {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2cm;
+  background: rgba(60, 64, 67, 0.08);
+}
+.editor-doc-regua-numero {
+  position: absolute;
+  top: 2px;
+  transform: translateX(-50%);
+}
