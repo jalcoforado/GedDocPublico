@@ -46,6 +46,8 @@ ALLOWED_TAGS = {
 _IMG_SRC_RE = re.compile(r"^/api/v2/editor-imagens/[a-f0-9]{32}\.(png|jpe?g|gif|webp)$")
 # Só a forma exata que o TextAlign do TipTap gera — nunca url(), nunca outra propriedade.
 _TEXT_ALIGN_RE = re.compile(r"^text-align:\s*(left|right|center|justify);?$")
+# SI-67 — largura e altura que o editor grava ao redimensionar a imagem (px).
+_TAMANHO_IMG_RE = re.compile(r"^\d{1,4}(\.\d{1,2})?$")
 
 
 def _allow_img_src(_tag: str, name: str, value: str) -> bool:
@@ -53,6 +55,8 @@ def _allow_img_src(_tag: str, name: str, value: str) -> bool:
         return True
     if name == "src":
         return bool(_IMG_SRC_RE.match(value))
+    if name in ("width", "height"):
+        return bool(_TAMANHO_IMG_RE.match(value))
     return False
 
 
@@ -71,7 +75,13 @@ ALLOWED_ATTRS = {
 # bleach >= 6 zera QUALQUER `style` sem isso — não é opcional para o
 # text-align sobreviver. `_TEXT_ALIGN_RE` acima documenta a forma esperada;
 # quem valida de fato é este sanitizador de CSS.
-_CSS_SANITIZER = CSSSanitizer(allowed_css_properties=["text-align"])
+# SI-67 — recuo do parágrafo (régua do editor): esquerdo, direito e da
+# primeira linha. Só o NOME da propriedade é conferido aqui; o valor que o
+# editor grava é sempre em cm (`margin-left: 1.25cm`), e o PDF não busca nada
+# de fora (`_raise_no_remote`), então um valor esquisito só deixa de ter efeito.
+_CSS_SANITIZER = CSSSanitizer(
+    allowed_css_properties=["text-align", "margin-left", "margin-right", "text-indent"]
+)
 
 
 def sanitizar_html(html: str) -> str:

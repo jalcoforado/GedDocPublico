@@ -819,3 +819,77 @@
   font-weight: 700;
   letter-spacing: normal;
 }
+
+/* Recuos na régua (SI-67), no desenho do Google Docs: triângulo embaixo =
+   recuo esquerdo/direito, barrinha em cima = recuo da primeira linha. */
+.editor-doc-marcador {
+  position: absolute;
+  transform: translateX(-50%);
+  width: 12px;
+  padding: 0;
+  border: 0;
+  background: #1a73e8;
+  cursor: ew-resize;
+  z-index: 1;
+}
+.editor-doc-marcador:focus-visible {
+  outline: 2px solid #1a73e8;
+  outline-offset: 2px;
+}
+.editor-doc-marcador-esquerdo,
+.editor-doc-marcador-direito {
+  bottom: 0;
+  height: 9px;
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+.editor-doc-marcador-primeira {
+  top: 0;
+  height: 5px;
+  border-radius: 1px;
+}
+.editor-doc-regua-dica {
+  position: absolute;
+  top: 24px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #3c4043;
+  color: #fff;
+  font: 11px/1.4 Arial, sans-serif;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Imagem redimensionável na folha (TipTap ResizableNodeView): alças nos
+   cantos, visíveis ao passar o mouse ou com a imagem selecionada. */
+.editor-doc-folha [data-resize-container] {
+  max-width: 100%;
+}
+.editor-doc-folha [data-resize-handle] {
+  width: 10px;
+  height: 10px;
+  margin: -5px;
+  background: #1a73e8;
+  border: 1px solid #fff;
+  border-radius: 2px;
+  opacity: 0;
+  transition: opacity 120ms;
+  z-index: 1;
+}
+.editor-doc-folha [data-resize-handle="top-left"],
+.editor-doc-folha [data-resize-handle="bottom-right"] {
+  cursor: nwse-resize;
+}
+.editor-doc-folha [data-resize-handle="top-right"],
+.editor-doc-folha [data-resize-handle="bottom-left"] {
+  cursor: nesw-resize;
+}
+.editor-doc-folha [data-resize-container]:hover [data-resize-handle],
+.editor-doc-folha .ProseMirror-selectednode [data-resize-handle],
+.editor-doc-folha [data-resize-state="true"] [data-resize-handle] {
+  opacity: 1;
+}
+.editor-doc-folha [data-resize-container]:hover [data-resize-wrapper] {
+  outline: 1px solid #1a73e8;
+}

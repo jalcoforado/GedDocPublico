@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, FileText, LayoutTemplate, Printer } from "lucide-react";
+import { ExternalLink, FileText, LayoutTemplate, Printer, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,9 @@ import { useToast } from "@/components/ui/toast";
 import { GoogleConnectDialog } from "@/components/GoogleConnectDialog";
 import { PreVisualizacaoDocumento } from "@/components/PreVisualizacaoDocumento";
 import { ModelosDeDocumentoDialog } from "@/components/protocolo/ModelosDeDocumentoDialog";
+import { Badge } from "@/components/ui/badge";
 import { api, type Minuta } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 /** `{{campo}}` que sobrou: sai literal no PDF (mesma regra da pré-visualização). */
 const CAMPO_PENDENTE = /\{\{\s*[\w.]+\s*\}\}/g;
@@ -425,6 +427,7 @@ export function RedigirDocumentoDialog({
           : undefined
       }
       size={noEditor ? "tela" : "xl"}
+      semCabecalho={noEditor}
       footer={footer}
     >
       {!emEdicao ? (
@@ -575,33 +578,29 @@ export function RedigirDocumentoDialog({
         </div>
       ) : (
         <>
-          {/* Barra de ações do documento — imagem 1 do Suite: "Modelos de
-              documentos" e "Salvar" no topo, a qualquer momento. */}
-          <div className="flex shrink-0 flex-wrap items-end gap-x-3 gap-y-2 border-b border-border bg-card px-5 py-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant="secondary"
-                onClick={() => setModelosAberto(true)}
-                disabled={ocupado}
-              >
-                <LayoutTemplate className="h-4 w-4" aria-hidden="true" />
-                Modelos de documentos
-              </Button>
-              <Button
-                variant={despacho ? "secondary" : "primary"}
-                onClick={() => salvarM.mutate()}
-                disabled={ocupado}
-              >
-                {salvarM.isPending ? "Salvando…" : "Salvar rascunho"}
-              </Button>
+          {/* Topo, como no Google Docs (e a imagem 1 do Suite): o nome do
+              documento à esquerda — os menus vêm logo abaixo, no editor — e
+              "Modelos de documentos", "Salvar" e fechar à direita. */}
+          <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 bg-card px-3 pt-2">
+            <FileText className="h-7 w-7 shrink-0 text-brand" aria-hidden="true" />
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+              <input
+                id="minuta-titulo-edit"
+                aria-label="Título do documento"
+                value={titulo}
+                onChange={(e) => setTitulo(e.target.value)}
+                placeholder="Documento sem título"
+                className={cn(
+                  "min-w-[12rem] max-w-[32rem] flex-1 truncate rounded border border-transparent bg-transparent px-1.5 py-0.5",
+                  "text-lg text-foreground transition-colors duration-fast hover:border-border",
+                  "focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/30",
+                  titulo.trim() === "" && "border-danger/60",
+                )}
+              />
               {despacho && (
-                <Button
-                  onClick={() => concluirM.mutate()}
-                  disabled={carregando || salvarM.isPending || aplicarModeloM.isPending || textoVazio}
-                  loading={concluirM.isPending}
-                >
-                  Concluir e assinar…
-                </Button>
+                <Badge intent="warning" title="O processo continua nesta unidade. Até ser assinado, o despacho é um rascunho que só você vê.">
+                  Despacho · só você vê até assinar
+                </Badge>
               )}
               <span
                 role="status"
@@ -614,22 +613,53 @@ export function RedigirDocumentoDialog({
                 {statusSalvo}
               </span>
             </div>
-            <div className="ml-auto grid w-full gap-3 sm:w-auto sm:grid-cols-[18rem_14rem]">
-              <FormField label="Título" required>
-                <Input
-                  id="minuta-titulo-edit"
-                  value={titulo}
-                  onChange={(e) => setTitulo(e.target.value)}
-                />
-              </FormField>
-              <FormField label="Destinatário" opcional>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-1.5 text-xs text-foreground-muted">
+                Destinatário
                 <Input
                   id="minuta-destinatario-edit"
                   value={destinatario}
                   onChange={(e) => setDestinatario(e.target.value)}
                   placeholder="Ex.: Secretaria de Obras"
+                  className="h-9 w-48 text-sm"
                 />
-              </FormField>
+              </label>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setModelosAberto(true)}
+                disabled={ocupado}
+              >
+                <LayoutTemplate className="h-4 w-4" aria-hidden="true" />
+                Modelos de documentos
+              </Button>
+              <Button
+                variant={despacho ? "secondary" : "primary"}
+                size="sm"
+                onClick={() => salvarM.mutate()}
+                disabled={ocupado}
+              >
+                {salvarM.isPending ? "Salvando…" : "Salvar rascunho"}
+              </Button>
+              {despacho && (
+                <Button
+                  size="sm"
+                  onClick={() => concluirM.mutate()}
+                  disabled={carregando || salvarM.isPending || aplicarModeloM.isPending || textoVazio}
+                  loading={concluirM.isPending}
+                >
+                  Concluir e assinar…
+                </Button>
+              )}
+              <button
+                type="button"
+                onClick={pedirFechar}
+                aria-label="Fechar"
+                title="Fechar"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md text-foreground-muted transition-colors duration-fast hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <X className="h-5 w-5" aria-hidden="true" />
+              </button>
             </div>
           </div>
           <RichTextEditor

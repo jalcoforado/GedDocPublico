@@ -91,6 +91,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * `can()` para componente que também roda fora do `<AuthProvider>` (diálogos
+ * reaproveitados e seus testes). Sem provider, nega: é só UX — quem barra de
+ * verdade é o backend.
+ */
+export function usePermissao(
+  codigo: string,
+  action?: "inserir" | "atualizar" | "excluir",
+): boolean {
+  const ctx = useContext(AuthContext);
+  return ctx ? ctx.can(codigo, action) : false;
+}
+
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth deve ser usado dentro de <AuthProvider>");

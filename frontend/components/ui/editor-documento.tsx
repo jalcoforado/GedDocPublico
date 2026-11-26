@@ -10,6 +10,8 @@ import {
   Columns3,
   Eye,
   Image as ImageIcon,
+  IndentDecrease,
+  IndentIncrease,
   Italic,
   Link as LinkIcon,
   List,
@@ -27,16 +29,25 @@ import {
   Underline as UnderlineIcon,
   Undo2,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ActionsMenu, type ActionsMenuItem } from "@/components/ui/actions-menu";
+import {
+  LARGURA_TEXTO_CM,
+  PASSO_RECUO_CM,
+  arredondarCm,
+  limitarRecuos,
+  recuosNoCursor,
+  type Recuos,
+} from "@/components/ui/extensao-recuo";
 import { cn } from "@/lib/utils";
 
 /**
  * Editor de documento com cara de Google Docs (SI-67) — a moldura do
- * `RichTextEditor variante="documento"`: barra de menus (Arquivo, Editar, Ver,
- * Inserir, Formatar), barra de ferramentas, régua e a folha A4 sobre fundo
- * cinza, com o papel timbrado da prefeitura dentro da folha.
+ * `RichTextEditor variante="documento"`: no topo, o nome do documento com a
+ * barra de menus embaixo (Arquivo, Editar, Ver, Inserir, Formatar) e as ações
+ * à direita; a barra de ferramentas; a régua com os recuos que se arrastam; e
+ * a folha A4 sobre fundo cinza, com o papel timbrado da prefeitura.
  *
  * Por que o nosso editor e não o Google Docs embutido: o SI-66 testaria o
  * Google num `<iframe>`, mas depende da credencial do Google, e o despacho
@@ -49,6 +60,12 @@ import { cn } from "@/lib/utils";
 
 /** Escopo do CSS do documento: as regras do PDF valem só dentro dele. */
 export const ESCOPO_FOLHA = ".folha-doc";
+
+/** Margem da página (cm), a do `@page` do PDF. Os recuos contam a partir dela. */
+const MARGEM_CM = 2;
+const LARGURA_PAGINA_CM = 21;
+/** 21 cm em px CSS (96 dpi). */
+const LARGURA_PAGINA_PX = (LARGURA_PAGINA_CM / 2.54) * 96;
 
 /**
  * Reescreve o CSS do PDF para valer só dentro de `escopo`: `body`/`html` viram
@@ -79,7 +96,7 @@ export function escoparCss(css: string, escopo: string = ESCOPO_FOLHA): string {
   return saida.join("\n");
 }
 
-/** HTML de um documento inteiro (timbre + título + corpo), para imprimir. */
+/** Imprime o documento inteiro (timbre + título + corpo) com o CSS do PDF. */
 export function imprimirDocumento({
   css,
   cabecalhoHtml,
@@ -126,7 +143,11 @@ function escaparHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }
 
-const ZOOMS = [50, 75, 90, 100, 125, 150];
+const ZOOMS = [50, 75, 90, 100, 125, 150, 200];
+type Zoom = number | "ajustar";
+/** "Ajustar": a folha ocupa a largura disponível, sem ficar ilegível nem enorme. */
+const AJUSTE_MIN = 0.5;
+const AJUSTE_MAX = 1.25;
 
 type Estilo = "normal" | "titulo" | "subtitulo";
 
@@ -145,6 +166,11 @@ function aplicarEstilo(editor: Editor, estilo: Estilo) {
 
 function hojePorExtenso(): string {
   return new Date().toLocaleDateString("pt-BR", { day: "numeric", month: "long", year: "numeric" });
+}
+
+/** "1,25 cm" */
+function cm(v: number): string {
+  return `${arredondarCm(v).toLocaleString("pt-BR")} cm`;
 }
 
 function Botao({
@@ -191,17 +217,133 @@ const SELECT_BARRA =
   "h-7 shrink-0 cursor-pointer rounded border-0 bg-transparent px-1.5 text-sm text-foreground " +
   "hover:bg-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
-/** Régua em centímetros: números a partir da margem esquerda, como no Google Docs. */
-function Regua() {
+type Marcador = "esquerdo" | "primeira" | "direito";
+
+const ROTULO_MARCADOR: Record<Marcador, string> = {
+  esquerdo: "Recuo esquerdo",
+  primeira: "Recuo da primeira linha",
+  direito: "Recuo direito",
+};
+
+/**
+ * Régua em centímetros com os recuos do parágrafo onde está o cursor, como no
+ * Google Docs: arraste o triângulo da esquerda (recuo esquerdo), a barrinha de
+ * cima (primeira linha) ou o triângulo da direita (recuo direito). Teclado:
+ * setas movem 0,25 cm. As faixas cinza são a margem da página (2 cm), a mesma
+ * do PDF.
+ */
+function Regua({ editor }: { editor: Editor }) {
+  const reguaRef = useRef<HTMLDivElement>(null);
+  const [arrastando, setArrastando] = useState<{ marcador: Marcador; valor: number } | null>(null);
+  const atual = recuosNoCursor(editor);
+
+  // Posição de cada marcador, em cm a partir da borda esquerda da folha.
+  const posicao: Record<Marcador, number> = {
+    esquerdo: MARGEM_CM + atual.recuoEsquerdo,
+    primeira: MARGEM_CM + atual.recuoEsquerdo + atual.recuoPrimeiraLinha,
+    direito: LARGURA_PAGINA_CM - MARGEM_CM - atual.recuoDireito,
+  };
+
+  /** Recuos novos a partir da posição (cm na folha) de um marcador. */
+  function recuosPara(marcador: Marcador, cmNaFolha: number, base: Recuos): Recuos {
+    const passo = Math.round(cmNaFolha * 4) / 4; // 0,25 cm, como o Google
+    if (marcador === "esquerdo") {
+      return limitarRecuos({ ...base, recuoEsquerdo: passo - MARGEM_CM });
+    }
+    if (marcador === "primeira") {
+      return limitarRecuos({ ...base, recuoPrimeiraLinha: passo - MARGEM_CM - base.recuoEsquerdo });
+    }
+    return limitarRecuos({ ...base, recuoDireito: LARGURA_PAGINA_CM - MARGEM_CM - passo });
+  }
+
+  function aplicar(r: Recuos, historico: boolean) {
+    editor
+      .chain()
+      .command(({ tr }) => {
+        if (!historico) tr.setMeta("addToHistory", false);
+        return true;
+      })
+      .definirRecuo(r)
+      .run();
+  }
+
+  function comecarArrasto(marcador: Marcador, e: React.PointerEvent) {
+    e.preventDefault();
+    const regua = reguaRef.current;
+    if (!regua) return;
+    const original = recuosNoCursor(editor);
+    let ultimo = original;
+    const mover = (ev: PointerEvent) => {
+      // A régua está dentro do zoom: o retângulo já vem na escala da tela.
+      const r = regua.getBoundingClientRect();
+      const cmNaFolha = ((ev.clientX - r.left) / r.width) * LARGURA_PAGINA_CM;
+      ultimo = recuosPara(marcador, cmNaFolha, original);
+      setArrastando({ marcador, valor: valorDo(marcador, ultimo) });
+      aplicar(ultimo, false);
+    };
+    const soltar = () => {
+      window.removeEventListener("pointermove", mover);
+      window.removeEventListener("pointerup", soltar);
+      setArrastando(null);
+      // Um passo só no "desfazer": volta ao original sem histórico e aplica o
+      // final com histórico.
+      aplicar(original, false);
+      aplicar(ultimo, true);
+      editor.commands.focus();
+    };
+    window.addEventListener("pointermove", mover);
+    window.addEventListener("pointerup", soltar);
+  }
+
+  function valorDo(marcador: Marcador, r: Recuos): number {
+    return marcador === "esquerdo"
+      ? r.recuoEsquerdo
+      : marcador === "primeira"
+        ? r.recuoPrimeiraLinha
+        : r.recuoDireito;
+  }
+
+  function teclado(marcador: Marcador, e: React.KeyboardEvent) {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const delta = e.key === "ArrowRight" ? 0.25 : -0.25;
+    aplicar(recuosPara(marcador, posicao[marcador] + delta, atual), true);
+  }
+
   return (
-    <div className="editor-doc-regua" aria-hidden="true">
-      <span className="editor-doc-regua-margem" style={{ left: 0 }} />
-      <span className="editor-doc-regua-margem" style={{ right: 0 }} />
-      {Array.from({ length: 16 }, (_, i) => i + 1).map((n) => (
-        <span key={n} className="editor-doc-regua-numero" style={{ left: `${2 + n}cm` }}>
+    <div ref={reguaRef} className="editor-doc-regua" role="group" aria-label="Régua e recuos do parágrafo">
+      <span
+        className="editor-doc-regua-margem"
+        style={{ left: 0 }}
+        title="Margem da página: 2 cm (a mesma do PDF)"
+      />
+      <span
+        className="editor-doc-regua-margem"
+        style={{ right: 0 }}
+        title="Margem da página: 2 cm (a mesma do PDF)"
+      />
+      {Array.from({ length: LARGURA_TEXTO_CM - 1 }, (_, i) => i + 1).map((n) => (
+        <span key={n} className="editor-doc-regua-numero" style={{ left: `${MARGEM_CM + n}cm` }} aria-hidden="true">
           {n}
         </span>
       ))}
+      {(["primeira", "esquerdo", "direito"] as const).map((m) => (
+        <button
+          key={m}
+          type="button"
+          className={cn("editor-doc-marcador", `editor-doc-marcador-${m}`)}
+          style={{ left: `${posicao[m]}cm` }}
+          aria-label={`${ROTULO_MARCADOR[m]}: ${cm(valorDo(m, atual))}`}
+          title={`${ROTULO_MARCADOR[m]}: ${cm(valorDo(m, atual))} — arraste para mudar`}
+          onPointerDown={(e) => comecarArrasto(m, e)}
+          onKeyDown={(e) => teclado(m, e)}
+        />
+      ))}
+      {arrastando && (
+        <span className="editor-doc-regua-dica" style={{ left: `${posicao[arrastando.marcador]}cm` }}>
+          {ROTULO_MARCADOR[arrastando.marcador]}: {cm(arrastando.valor)}
+        </span>
+      )}
     </div>
   );
 }
@@ -226,7 +368,7 @@ export interface OpcoesDocumento {
   aviso?: React.ReactNode;
 }
 
-/** Barras + régua + folha. Recebe o editor já criado pelo `RichTextEditor`. */
+/** Topo, barras, régua e folha. Recebe o editor já criado pelo `RichTextEditor`. */
 export function MolduraDocumento({
   editor,
   opcoes,
@@ -245,17 +387,56 @@ export function MolduraDocumento({
   onLink: () => void;
   className?: string;
 }) {
-  const [zoom, setZoom] = useState(100);
+  const [zoom, setZoom] = useState<Zoom>("ajustar");
   const [regua, setRegua] = useState(true);
+  const [largura, setLargura] = useState(0);
+  const telaRef = useRef<HTMLDivElement>(null);
   const cssEscopado = useMemo(() => escoparCss(opcoes.css ?? ""), [opcoes.css]);
   const emTabela = editor.isActive("table");
   const ch = () => editor.chain().focus();
 
+  // Largura da área da folha, para o "Ajustar".
+  useEffect(() => {
+    const el = telaRef.current;
+    if (!el) return;
+    const medir = () => setLargura(el.clientWidth);
+    medir();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(medir);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const escala =
+    zoom === "ajustar"
+      ? largura > 0
+        ? Math.min(AJUSTE_MAX, Math.max(AJUSTE_MIN, (largura - 64) / LARGURA_PAGINA_PX))
+        : 1
+      : zoom / 100;
+
+  // Ctrl + roda do mouse muda o zoom da folha (como no Google Docs), em vez do
+  // zoom da página inteira. Ouvinte nativo: o do React é passivo e não deixa
+  // cancelar o zoom do navegador.
+  const escalaRef = useRef(escala);
+  escalaRef.current = escala;
+  useEffect(() => {
+    const el = telaRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const atual = Math.round(escalaRef.current * 100);
+      const proximo = e.deltaY < 0 ? ZOOMS.find((z) => z > atual) : [...ZOOMS].reverse().find((z) => z < atual);
+      if (proximo) setZoom(proximo);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  const recuoPrimeira = recuosNoCursor(editor).recuoPrimeiraLinha;
+
   const menus: { rotulo: string; itens: ActionsMenuItem[] }[] = [
-    {
-      rotulo: "Arquivo",
-      itens: opcoes.menuArquivo ?? [],
-    },
+    { rotulo: "Arquivo", itens: opcoes.menuArquivo ?? [] },
     {
       rotulo: "Editar",
       itens: [
@@ -277,9 +458,9 @@ export function MolduraDocumento({
             ]
           : []),
         { label: regua ? "Ocultar régua" : "Mostrar régua", onClick: () => setRegua((r) => !r) },
-        { label: "Zoom 75%", onClick: () => setZoom(75) },
+        { label: "Ajustar à largura", onClick: () => setZoom("ajustar") },
         { label: "Zoom 100%", onClick: () => setZoom(100) },
-        { label: "Zoom 125%", onClick: () => setZoom(125) },
+        { label: "Zoom 150%", onClick: () => setZoom(150) },
       ],
     },
     {
@@ -311,10 +492,21 @@ export function MolduraDocumento({
         { label: "Centralizar", icon: AlignCenter, onClick: () => ch().setTextAlign("center").run() },
         { label: "Alinhar à direita", icon: AlignRight, onClick: () => ch().setTextAlign("right").run() },
         { label: "Justificar", icon: AlignJustify, onClick: () => ch().setTextAlign("justify").run() },
+        { label: "Aumentar recuo (Ctrl+])", icon: IndentIncrease, onClick: () => ch().mudarRecuoEsquerdo(PASSO_RECUO_CM).run() },
+        { label: "Diminuir recuo (Ctrl+[)", icon: IndentDecrease, onClick: () => ch().mudarRecuoEsquerdo(-PASSO_RECUO_CM).run() },
+        {
+          label: recuoPrimeira ? "Tirar o recuo da primeira linha" : "Recuo da primeira linha (1,25 cm)",
+          onClick: () => ch().definirRecuo({ recuoPrimeiraLinha: recuoPrimeira ? 0 : PASSO_RECUO_CM }).run(),
+        },
         {
           label: "Limpar formatação",
           icon: RemoveFormatting,
-          onClick: () => ch().unsetAllMarks().clearNodes().run(),
+          onClick: () =>
+            ch()
+              .unsetAllMarks()
+              .clearNodes()
+              .definirRecuo({ recuoEsquerdo: 0, recuoDireito: 0, recuoPrimeiraLinha: 0 })
+              .run(),
         },
       ],
     },
@@ -322,7 +514,7 @@ export function MolduraDocumento({
 
   return (
     <div
-      className={cn("flex min-h-0 flex-1 flex-col bg-surface-2", className)}
+      className={cn("flex min-h-0 flex-1 flex-col", className)}
       onKeyDown={(e) => {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s" && opcoes.onSalvar) {
           e.preventDefault();
@@ -330,23 +522,31 @@ export function MolduraDocumento({
         }
       }}
     >
-      <div className="shrink-0 space-y-1 border-b border-border bg-card px-3 pb-2 pt-1">
-        <nav aria-label="Menus do documento" className="flex flex-wrap items-center">
-          {menus.map((m) => (
-            <ActionsMenu
-              key={m.rotulo}
-              label={m.rotulo}
-              items={m.itens}
-              variant="ghost"
-              semSeta
-              placement="bottom-start"
-            />
-          ))}
-        </nav>
+      {/* Menus logo abaixo do nome do documento (que a tela põe acima, com o
+          ícone à esquerda): o recuo alinha os menus com o nome, como no Google
+          Docs. */}
+      <div className="shrink-0 bg-card px-3">
+        <div>
+          <div className="min-w-0 pl-[2.6rem]">
+            <nav aria-label="Menus do documento" className="-ml-2 flex flex-wrap items-center">
+              {menus.map((m) => (
+                <ActionsMenu
+                  key={m.rotulo}
+                  label={m.rotulo}
+                  items={m.itens}
+                  variant="ghost"
+                  semSeta
+                  placement="bottom-start"
+                  className="[&>button]:h-7 [&>button]:px-2 [&>button]:text-sm [&>button]:font-normal"
+                />
+              ))}
+            </nav>
+          </div>
+        </div>
         <div
           role="toolbar"
           aria-label="Formatação do texto"
-          className="flex items-center gap-0.5 overflow-x-auto rounded-full bg-surface-2 px-3 py-1"
+          className="my-2 flex items-center gap-0.5 overflow-x-auto rounded-full bg-surface-2 px-3 py-1"
         >
           <Botao rotulo="Desfazer (Ctrl+Z)" icon={Undo2} onClick={() => ch().undo().run()} desabilitado={!editor.can().undo()} />
           <Botao rotulo="Refazer (Ctrl+Y)" icon={Redo2} onClick={() => ch().redo().run()} desabilitado={!editor.can().redo()} />
@@ -354,10 +554,14 @@ export function MolduraDocumento({
           <Separador />
           <select
             aria-label="Zoom"
-            value={zoom}
-            onChange={(e) => setZoom(Number(e.target.value))}
-            className={SELECT_BARRA}
+            title="Zoom (Ctrl + roda do mouse)"
+            value={zoom === "ajustar" ? "ajustar" : String(zoom)}
+            onChange={(e) => setZoom(e.target.value === "ajustar" ? "ajustar" : Number(e.target.value))}
+            className={cn(SELECT_BARRA, "w-[5.5rem]")}
           >
+            <option value="ajustar">
+              {zoom === "ajustar" ? `${Math.round(escala * 100)}%` : "Ajustar"}
+            </option>
             {ZOOMS.map((z) => (
               <option key={z} value={z}>
                 {z}%
@@ -410,10 +614,18 @@ export function MolduraDocumento({
           <Separador />
           <Botao rotulo="Lista com marcadores" icon={List} onClick={() => ch().toggleBulletList().run()} ativo={editor.isActive("bulletList")} />
           <Botao rotulo="Lista numerada" icon={ListOrdered} onClick={() => ch().toggleOrderedList().run()} ativo={editor.isActive("orderedList")} />
+          <Botao rotulo="Diminuir recuo (Ctrl+[)" icon={IndentDecrease} onClick={() => ch().mudarRecuoEsquerdo(-PASSO_RECUO_CM).run()} />
+          <Botao rotulo="Aumentar recuo (Ctrl+])" icon={IndentIncrease} onClick={() => ch().mudarRecuoEsquerdo(PASSO_RECUO_CM).run()} />
           <Botao rotulo="Citação" icon={Quote} onClick={() => ch().toggleBlockquote().run()} ativo={editor.isActive("blockquote")} />
           <Botao rotulo="Linha horizontal" icon={SeparatorHorizontal} onClick={() => ch().setHorizontalRule().run()} />
           <Separador />
-          <Botao rotulo="Limpar formatação" icon={RemoveFormatting} onClick={() => ch().unsetAllMarks().clearNodes().run()} />
+          <Botao
+            rotulo="Limpar formatação"
+            icon={RemoveFormatting}
+            onClick={() =>
+              ch().unsetAllMarks().clearNodes().definirRecuo({ recuoEsquerdo: 0, recuoDireito: 0, recuoPrimeiraLinha: 0 }).run()
+            }
+          />
           {opcoes.onAlternarPrevia && (
             <>
               <span className="ml-auto" />
@@ -428,13 +640,13 @@ export function MolduraDocumento({
         </div>
       </div>
 
-      <div className={cn("flex min-h-0 flex-1", opcoes.previaAberta && opcoes.previa && "gap-0")}>
-        <div className="min-h-0 min-w-0 flex-1 overflow-auto bg-muted">
+      <div className="flex min-h-0 flex-1 border-t border-border">
+        <div ref={telaRef} className="min-h-0 min-w-0 flex-1 overflow-auto bg-muted">
           {opcoes.aviso && <div className="mx-auto max-w-[21cm] px-4 pt-3">{opcoes.aviso}</div>}
-          <div className="px-4 pb-10 pt-3" style={{ zoom: zoom / 100 }}>
+          <div className="px-4 pb-10 pt-3" style={{ zoom: escala }}>
             {regua && (
               <div className="sticky top-0 z-sticky mb-3">
-                <Regua />
+                <Regua editor={editor} />
               </div>
             )}
             {cssEscopado && <style>{cssEscopado}</style>}

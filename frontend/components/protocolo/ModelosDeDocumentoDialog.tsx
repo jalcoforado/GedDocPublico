@@ -1,14 +1,16 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { FileText, Search } from "lucide-react";
+import { FileText, Plus, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { FormularioModeloDialog } from "@/components/protocolo/FormularioModeloDialog";
 import { api } from "@/lib/api";
+import { usePermissao } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
 /** Sem acento e em minúsculas: "oficio" acha "Ofício". */
@@ -36,6 +38,11 @@ export function ModelosDeDocumentoDialog({
   modeloAtualId?: number | null;
 }) {
   const [busca, setBusca] = useState("");
+  // SI-67 — criar um modelo sem sair do documento: o mesmo formulário de
+  // Cadastros › Templates de documento, por cima desta lista. Só para quem
+  // pode criar modelo (a barreira de verdade é o servidor).
+  const podeCriar = usePermissao("minuta_template", "inserir");
+  const [criando, setCriando] = useState(false);
   useEffect(() => {
     if (open) setBusca("");
   }, [open]);
@@ -63,6 +70,7 @@ export function ModelosDeDocumentoDialog({
     "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring";
 
   return (
+    <>
     <Dialog
       open={open}
       onClose={onClose}
@@ -70,9 +78,19 @@ export function ModelosDeDocumentoDialog({
       description="Escolha um modelo para o documento. Os dados do processo já entram preenchidos."
       size="lg"
       footer={
-        <Button variant="ghost" onClick={onClose}>
-          Cancelar
-        </Button>
+        <div className="flex w-full flex-wrap items-center justify-between gap-2">
+          {podeCriar ? (
+            <Button variant="secondary" onClick={() => setCriando(true)}>
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Criar novo modelo
+            </Button>
+          ) : (
+            <span />
+          )}
+          <Button variant="ghost" onClick={onClose}>
+            Cancelar
+          </Button>
+        </div>
       }
     >
       <div className="space-y-3">
@@ -140,5 +158,16 @@ export function ModelosDeDocumentoDialog({
         </ul>
       </div>
     </Dialog>
+
+    <FormularioModeloDialog
+      open={criando}
+      onClose={() => setCriando(false)}
+      onSalvo={(t) => {
+        // Modelo ativo já vale para este documento: segue para a troca (com
+        // o aviso, se houver texto). Inativo só fica guardado.
+        if (t.ativo) onEscolher({ id: t.id, nome: t.nome });
+      }}
+    />
+    </>
   );
 }

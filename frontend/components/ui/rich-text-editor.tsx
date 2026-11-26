@@ -39,6 +39,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { MolduraDocumento, type OpcoesDocumento } from "@/components/ui/editor-documento";
+import { Recuo } from "@/components/ui/extensao-recuo";
 import { cn } from "@/lib/utils";
 
 interface ToolbarButtonProps {
@@ -139,11 +140,26 @@ export function RichTextEditor({
       Placeholder.configure({ placeholder }),
       Underline,
       TextAlign.configure({ types: ["heading", "paragraph"] }),
-      Image.configure({ inline: true, HTMLAttributes: { class: "max-w-full" } }),
+      Image.configure({
+        inline: true,
+        HTMLAttributes: { class: "max-w-full" },
+        // SI-67 — na folha, a imagem se redimensiona arrastando o canto, como no
+        // Google Docs; o tamanho vai no `width` do <img>, que o PDF respeita.
+        resize: ehDocumento
+          ? {
+              enabled: true,
+              directions: ["top-left", "top-right", "bottom-left", "bottom-right"],
+              minWidth: 32,
+              minHeight: 16,
+              alwaysPreserveAspectRatio: true,
+            }
+          : false,
+      }),
       Table.configure({ resizable: false }),
       TableRow,
       TableHeader,
       TableCell,
+      ...(ehDocumento ? [Recuo] : []),
     ],
     content: value || "",
     editorProps: {

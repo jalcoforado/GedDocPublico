@@ -3,6 +3,7 @@
 import {
   AlignCenter,
   AlignLeft,
+  AlignRight,
   Braces,
   CalendarDays,
   ChevronDown,
@@ -10,7 +11,9 @@ import {
   Copy,
   GripVertical,
   Heading,
+  Image as ImageIcon,
   LayoutTemplate,
+  Loader2,
   Minus,
   PenLine,
   Pilcrow,
@@ -25,6 +28,7 @@ import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { Select } from "@/components/ui/select";
 import {
   CATALOGO_BLOCOS,
+  LARGURAS_IMAGEM,
   ROTULO_BLOCO,
   copiarBloco,
   moverPara,
@@ -40,6 +44,7 @@ const ICONE: Record<TipoBloco, LucideIcon> = {
   campo: Braces,
   data_local: CalendarDays,
   assinatura: PenLine,
+  imagem: ImageIcon,
   separador: Minus,
 };
 
@@ -570,7 +575,139 @@ function EditorDoBloco({
           </div>
         </div>
       );
+    case "imagem":
+      return <EditorDeImagem bloco={b} onUploadImage={onUploadImage} onAtualizar={onAtualizar} />;
     case "separador":
       return <p className="text-xs text-foreground-muted">Linha horizontal entre duas partes do documento.</p>;
   }
+}
+
+/**
+ * Bloco Imagem (SI-67): enviar a imagem (logotipo, selo, foto), escolher o
+ * tamanho e o alinhamento. A imagem vai para o mesmo armazenamento das imagens
+ * do editor (`/editor-imagens`), que o PDF embute.
+ */
+function EditorDeImagem({
+  bloco: b,
+  onUploadImage,
+  onAtualizar,
+}: {
+  bloco: Extract<Bloco, { tipo: "imagem" }>;
+  onUploadImage?: (file: File) => Promise<string>;
+  onAtualizar: (patch: Partial<Bloco>) => void;
+}) {
+  const arquivoRef = useRef<HTMLInputElement>(null);
+  const [enviando, setEnviando] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+
+  async function escolher(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !onUploadImage) return;
+    setErro(null);
+    setEnviando(true);
+    try {
+      onAtualizar({ src: await onUploadImage(file) });
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : "Não foi possível enviar a imagem.");
+    } finally {
+      setEnviando(false);
+    }
+  }
+
+  const alinhamentos = [
+    ["left", "À esquerda", AlignLeft],
+    ["center", "Centralizada", AlignCenter],
+    ["right", "À direita", AlignRight],
+  ] as const;
+
+  return (
+    <div className="flex flex-wrap items-start gap-4">
+      <input
+        ref={arquivoRef}
+        type="file"
+        accept="image/png,image/jpeg,image/gif,image/webp"
+        className="hidden"
+        aria-label="Arquivo da imagem"
+        onChange={escolher}
+      />
+      <button
+        type="button"
+        onClick={() => arquivoRef.current?.click()}
+        disabled={!onUploadImage || enviando}
+        className={cn(
+          "flex h-28 w-40 shrink-0 items-center justify-center overflow-hidden rounded-md border border-dashed border-border-strong bg-surface-1",
+          "text-xs text-foreground-muted transition-colors duration-fast hover:bg-surface-2",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60",
+        )}
+      >
+        {enviando ? (
+          <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+        ) : b.src ? (
+          <img src={b.src} alt="Imagem escolhida" className="max-h-full max-w-full object-contain" />
+        ) : (
+          <span className="flex flex-col items-center gap-1 px-2 text-center">
+            <ImageIcon className="h-5 w-5" aria-hidden="true" />
+            Escolher imagem
+          </span>
+        )}
+      </button>
+      <div className="min-w-[12rem] flex-1 space-y-3">
+        {b.src && (
+          <button
+            type="button"
+            onClick={() => arquivoRef.current?.click()}
+            disabled={enviando}
+            className="text-xs font-medium text-brand hover:underline"
+          >
+            Trocar imagem
+          </button>
+        )}
+        <div className="space-y-1">
+          <Label htmlFor={`${b.id}-largura`}>Tamanho</Label>
+          <Select
+            id={`${b.id}-largura`}
+            value={b.largura}
+            onChange={(e) => onAtualizar({ largura: Number(e.target.value) })}
+          >
+            {!LARGURAS_IMAGEM.some((l) => l.valor === b.largura) && (
+              <option value={b.largura}>Personalizado ({(b.largura / 37.8).toFixed(1)} cm)</option>
+            )}
+            {LARGURAS_IMAGEM.map((l) => (
+              <option key={l.valor} value={l.valor}>
+                {l.rotulo}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div role="group" aria-label="Alinhamento da imagem" className="inline-flex rounded-md border border-border p-0.5">
+          {alinhamentos.map(([valor, nome, I]) => (
+            <button
+              key={valor}
+              type="button"
+              aria-pressed={b.alinhamento === valor}
+              aria-label={nome}
+              title={nome}
+              onClick={() => onAtualizar({ alinhamento: valor })}
+              className={cn(
+                "inline-flex h-8 w-8 items-center justify-center rounded transition-colors duration-fast",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                b.alinhamento === valor ? "bg-brand/10 text-brand" : "text-foreground-muted hover:bg-muted",
+              )}
+            >
+              <I className="h-4 w-4" aria-hidden="true" />
+            </button>
+          ))}
+        </div>
+        {erro && (
+          <p role="alert" className="text-xs text-danger-soft-foreground">
+            {erro}
+          </p>
+        )}
+        {!onUploadImage && (
+          <p className="text-xs text-foreground-muted">O envio de imagem não está disponível aqui.</p>
+        )}
+      </div>
+    </div>
+  );
 }

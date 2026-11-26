@@ -74,7 +74,10 @@ vi.mock("@/components/PreVisualizacaoDocumento", () => ({
 vi.mock("@/components/GoogleConnectDialog", () => ({ GoogleConnectDialog: () => null }));
 vi.mock("@/components/ArquivarDialog", () => ({ ArquivarDialog: () => null }));
 // A barra de ações confere permissões (desarquivar, cancelar recebimento).
-vi.mock("@/lib/auth", () => ({ useAuth: () => ({ can: () => true, user: { id: 1 } }) }));
+vi.mock("@/lib/auth", () => ({
+  useAuth: () => ({ can: () => true, user: { id: 1 } }),
+  usePermissao: () => true,
+}));
 
 import { AcoesProcesso } from "@/components/AcoesProcesso";
 import { MinutasProcesso } from "@/components/MinutasProcesso";

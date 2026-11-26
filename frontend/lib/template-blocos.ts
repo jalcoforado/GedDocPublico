@@ -15,9 +15,31 @@
  * vira bloco de Texto: nada se perde ao abrir um modelo existente.
  */
 
-export type TipoBloco = "titulo" | "texto" | "campo" | "data_local" | "assinatura" | "separador";
+export type TipoBloco =
+  | "titulo"
+  | "texto"
+  | "campo"
+  | "data_local"
+  | "assinatura"
+  | "imagem"
+  | "separador";
 
 export type Alinhamento = "center" | "left";
+
+/** SI-67 — imagem (logotipo, selo, foto): também à direita. */
+export type AlinhamentoImagem = "left" | "center" | "right";
+
+/**
+ * Larguras do bloco Imagem, em px CSS (1 cm = 37,8 px). "Página" é a largura
+ * do texto numa A4 com 2 cm de margem (17 cm). Vão no `width` do `<img>`, que
+ * o editor de documento mantém e o PDF respeita.
+ */
+export const LARGURAS_IMAGEM = [
+  { valor: 113, rotulo: "Pequena (3 cm)" },
+  { valor: 227, rotulo: "Média (6 cm)" },
+  { valor: 378, rotulo: "Grande (10 cm)" },
+  { valor: 643, rotulo: "Largura do texto (17 cm)" },
+] as const;
 
 export type Bloco =
   | { id: string; tipo: "titulo"; texto: string; alinhamento: Alinhamento }
@@ -25,6 +47,7 @@ export type Bloco =
   | { id: string; tipo: "campo"; rotulo: string; chave: string }
   | { id: string; tipo: "data_local"; local: string }
   | { id: string; tipo: "assinatura"; nome: string; cargo: string }
+  | { id: string; tipo: "imagem"; src: string; largura: number; alinhamento: AlinhamentoImagem }
   | { id: string; tipo: "separador" };
 
 export interface InfoBloco {
@@ -41,6 +64,7 @@ export const CATALOGO_BLOCOS: InfoBloco[] = [
   { tipo: "campo", rotulo: "Campo automático", descricao: "Dado do processo, preenchido ao redigir" },
   { tipo: "data_local", rotulo: "Data e local", descricao: "Cidade e a data do dia, à direita" },
   { tipo: "assinatura", rotulo: "Assinatura", descricao: "Linha, nome e cargo, centralizados" },
+  { tipo: "imagem", rotulo: "Imagem", descricao: "Logotipo, selo ou foto, no tamanho escolhido" },
   { tipo: "separador", rotulo: "Separador", descricao: "Linha horizontal entre partes" },
 ];
 
@@ -67,6 +91,8 @@ export function novoBloco(tipo: TipoBloco): Bloco {
       return { id, tipo, local: "" };
     case "assinatura":
       return { id, tipo, nome: "{{usuario.nome}}", cargo: "" };
+    case "imagem":
+      return { id, tipo, src: "", largura: 227, alinhamento: "center" };
     case "separador":
       return { id, tipo };
   }
@@ -110,6 +136,11 @@ export function htmlDoBloco(b: Bloco): string {
         `<p${CENTRO}><strong>${esc(b.nome.trim())}</strong></p>` +
         (b.cargo.trim() ? `<p${CENTRO}>${esc(b.cargo.trim())}</p>` : "")
       );
+    case "imagem": {
+      if (!b.src) return "";
+      const alinhar = b.alinhamento === "center" ? CENTRO : b.alinhamento === "right" ? DIREITA : "";
+      return `<p${alinhar}><img src="${esc(b.src)}" alt="" width="${Math.round(b.largura)}"></p>`;
+    }
     case "separador":
       return "<hr>";
   }
@@ -169,6 +200,15 @@ function lerBloco(tipo: TipoBloco, el: Element): Bloco | null {
       const nome = filhos[1].textContent ?? "";
       const cargo = filhos[2]?.textContent ?? "";
       return { id, tipo, nome, cargo };
+    }
+    case "imagem": {
+      const img = el.querySelector("img");
+      const src = img?.getAttribute("src") ?? "";
+      if (!img || !src || filhos.length !== 1) return null;
+      const a = (filhos[0] as HTMLElement).style?.textAlign;
+      const alinhamento: AlinhamentoImagem = a === "center" ? "center" : a === "right" ? "right" : "left";
+      const largura = Number(img.getAttribute("width")) || 227;
+      return { id, tipo, src, largura, alinhamento };
     }
     case "separador":
       return el.querySelector("hr") ? { id, tipo } : null;
