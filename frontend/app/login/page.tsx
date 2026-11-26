@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { AssinaturaAprimora } from "@/components/AssinaturaAprimora";
 import { AtalhosPublicos, CAMPO_LOGIN, CAMPO_SENHA_LOGIN } from "@/components/login/comum";
+import { EntrarComGoogle, mensagemDoGoogle } from "@/components/login/EntrarComGoogle";
 import { EsqueciSenha } from "@/components/login/EsqueciSenha";
 import { EtapaCodigo } from "@/components/login/EtapaCodigo";
 import { PasswordInput } from "@/components/ui/password-input";
@@ -66,6 +67,9 @@ export default function LoginPage() {
       setEmail(salvo);
       setLembrar(true);
     }
+    // Volta do login com o Google sem sessão (`?google=<motivo>`, SI-32).
+    const doGoogle = mensagemDoGoogle(window.location.search);
+    if (doGoogle) setError(doGoogle);
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -325,6 +329,9 @@ export default function LoginPage() {
               )}
             </form>
             )}
+
+            {/* SI-32 — só com o Google configurado no servidor. */}
+            {etapa === "senha" && branding?.login_google && <EntrarComGoogle className="mt-4" />}
 
             <p className="mt-8 px-2 text-sm text-foreground-muted">
               Ainda não tem acesso?{" "}
