@@ -411,23 +411,88 @@ export default function VeiculosPage() {
           </>
         }
       >
-        <form
-          id="form-veiculo"
-          noValidate
-          className="space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            salvar();
-          }}
-        >
-          <SectionCard icon={FileText} title="Identificação" description="Como o veículo é reconhecido nos documentos.">
-            <div className="space-y-4">
-              <GradeCampos>
-                <FormField
-                  label="Placa"
-                  required
-                  hint="Antiga (ABC1234) ou Mercosul (ABC1D23)."
-                  error={campos.erro("placa")}
+        <div className="space-y-4">
+          <SectionCard
+            icon={FileText}
+            title="Identificação"
+            description="Dados do veículo e documentação."
+          >
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <Label htmlFor="placa" required>
+                  Placa
+                </Label>
+                <Input
+                  id="placa"
+                  value={form.placa}
+                  onChange={(e) => set("placa", e.target.value)}
+                  className="font-mono uppercase"
+                  placeholder="ABC1D23"
+                />
+              </div>
+              <div>
+                <Label htmlFor="numero_tombo">Número de tombo</Label>
+                <Input
+                  id="numero_tombo"
+                  value={form.numero_tombo}
+                  onChange={(e) => set("numero_tombo", e.target.value)}
+                  maxLength={30}
+                  placeholder="Tombo patrimonial do bem"
+                />
+              </div>
+              <div>
+                <Label htmlFor="renavam">RENAVAM</Label>
+                <Input id="renavam" value={form.renavam} onChange={(e) => set("renavam", e.target.value)} />
+              </div>
+              <div>
+                <Label htmlFor="marca">Marca</Label>
+                <Input id="marca" value={form.marca} onChange={(e) => set("marca", e.target.value)} />
+              </div>
+              <div>
+                <Label htmlFor="modelo">Modelo</Label>
+                <Input id="modelo" value={form.modelo} onChange={(e) => set("modelo", e.target.value)} />
+              </div>
+              <div>
+                <Label htmlFor="ano_fab">Ano fabricação</Label>
+                <Input
+                  id="ano_fab"
+                  type="number"
+                  value={form.ano_fabricacao ?? ""}
+                  onChange={(e) => set("ano_fabricacao", e.target.value ? Number(e.target.value) : null)}
+                />
+              </div>
+              <div>
+                <Label htmlFor="ano_mod">Ano modelo</Label>
+                <Input
+                  id="ano_mod"
+                  type="number"
+                  value={form.ano_modelo ?? ""}
+                  onChange={(e) => set("ano_modelo", e.target.value ? Number(e.target.value) : null)}
+                />
+              </div>
+              <div>
+                <Label htmlFor="cor">Cor</Label>
+                <Input id="cor" value={form.cor} onChange={(e) => set("cor", e.target.value)} />
+              </div>
+              <div>
+                <Label htmlFor="chassi">Chassi</Label>
+                <Input id="chassi" value={form.chassi} onChange={(e) => set("chassi", e.target.value)} />
+              </div>
+              <div>
+                <Label htmlFor="tipo_veiculo">Tipo de veículo</Label>
+                <Input
+                  id="tipo_veiculo"
+                  value={form.tipo_veiculo}
+                  onChange={(e) => set("tipo_veiculo", e.target.value)}
+                  placeholder="ex.: automóvel, caminhonete, ônibus"
+                />
+              </div>
+              <div>
+                <Label htmlFor="combustivel">Combustível</Label>
+                <Select
+                  id="combustivel"
+                  value={form.tipo_combustivel}
+                  onChange={(e) => set("tipo_combustivel", e.target.value)}
                 >
                   <Input
                     id="placa"
