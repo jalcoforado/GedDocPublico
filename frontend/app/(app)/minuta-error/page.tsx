@@ -5,18 +5,10 @@ import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
+import { MENSAGEM_ERRO_GOOGLE } from "@/lib/google-conexao";
 
-const ERROR_MESSAGES: Record<string, string> = {
-  access_denied: "Você rejeitou o acesso ao Google Docs. Tente novamente.",
-  state_expired: "A conexão demorou mais de 5 minutos e expirou. Tente conectar novamente.",
-  google_api_error: "Erro ao conectar com o Google. Tente novamente.",
-  invalid_state: "Requisição inválida. Tente novamente.",
-  // SI-32
-  google_nao_configurado:
-    "A integração com o Google Docs ainda não foi configurada neste servidor. Fale com o administrador do sistema.",
-  conta_diferente:
-    "A conexão foi iniciada por outro usuário. Entre com a sua conta e tente de novo.",
-};
+// Mensagens compartilhadas com a janela à parte da conexão (`lib/google-conexao.ts`).
+const ERROR_MESSAGES = MENSAGEM_ERRO_GOOGLE;
 
 /** Segundos até voltar sozinho — o bastante para ler a mensagem. */
 const ESPERA = 8;

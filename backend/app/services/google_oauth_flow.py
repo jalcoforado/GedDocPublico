@@ -97,7 +97,13 @@ class GoogleOAuthFlow:
         return Flow.from_client_config(config, **kwargs)
 
     async def generate_oauth_url(
-        self, user_id: int, tenant_id: int, minuta_id: int, processo_id: int
+        self,
+        user_id: int,
+        tenant_id: int,
+        minuta_id: int,
+        processo_id: int,
+        *,
+        popup: bool = False,
     ) -> str:
         """Generate OAuth URL and save state to Redis.
 
@@ -134,6 +140,9 @@ class GoogleOAuthFlow:
             "tenant_id": tenant_id,
             "minuta_id": minuta_id,
             "processo_id": processo_id,
+            # Aberto numa janela à parte (a aba de origem não sai do lugar):
+            # o callback termina na página que avisa a aba e se fecha.
+            "popup": bool(popup),
             "code_verifier": flow.code_verifier,
         }
         await self.redis.setex(

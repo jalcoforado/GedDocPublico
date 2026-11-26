@@ -101,8 +101,8 @@ existentes (cada usuário conecta de novo).
 **Google Docs**
 
 1. `GET /api/v2/auth/google/status` (logado) → `{"configurado": true, "conectado": false, ...}`.
-2. Num processo: aba **Documentos** → **Redigir documento** → em *Plataforma de redação*, **Conectar agora** → autorizar no Google.
-3. Volta para o mesmo processo; reabrindo *Redigir documento*, a opção **Google Docs** está habilitada. `status` agora diz `"conectado": true`.
+2. Num processo: aba **Documentos** → **Redigir documento** → em *Onde redigir*, **Conectar agora** → **Conectar Conta Google**. A autorização abre numa **janela à parte**; a tela do processo não sai do lugar.
+3. Ao autorizar, a janela se fecha sozinha e o diálogo de redigir (com o que já foi digitado) passa a **Google Docs**. `status` agora diz `"conectado": true`. Se o navegador bloquear a janela, a conexão segue na mesma aba, como antes.
 4. Criar um documento em Google Docs abre o documento numa aba nova; **Sincronizar do Google Docs** traz o texto de volta.
 
 ## Erros e o que significam
@@ -150,5 +150,5 @@ revisto quando ela for ligada.
 **Google Docs** — `backend/app/services/google_oauth_flow.py`, rotas em `backend/app/routers/auth.py`, documento em `backend/app/services/google_docs_service.py`:
 
 - `GET /api/v2/auth/google/status` — `{configurado, conectado, conectado_em}` para a tela.
-- `GET /api/v2/auth/google?minuta_id=X&processo_id=Y` — gera o `state` (Redis, 5 min, uso único) e manda para o Google. `minuta_id=0` = só conectar a conta.
+- `GET /api/v2/auth/google?minuta_id=X&processo_id=Y` — gera o `state` (Redis, 5 min, uso único) e manda para o Google. `minuta_id=0` = só conectar a conta. `popup=1` = a conexão foi aberta numa janela à parte: o callback termina em `/google-conectado`, que avisa a aba de origem por `BroadcastChannel` e se fecha (`frontend/lib/google-conexao.ts`).
 - `GET /api/v2/auth/google/callback` — confere que o `state` é do mesmo usuário/tenant da sessão, troca o código por tokens (PKCE: o `code_verifier` guardado no `state`), cifra e grava; revoga a conexão anterior do usuário.

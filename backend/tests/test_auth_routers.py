@@ -312,3 +312,94 @@ async def test_si32_status_diz_configurado_e_conectado(
     corpo = r.json()
     assert corpo["conectado"] is False and corpo["conectado_em"] is None
     assert isinstance(corpo["configurado"], bool)
+
+
+# ------------------------------------------- SI-32: conexão em janela à parte
+# A aba de origem (diálogo de redigir aberto, com o que já foi digitado) não
+# sai do lugar: a conexão acontece numa janela à parte, que termina em
+# /google-conectado — essa página avisa a aba e se fecha.
+
+
+async def _state_popup(redis_client, s, chave="pop"):
+    import json as _json
+
+    await redis_client.setex(
+        f"oauth_state:{chave}",
+        300,
+        _json.dumps({"user_id": s["su_id"], "tenant_id": s["tenant_id"], "minuta_id": 0,
+                     "processo_id": 77, "popup": True, "code_verifier": "x" * 43}),
+    )
+
+
+@pytest.mark.asyncio
+async def test_si32_popup_fica_guardado_no_state(
+    admin_engine, auth_setup, client, admin_token, redis_client
+):
+    import json as _json
+    from urllib.parse import parse_qs, urlparse
+
+    host = _sessao_de_teste(auth_setup, redis_client)
+    r = await client.get(
+        "/api/v2/auth/google?minuta_id=0&processo_id=77&popup=1",
+        headers={"Authorization": f"Bearer {admin_token}", "Host": host},
+        follow_redirects=False,
+    )
+    assert r.status_code == 307 and "accounts.google.com" in r.headers["location"]
+    state = parse_qs(urlparse(r.headers["location"]).query)["state"][0]
+    ctx = _json.loads(await redis_client.get(f"oauth_state:{state}"))
+    assert ctx["popup"] is True and ctx["processo_id"] == 77
+
+
+@pytest.mark.asyncio
+async def test_si32_popup_conectou_termina_na_pagina_que_avisa_a_aba(
+    admin_engine, auth_setup, client, admin_token, redis_client
+):
+    s = auth_setup
+    host = _sessao_de_teste(s, redis_client)
+    await _state_popup(redis_client, s)
+
+    async def ok(self, code, state, db=None, **_):
+        return {"user_id": s["su_id"], "tenant_id": s["tenant_id"], "minuta_id": 0,
+                "processo_id": 77, "popup": True}
+
+    with patch("app.services.google_oauth_flow.GoogleOAuthFlow.handle_callback", ok):
+        r = await client.get(
+            "/api/v2/auth/google/callback?code=c&state=pop",
+            headers={"Authorization": f"Bearer {admin_token}", "Host": host},
+            follow_redirects=False,
+        )
+    # NÃO recarrega o processo — a aba de origem continua onde estava.
+    assert r.headers["location"] == "/google-conectado"
+
+
+@pytest.mark.asyncio
+async def test_si32_popup_recusa_no_google_volta_pela_mesma_pagina(
+    admin_engine, auth_setup, client, admin_token, redis_client
+):
+    host = _sessao_de_teste(auth_setup, redis_client)
+    await _state_popup(redis_client, auth_setup)
+    r = await client.get(
+        "/api/v2/auth/google/callback?error=access_denied&state=pop",
+        headers={"Authorization": f"Bearer {admin_token}", "Host": host},
+        follow_redirects=False,
+    )
+    assert r.headers["location"] == "/google-conectado?erro=access_denied"
+    assert await redis_client.get("oauth_state:pop") is None
+
+
+@pytest.mark.asyncio
+async def test_si32_popup_sem_configuracao_avisa_a_aba(
+    admin_engine, auth_setup, client, admin_token, redis_client
+):
+    from unittest.mock import PropertyMock
+
+    from app.services.google_oauth_flow import GoogleOAuthFlow
+
+    host = _sessao_de_teste(auth_setup, redis_client)
+    with patch.object(GoogleOAuthFlow, "configurado", new_callable=PropertyMock, return_value=False):
+        r = await client.get(
+            "/api/v2/auth/google?minuta_id=0&processo_id=456&popup=1",
+            headers={"Authorization": f"Bearer {admin_token}", "Host": host},
+            follow_redirects=False,
+        )
+    assert r.headers["location"] == "/google-conectado?erro=google_nao_configurado"

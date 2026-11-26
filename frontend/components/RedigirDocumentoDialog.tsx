@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, FileText } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -95,6 +95,22 @@ export function RedigirDocumentoDialog({
   const hasGoogleCredentials = credentialQ.data?.connected === true;
   // SI-32: sem client ID/secret no servidor não há o que conectar.
   const googleConfigurado = credentialQ.data?.configurado !== false;
+
+  // SI-32 — a conexão acontece numa janela à parte e este diálogo fica aberto,
+  // com o que já foi digitado. Quando o status passa a "conectado", fecha o
+  // "Conectar Google Docs" e já escolhe o Google Docs, que era o que a pessoa
+  // estava tentando fazer.
+  const { refetch: refetchCredencial } = credentialQ;
+  const reconferirGoogle = useCallback(() => {
+    void refetchCredencial();
+  }, [refetchCredencial]);
+  useEffect(() => {
+    if (showGoogleConnect && hasGoogleCredentials) {
+      setShowGoogleConnect(false);
+      setOrigem("google");
+      toast.success("Conta Google conectada. Agora é só criar o documento.");
+    }
+  }, [showGoogleConnect, hasGoogleCredentials, toast]);
 
   useEffect(() => {
     if (open) {
@@ -493,10 +509,8 @@ export function RedigirDocumentoDialog({
       onClose={() => setShowGoogleConnect(false)}
       minutaId={minutaAtualId || 0}
       processoId={processoId}
-      onSuccess={() => {
-        setShowGoogleConnect(false);
-        credentialQ.refetch();
-      }}
+      onSuccess={reconferirGoogle}
+      onRecheck={reconferirGoogle}
     />
     </>
   );

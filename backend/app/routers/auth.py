@@ -440,8 +440,19 @@ async def alterar_senha_endpoint(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-def _erro_google(codigo: str, processo_id: object = None) -> RedirectResponse:
-    """Tela de erro da conexão com o Google, com o caminho de volta ao processo."""
+#: Onde a janela à parte da conexão termina: a página avisa a aba de origem
+#: (que nunca saiu do lugar) e se fecha. Ver `app/google-conectado/page.tsx`.
+DESTINO_POPUP_GOOGLE = "/google-conectado"
+
+
+def _erro_google(codigo: str, processo_id: object = None, *, popup: bool = False) -> RedirectResponse:
+    """Tela de erro da conexão com o Google, com o caminho de volta ao processo.
+
+    Na janela à parte (`popup`), o erro vai para a página que o repassa à aba
+    de origem — lá o diálogo de redigir continua aberto e mostra a mensagem.
+    """
+    if popup:
+        return RedirectResponse(url=f"{DESTINO_POPUP_GOOGLE}?erro={codigo}", status_code=307)
     url = f"/minuta-error?error={codigo}"
     if isinstance(processo_id, int) and processo_id > 0:
         url += f"&processo={processo_id}"
@@ -482,11 +493,16 @@ async def google_status(
 async def initiate_google_oauth(
     minuta_id: int,
     processo_id: int,
+    popup: bool = False,
     user: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     redis: Redis = Depends(get_redis),
 ) -> RedirectResponse:
     """Inicia o fluxo OAuth com Google.
+
+    `popup=1`: a conexão foi aberta numa janela à parte, e a aba de origem (com
+    o diálogo de redigir aberto e o que já foi digitado) não sai do lugar. O
+    callback termina em `/google-conectado`, que avisa a aba e se fecha.
 
     Query params:
     - minuta_id (required): ID da minuta a ser editada. 0 quando o usuário
@@ -501,13 +517,14 @@ async def initiate_google_oauth(
     """
     oauth_flow = GoogleOAuthFlow(redis)
     if not oauth_flow.configurado:
-        return _erro_google("google_nao_configurado", processo_id)
+        return _erro_google("google_nao_configurado", processo_id, popup=popup)
 
     auth_url = await oauth_flow.generate_oauth_url(
         user_id=user.id,
         tenant_id=tenant_id,
         minuta_id=minuta_id,
         processo_id=processo_id,
+        popup=popup,
     )
     return RedirectResponse(url=auth_url, status_code=307)
 
@@ -540,6 +557,9 @@ async def handle_google_oauth_callback(
     oauth_flow = GoogleOAuthFlow(redis)
     contexto = await oauth_flow.ler_contexto(state) if state else None
     processo_volta = (contexto or {}).get("processo_id")
+    # Janela à parte? Lido ANTES de qualquer saída, para que até o erro volte
+    # pelo mesmo caminho (a aba de origem mostra a mensagem no diálogo).
+    popup = bool((contexto or {}).get("popup"))
 
     # Recusa no Google (ou outro erro dele): o state não vale mais.
     if error:
@@ -548,28 +568,32 @@ async def handle_google_oauth_callback(
         return _erro_google(
             "access_denied" if error == "access_denied" else "google_api_error",
             processo_volta,
+            popup=popup,
         )
 
     if not code or not state:
-        return _erro_google("google_api_error", processo_volta)
+        return _erro_google("google_api_error", processo_volta, popup=popup)
 
     try:
         context = await oauth_flow.handle_callback(
             code, state, db=db, usuario_id=user.id, tenant_id=tenant_id
         )
     except OutroUsuarioError:
-        return _erro_google("conta_diferente", None)
+        return _erro_google("conta_diferente", None, popup=popup)
     except ValueError as e:
         if "Sessão expirou" in str(e):
-            return _erro_google("state_expired", processo_volta)
-        return _erro_google("google_api_error", processo_volta)
+            return _erro_google("state_expired", processo_volta, popup=popup)
+        return _erro_google("google_api_error", processo_volta, popup=popup)
 
     # minuta_id=0 é o "só conectar a conta" (RedigirDocumentoDialog permite
     # conectar antes de criar qualquer minuta) — sem minuta pra vincular, não
     # há Google Doc nenhum pra criar. Credenciais já foram salvas acima;
-    # só volta pro processo, de onde o usuário segue o fluxo normal.
+    # só volta pro processo, de onde o usuário segue o fluxo normal — ou, na
+    # janela à parte, avisa a aba de origem e se fecha.
     minuta_id = context.get("minuta_id")
     if not minuta_id:
+        if popup:
+            return RedirectResponse(url=DESTINO_POPUP_GOOGLE, status_code=307)
         processo_id = context.get("processo_id")
         return RedirectResponse(
             url=f"/m/protocolo/processos/{processo_id}?tab=documentos",
@@ -587,7 +611,7 @@ async def handle_google_oauth_callback(
         return RedirectResponse(url=minuta.google_doc_url, status_code=307)
     except Exception:
         logger.exception("Falha ao criar o Google Doc da minuta %s", minuta_id)
-        return _erro_google("google_api_error", context.get("processo_id"))
+        return _erro_google("google_api_error", context.get("processo_id"), popup=popup)
 
 
 @router.get("/users/me/google-credential")
