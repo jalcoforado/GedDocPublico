@@ -30,6 +30,7 @@ from ..config import get_settings
 from ..database import get_db
 from ..models import Usuario
 from ..services import google_login
+from ..services.conta_email import mascarar_email
 from ..services.google_login import CAMINHO_COOKIE, COOKIE_ESTADO, GoogleLoginErro
 from .auth import _emitir_sessao
 
@@ -130,9 +131,15 @@ async def google_login_callback(
     if len(candidatos) != 1:
         # Nenhum: a conta Google não é de um servidor daqui. Mais de um: o
         # cadastro está ambíguo, e escolher um deles seria adivinhar.
+        # E-mail MASCARADO no log: o suporte precisa saber qual conta o Google
+        # devolveu ("escolheu a conta errada?") sem gravar o endereço inteiro.
         logger.info(
             "google_login_sem_usuario",
-            extra={"tenant_id": tenant_id, "encontrados": len(candidatos)},
+            extra={
+                "tenant_id": tenant_id,
+                "encontrados": len(candidatos),
+                "email_google": mascarar_email(identidade.email),
+            },
         )
         return _voltar_ao_login("sem_conta")
     user = candidatos[0]

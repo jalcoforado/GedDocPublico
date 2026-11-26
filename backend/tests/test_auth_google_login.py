@@ -346,13 +346,18 @@ async def test_troca_obrigatoria_de_senha_tem_precedencia(google, tenants, admin
 
 @pytest.mark.asyncio
 async def test_conta_google_sem_cadastro_nao_entra_e_nada_e_criado(
-    google, tenants, admin_engine
+    google, tenants, admin_engine, caplog
 ):
     a, _ = tenants
     await _servidor(admin_engine, a)
+    caplog.set_level("INFO", logger="app.routers.auth_google_login")
     async with _cliente() as c:
         r = await _fluxo(c, google, a, email="desconhecido@gmail.test")
     assert _motivo(r) == "sem_conta" and "aprimora_token" not in r.cookies
+    # O log diz QUAL conta o Google devolveu (o suporte precisa), mascarada.
+    [reg] = [x for x in caplog.records if x.getMessage() == "google_login_sem_usuario"]
+    assert reg.email_google.startswith("de") and reg.email_google.endswith("@gmail.test")
+    assert "desconhecido@" not in reg.email_google
     async with admin_engine.begin() as conn:
         n = (
             await conn.execute(
