@@ -29,6 +29,11 @@ import { ToastProvider } from "@/components/ui/toast";
 // a estrutura das abas, então a API devolve vazio e as telas renderizam o
 // esqueleto — que é onde as abas moram.
 
+// SI-72: a tela de jobs usa `useAuth` (só quem disparou baixa o resultado).
+vi.mock("@/lib/auth", () => ({
+  useAuth: () => ({ user: { id: 1 }, perms: { is_super_usuario: false }, can: () => true }),
+}));
+
 vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),

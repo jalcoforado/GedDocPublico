@@ -25,6 +25,13 @@ export interface AcaoDaLinha {
    * botão a botão, sem a linha em volta.
    */
   ariaLabel?: string;
+  /**
+   * Vai para o ⋯ mesmo havendo espaço à vista. Serve à lista que quer a
+   * MESMA forma em toda linha (ex.: anexos do processo, SI-72): sem isso, a
+   * linha com uma ação a menos mostrava "Excluir" à vista e a outra o
+   * escondia no menu.
+   */
+  sempreNoMenu?: boolean;
 }
 
 interface AcoesDaLinhaProps {
@@ -47,10 +54,18 @@ interface AcoesDaLinhaProps {
 export function AcoesDaLinha({ acoes, visiveis = 2, className }: AcoesDaLinhaProps) {
   const ativas = acoes.filter((a) => !a.oculta);
   // Destrutivas por último, preservando a ordem relativa do resto.
-  const ordenadas = [...ativas.filter((a) => !a.perigo), ...ativas.filter((a) => a.perigo)];
-  const cabe = ordenadas.length <= visiveis + 1;
+  const destrutivasPorUltimo = (l: AcaoDaLinha[]) => [
+    ...l.filter((a) => !a.perigo),
+    ...l.filter((a) => a.perigo),
+  ];
+  const ordenadas = destrutivasPorUltimo(ativas.filter((a) => !a.sempreNoMenu));
+  const fixasNoMenu = ativas.filter((a) => a.sempreNoMenu);
+  // "Um item só no menu não vale o clique" só se aplica quando não há
+  // nenhuma ação que vá ao menu de qualquer jeito.
+  const cabe =
+    ordenadas.length <= (fixasNoMenu.length > 0 ? visiveis : visiveis + 1);
   const aVista = cabe ? ordenadas : ordenadas.slice(0, visiveis);
-  const noMenu = cabe ? [] : ordenadas.slice(visiveis);
+  const noMenu = destrutivasPorUltimo([...(cabe ? [] : ordenadas.slice(visiveis)), ...fixasNoMenu]);
 
   return (
     <div className={cn("inline-flex flex-nowrap items-center justify-end gap-1.5", className)}>

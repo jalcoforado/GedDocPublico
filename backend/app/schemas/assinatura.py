@@ -111,6 +111,9 @@ class ValidacaoPublicaOut(BaseModel):
     status: str | None = None
     detalhe: str | None = None
     aviso: str | None = None
+    # SI-72: True quando o documento assinado foi substituído no processo por
+    # uma versão posterior. A assinatura continua valendo para ESTE arquivo.
+    substituido: bool | None = None
 
 
 class SolicitacaoOut(BaseModel):

@@ -56,7 +56,7 @@ export function AnexoDesentranhar({
   );
 }
 
-function DesentranharDialog({
+export function DesentranharDialog({
   processoId,
   anexoProcessoId,
   descricaoAnexo,

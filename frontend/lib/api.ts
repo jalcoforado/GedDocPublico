@@ -383,6 +383,25 @@ export interface AnexoNoProcesso {
    * anteriores + este); `null` quando não é PDF ou a contagem de página
    * não foi calculada no upload. */
   pagina_processo: number | null;
+  /** SI-72 — versões do documento. A substituída CONTINUA na lista, com o
+   * mesmo número e as mesmas folhas; a tela a recolhe sob a vigente.
+   * Opcionais só para fixtures antigas: o backend sempre manda. */
+  versao?: number;
+  id_anexo_anterior?: number | null;
+  /** Quem substituiu esta versão; `null` = é a vigente. */
+  id_anexo_substituto?: number | null;
+  motivo_versao?: string | null;
+  /** Regras do documento (herdado, despacho, minuta, já substituído). O
+   * estado do processo (arquivado, inativo) a tela confere à parte. */
+  aceita_nova_versao?: boolean;
+  /** Gerado por "Redigir documento": a versão redigida começa do texto dele. */
+  redigido?: boolean;
+}
+
+export interface NovaVersaoInput {
+  file: File;
+  /** O que mudou em relação à versão anterior (opcional, até 1000). */
+  motivo?: string;
 }
 
 export interface EncaminhamentoOut {
@@ -1659,6 +1678,9 @@ export interface Minuta {
   finalizada_em: string | null;
   criado_em: string;
   atualizado_em: string | null;
+  /** SI-72 — rascunho que, finalizado, vira a versão nova deste anexo. */
+  id_anexo_substitui?: number | null;
+  motivo_versao?: string | null;
 }
 
 export interface MinutaListItem {
@@ -1673,6 +1695,8 @@ export interface MinutaListItem {
   id_usuario_criacao: number;
   criado_em: string;
   atualizado_em: string | null;
+  /** SI-72 — rascunho de versão nova de um anexo. */
+  id_anexo_substitui?: number | null;
 }
 
 // ---------- Pagamentos (PAG-1) — cadastros ----------
@@ -2691,6 +2715,9 @@ export interface MinutaCreateInput {
   destinatario?: string | null;
   /** SI-62 — "despacho": rascunho de despacho avulso (só o autor vê). */
   finalidade?: MinutaFinalidade;
+  /** SI-72 — redigir a versão nova deste anexo (ao finalizar). */
+  id_anexo_substitui?: number | null;
+  motivo_versao?: string | null;
 }
 
 export interface MinutaUpdateInput {
@@ -5690,6 +5717,16 @@ export const api = {
       request<void>(`/processos/${processoId}/anexos/${anexoId}`, {
         method: "DELETE",
       }),
+    // SI-72 — versão nova de documento: a anterior fica no histórico.
+    enviarNovaVersao: (processoId: number, anexoId: number, input: NovaVersaoInput) => {
+      const fd = new FormData();
+      fd.append("file", input.file);
+      if (input.motivo?.trim()) fd.append("motivo", input.motivo.trim());
+      return request<AnexoNoProcesso>(`/processos/${processoId}/anexos/${anexoId}/versoes`, {
+        method: "POST",
+        body: fd,
+      });
+    },
     // PR 4c — checklist documental read-only (servidor)
     checklistDocumentos: (processoId: number) =>
       request<ChecklistDocumentosResponse>(

@@ -216,6 +216,17 @@ async def validar_publico(
         if integro
         else "Documento alterado após a assinatura (hash divergente)."
     )
+    # SI-72: o processo pode ter juntado uma versão nova deste documento. A
+    # assinatura segue válida para este arquivo, mas quem confere precisa
+    # saber que ele não é mais o vigente.
+    substituido = (
+        await anexos_svc.sucessora_de(db, aa.id_anexo, tenant_id=tenant_id)
+    ) is not None
+    if substituido:
+        detalhe += (
+            " Atenção: este documento foi substituído no processo por uma "
+            "versão posterior."
+        )
     return ValidacaoPublicaOut(
         valido=True,
         integro=integro,
@@ -228,6 +239,7 @@ async def validar_publico(
         status="assinada",
         detalhe=detalhe,
         aviso=AVISO,
+        substituido=substituido,
     )
 
 

@@ -34,8 +34,17 @@ async def gerar_processo_completo_pdf(detail: ProcessoDetail, *, tenant_slug: st
         if a.e_doc and a.e_doc.lower().endswith(".pdf")
     ]
     pdf_anexos.sort(key=lambda a: (a.ordem if a.ordem is not None else 9999, a.id))
+    # SI-72 — a versão substituída continua no PDF (folha não se renumera),
+    # mas com a faixa "substituído pela versão N".
+    por_id = {a.id: a for a in detail.anexos}
 
     for anexo in pdf_anexos:
+        # A sucessora pode não estar na lista (desentranhada); a versão dela é
+        # sempre a desta + 1.
+        substituta = None
+        if anexo.id_anexo_substituto is not None:
+            sucessora = por_id.get(anexo.id_anexo_substituto)
+            substituta = sucessora.versao if sucessora else (anexo.versao or 1) + 1
         # O original é lido pela abstração de storage (services/storage.py),
         # que mantém o fallback legado (Sobral) do download avulso.
         try:
@@ -44,6 +53,8 @@ async def gerar_processo_completo_pdf(detail: ProcessoDetail, *, tenant_slug: st
                 numero_processo=detail.numero_processo,
                 e_doc=anexo.e_doc or "",
                 tenant_slug=tenant_slug,
+                versao=anexo.versao or 1,
+                substituido_pela_versao=substituta,
             )
         except CarimboError:
             # PDF corrompido — pula em vez de quebrar a montagem inteira.

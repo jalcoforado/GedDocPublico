@@ -61,6 +61,10 @@ interface Props {
    * no rodapé, que salva e chama `onConcluirDespacho` com o id do rascunho. */
   finalidade?: "documento" | "despacho";
   onConcluirDespacho?: (minutaId: number) => void;
+  /** SI-72 — redigir a VERSÃO NOVA deste anexo: ao finalizar, o rascunho entra
+   * como versão seguinte dele. Documento redigido começa com o texto anterior. */
+  versaoDe?: { id: number; descricao: string | null; versao: number; redigido: boolean } | null;
+  motivoVersao?: string;
 }
 
 /**
@@ -77,6 +81,8 @@ export function RedigirDocumentoDialog({
   onSaved,
   finalidade = "documento",
   onConcluirDespacho,
+  versaoDe = null,
+  motivoVersao,
 }: Props) {
   const qc = useQueryClient();
   const toast = useToast();
@@ -109,7 +115,7 @@ export function RedigirDocumentoDialog({
   useEffect(() => {
     if (open) {
       setMinutaAtualId(minutaId);
-      setTitulo(despacho ? "Despacho" : "");
+      setTitulo(versaoDe ? (versaoDe.descricao ?? "") : despacho ? "Despacho" : "");
       setDestinatario("");
       setOrigem("interno");
       setTemplateId("");
@@ -117,7 +123,7 @@ export function RedigirDocumentoDialog({
       setVersao(undefined);
       padraoAplicado.current = false;
     }
-  }, [open, minutaId]);
+  }, [open, minutaId, versaoDe?.id]);
 
   const templatesQ = useQuery({
     queryKey: ["templates-documento", "ativos"],
@@ -129,6 +135,8 @@ export function RedigirDocumentoDialog({
   useEffect(() => {
     if (!open || minutaAtualId !== undefined || padraoAplicado.current || !templatesQ.data) return;
     padraoAplicado.current = true;
+    // SI-72 — versão de documento redigido começa do texto anterior, não do modelo.
+    if (versaoDe?.redigido) return;
     const padrao = templatesQ.data.find((t) => t.padrao);
     if (padrao) setTemplateId(String(padrao.id));
   }, [open, minutaAtualId, templatesQ.data]);
@@ -164,6 +172,8 @@ export function RedigirDocumentoDialog({
         origem: despacho ? "interno" : origem,
         finalidade,
         id_template_origem: origem === "interno" ? (templateId ? Number(templateId) : null) : null,
+        id_anexo_substitui: versaoDe?.id ?? null,
+        motivo_versao: versaoDe ? motivoVersao?.trim() || null : null,
       }),
     onSuccess: (m) => {
       if (origem === "google") {
@@ -344,7 +354,7 @@ export function RedigirDocumentoDialog({
       title={
         despacho
           ? "Registrar despacho"
-          : emEdicao ? "Editar documento" : "Redigir documento"
+          : emEdicao ? "Editar documento" : versaoDe ? "Redigir nova versão" : "Redigir documento"
       }
       description={
         despacho
@@ -356,6 +366,16 @@ export function RedigirDocumentoDialog({
     >
       {!emEdicao ? (
         <div className="space-y-4">
+          {versaoDe && (
+            <div className="rounded-md border border-border bg-surface-1 px-3 py-2.5 text-sm">
+              Versão nova de <strong>“{versaoDe.descricao ?? `Anexo #${versaoDe.id}`}”</strong>.
+              {versaoDe.redigido
+                ? " O rascunho começa com o texto da versão atual: é só corrigir."
+                : ""}{" "}
+              Ao <strong>finalizar</strong> o rascunho, ele entra no processo como versão{" "}
+              {versaoDe.versao + 1}, e a atual fica no histórico.
+            </div>
+          )}
           <FormField
             label="Título do documento"
             required
@@ -444,7 +464,7 @@ export function RedigirDocumentoDialog({
             )}
           </div>
           )}
-          {origem === "interno" && (
+          {origem === "interno" && !versaoDe?.redigido && (
             <FormField
               label="Modelo"
               opcional

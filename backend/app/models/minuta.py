@@ -137,6 +137,12 @@ class Minuta(Base):
         ForeignKey("utils.usuario.id"), nullable=True
     )
     finalizada_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # SI-72 — rascunho que, ao finalizar, vira a VERSÃO NOVA deste anexo (em vez
+    # de documento avulso). Migration 0147.
+    id_anexo_substitui: Mapped[int | None] = mapped_column(
+        ForeignKey("protocolos.anexo.id"), nullable=True
+    )
+    motivo_versao: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     criado_em: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     atualizado_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

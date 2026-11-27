@@ -2,12 +2,17 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ChevronDown,
+  ChevronRight,
   Download,
   Eye,
   File as FileIcon,
   FileImage,
   FileSpreadsheet,
+  FileMinus,
   FileText,
+  FileUp,
+  History,
   Globe,
   Lock,
   Paperclip,
@@ -30,9 +35,11 @@ import { EscolhaSegmentada } from "@/components/ui/escolha-segmentada";
 import { FormField, GradeCampos } from "@/components/ui/form-field";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
-import { AnexoDesentranhar } from "@/components/AnexoDesentranhar";
+import { DesentranharDialog } from "@/components/AnexoDesentranhar";
 import { PdfViewerDialog } from "@/components/PdfViewerDialog";
+import { RedigirDocumentoDialog } from "@/components/RedigirDocumentoDialog";
 import {
   anexoCarimbadoUrl,
   anexoDownloadUrl,
@@ -42,7 +49,9 @@ import {
   type CotaAnexacaoOut,
   type ProcessoDetail,
 } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+import { separarVersoes } from "@/lib/versoes-anexo";
 
 function isPdf(a: AnexoNoProcesso): boolean {
   return !!a.e_doc && a.e_doc.toLowerCase().endsWith(".pdf");
@@ -53,6 +62,8 @@ interface ViewerState {
   src: string;
   downloadUrl: string;
 }
+
+export { separarVersoes } from "@/lib/versoes-anexo";
 
 export function AnexosProcesso({ processo }: { processo: ProcessoDetail }) {
   const qc = useQueryClient();
@@ -75,7 +86,7 @@ export function AnexosProcesso({ processo }: { processo: ProcessoDetail }) {
   const carimbarBg = useMutation({
     mutationFn: () => api.jobs.carimbarAnexos(processo.id),
     onSuccess: () => {
-      toast.success("Carimbo enfileirado em background.");
+      toast.success("Gerando o .zip com os PDFs carimbados. Baixe em Tarefas quando ficar pronto.");
       router.push("/m/administracao/jobs");
     },
     onError: (e: Error) => toast.error(e.message),
@@ -90,23 +101,208 @@ export function AnexosProcesso({ processo }: { processo: ProcessoDetail }) {
   }
 
   const podeAnexar = processo.ativo && processo.movimentacoes.length > 0;
+  // SI-72 — o backend também recusa (409); aqui só não se oferece o botão.
+  const podeNovaVersao = podeAnexar && !processo.arquivado;
+  const { principais, anterioresDe, porId } = separarVersoes(processo.anexos);
+  const qtdAnteriores = processo.anexos.length - principais.length;
+  const [historicoAberto, setHistoricoAberto] = useState<Set<number>>(new Set());
+  const [versaoDe, setVersaoDe] = useState<AnexoNoProcesso | null>(null);
+  const [desentranhando, setDesentranhando] = useState<AnexoNoProcesso | null>(null);
+  // SI-72 — versão nova redigida no sistema (editor de documentos).
+  const [redigindoVersao, setRedigindoVersao] = useState<{ anexo: AnexoNoProcesso; motivo: string } | null>(null);
+  const { can } = useAuth();
+
+  /** "Abrir" igual em toda linha: PDF no visualizador; o resto numa aba nova,
+   *  onde o navegador mostra imagem e texto e baixa o que não sabe exibir
+   *  (Word, planilha). */
+  function abrir(a: AnexoNoProcesso) {
+    if (isPdf(a)) {
+      setViewer({
+        title: a.descricao ?? `Anexo #${a.id}`,
+        src: anexoInlineUrl(a.id),
+        downloadUrl: anexoDownloadUrl(a.id),
+      });
+      return;
+    }
+    window.open(anexoInlineUrl(a.id), "_blank", "noopener,noreferrer");
+  }
+
+  function alternarHistorico(id: number) {
+    setHistoricoAberto((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+
+  function linha(a: AnexoNoProcesso, { anterior }: { anterior: boolean }) {
+    const anteriores = anterior ? [] : anterioresDe(a);
+    const aberto = historicoAberto.has(a.id);
+    const substituto = a.id_anexo_substituto != null ? porId.get(a.id_anexo_substituto) : undefined;
+    const versao = a.versao ?? 1;
+    const substituida = a.id_anexo_substituto != null;
+    return (
+      <li
+        key={a.id}
+        className={cn(
+          "flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between",
+          anterior && "bg-muted/40 pl-8",
+        )}
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <span
+              className={cn(
+                "truncate text-sm font-medium",
+                anterior ? "text-muted-foreground" : "text-foreground",
+              )}
+            >
+              {a.descricao ?? "(sem descrição)"}
+            </span>
+            {versao > 1 && <Badge intent="neutral">versão {versao}</Badge>}
+            {anterior && <Badge intent="neutral">substituído</Badge>}
+            {/* Não público = fora da consulta pública. Não é o sigilo da LAI
+                (`nivel_sigilo` do processo), e "sigiloso" confundia os dois. */}
+            {!a.publico && <Badge intent="neutral">interno</Badge>}
+          </div>
+          {/* SI-62 — arquivo que acompanha outro documento (ex.: despacho). */}
+          {a.id_anexo_principal != null && (
+            <div className="truncate text-xs text-muted-foreground">
+              acompanha:{" "}
+              {porId.get(a.id_anexo_principal)?.descricao ?? `Doc. #${a.id_anexo_principal}`}
+            </div>
+          )}
+          {anterior && (
+            <div className="truncate text-xs text-muted-foreground">
+              substituído pela versão {substituto?.versao ?? versao + 1}
+              {substituto?.documento_numero != null ? ` (Doc. nº ${substituto.documento_numero})` : ""}
+            </div>
+          )}
+          {a.motivo_versao && (
+            <div className="truncate text-xs text-muted-foreground" title={a.motivo_versao}>
+              o que mudou: {a.motivo_versao}
+            </div>
+          )}
+          <div className="truncate text-xs text-muted-foreground">
+            {tipoNome(a)} · {a.qtd_paginas ?? "?"} pág
+            {a.e_doc ? ` · ${a.e_doc}` : ""}
+            {a.documento_numero != null ? ` · Doc. nº ${a.documento_numero}` : ""}
+            {a.pagina_processo != null ? ` · fls. ${a.pagina_processo}` : ""}
+          </div>
+          {anteriores.length > 0 && (
+            <button
+              type="button"
+              onClick={() => alternarHistorico(a.id)}
+              aria-expanded={aberto}
+              className="mt-1 inline-flex items-center gap-1 rounded text-xs font-medium text-brand hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {aberto ? (
+                <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+              <History className="h-3.5 w-3.5" aria-hidden="true" />
+              {aberto ? "Ocultar" : "Ver"}{" "}
+              {anteriores.length === 1 ? "versão anterior" : `${anteriores.length} versões anteriores`}
+            </button>
+          )}
+        </div>
+        {/* SI-72 — a MESMA forma em toda linha: à vista "Abrir" e "Enviar nova
+            versão"; no ⋯ Carimbar (PDF), Baixar, Desentranhar e Excluir, as
+            graves por último. Antes o primeiro botão mudava de nome conforme o
+            tipo (Visualizar × Baixar), o "Excluir" ficava à vista só em
+            algumas linhas e o "Desentranhar" era um link solto. */}
+        <div className="flex flex-nowrap items-center gap-1 sm:shrink-0 sm:justify-end">
+          <AcoesDaLinha
+            acoes={[
+              {
+                label: "Abrir",
+                icon: Eye,
+                ariaLabel: `Abrir ${a.descricao ?? `anexo ${a.id}`}`,
+                onClick: () => abrir(a),
+              },
+              {
+                label: "Enviar nova versão",
+                icon: FileUp,
+                oculta: anterior || !a.aceita_nova_versao || !podeNovaVersao,
+                onClick: () => setVersaoDe(a),
+              },
+              {
+                label: "Carimbar",
+                icon: Stamp,
+                oculta: !isPdf(a),
+                sempreNoMenu: true,
+                onClick: () =>
+                  setViewer({
+                    title: `Carimbado — ${a.descricao ?? `Anexo #${a.id}`}`,
+                    src: anexoCarimbadoUrl(a.id),
+                    downloadUrl: anexoCarimbadoUrl(a.id, false),
+                  }),
+              },
+              {
+                label: "Baixar",
+                icon: Download,
+                sempreNoMenu: true,
+                onClick: () =>
+                  window.open(anexoDownloadUrl(a.id), "_blank", "noopener,noreferrer"),
+              },
+              {
+                label: "Desentranhar",
+                icon: FileMinus,
+                perigo: true,
+                sempreNoMenu: true,
+                // Mesma regra do botão antigo: permissão de excluir processo.
+                oculta: anterior || a.id_anexo_processo == null || !can("processo", "excluir"),
+                onClick: () => setDesentranhando(a),
+              },
+              {
+                label: "Excluir",
+                icon: Trash2,
+                perigo: true,
+                sempreNoMenu: true,
+                // A substituída é histórico; a vigente (inclusive uma versão
+                // enviada por engano) pode sair, e a anterior volta a valer.
+                oculta: substituida,
+                onClick: async () => {
+                  const ok = await confirm({
+                    title: versao > 1 ? `Excluir a versão ${versao}` : "Excluir anexo",
+                    message:
+                      versao > 1
+                        ? `Excluir a versão ${versao} de "${a.descricao ?? `Anexo #${a.id}`}"? A versão anterior volta a valer.`
+                        : `Excluir "${a.descricao ?? `Anexo #${a.id}`}"? Esta ação não pode ser desfeita.`,
+                    confirmLabel: "Excluir",
+                    intent: "danger",
+                  });
+                  if (ok) deleteM.mutate(a.id);
+                },
+              },
+            ]}
+          />
+        </div>
+      </li>
+    );
+  }
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div className="text-sm text-muted-foreground">
-          {processo.anexos.length} anexo{processo.anexos.length === 1 ? "" : "s"}
+          {principais.length} anexo{principais.length === 1 ? "" : "s"}
+          {qtdAnteriores > 0 &&
+            ` · ${qtdAnteriores} ${qtdAnteriores === 1 ? "versão anterior" : "versões anteriores"}`}
         </div>
         <div className="flex gap-2">
+          {/* Mesmo tamanho do "Adicionar anexo" (antes era `sm`, e a dupla
+              ficava com alturas e letras diferentes). */}
           {temPdf && (
             <Button
               variant="secondary"
-              size="sm"
               onClick={() => carimbarBg.mutate()}
               disabled={carimbarBg.isPending}
-              title="Pré-carimba todos os anexos PDF em background (aquece cache)"
+              title="Gera, em segundo plano, um .zip com cada PDF do processo carimbado (um arquivo por documento). Fica em Tarefas para baixar."
             >
-              {carimbarBg.isPending ? "Enfileirando..." : "Pré-carimbar PDFs"}
+              {carimbarBg.isPending ? "Gerando…" : "PDFs carimbados (.zip)"}
             </Button>
           )}
           <Button onClick={() => setOpenUpload(true)} disabled={!podeAnexar}>
@@ -124,94 +320,53 @@ export function AnexosProcesso({ processo }: { processo: ProcessoDetail }) {
         />
       ) : (
         <ul className="divide-y divide-border rounded-md border border-border bg-card">
-          {processo.anexos.map((a) => (
-            <li key={a.id} className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0 flex-1">
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="truncate text-sm font-medium text-foreground">
-                    {a.descricao ?? "(sem descrição)"}
-                  </span>
-                  {/* Não público = fora da consulta pública. Não é o sigilo da LAI
-                      (`nivel_sigilo` do processo), e "sigiloso" confundia os dois. */}
-                  {!a.publico && <Badge intent="neutral">interno</Badge>}
-                </div>
-                {/* SI-62 — arquivo que acompanha outro documento (ex.: despacho). */}
-                {a.id_anexo_principal != null && (
-                  <div className="truncate text-xs text-muted-foreground">
-                    acompanha:{" "}
-                    {processo.anexos.find((p) => p.id === a.id_anexo_principal)?.descricao ??
-                      `Doc. #${a.id_anexo_principal}`}
-                  </div>
-                )}
-                <div className="truncate text-xs text-muted-foreground">
-                  {tipoNome(a)} · {a.qtd_paginas ?? "?"} pág
-                  {a.e_doc ? ` · ${a.e_doc}` : ""}
-                  {a.documento_numero != null ? ` · Doc. nº ${a.documento_numero}` : ""}
-                  {a.pagina_processo != null ? ` · fls. ${a.pagina_processo}` : ""}
-                </div>
-              </div>
-              {/* Eram até cinco botões, que quebravam em duas linhas: à vista os
-                  dois primeiros, o resto no ⋯ e Excluir por último. Desentranhar
-                  tem diálogo próprio e só aparece com permissão. */}
-              <div className="flex flex-nowrap items-center gap-1 sm:shrink-0 sm:justify-end">
-                {a.id_anexo_processo != null && (
-                  <AnexoDesentranhar
-                    processoId={processo.id}
-                    anexoProcessoId={a.id_anexo_processo}
-                    descricaoAnexo={a.descricao}
-                  />
-                )}
-                <AcoesDaLinha
-                  acoes={[
-                    {
-                      label: "Visualizar",
-                      icon: Eye,
-                      oculta: !isPdf(a),
-                      onClick: () =>
-                        setViewer({
-                          title: a.descricao ?? `Anexo #${a.id}`,
-                          src: anexoInlineUrl(a.id),
-                          downloadUrl: anexoDownloadUrl(a.id),
-                        }),
-                    },
-                    {
-                      label: "Carimbar",
-                      icon: Stamp,
-                      oculta: !isPdf(a),
-                      onClick: () =>
-                        setViewer({
-                          title: `Carimbado — ${a.descricao ?? `Anexo #${a.id}`}`,
-                          src: anexoCarimbadoUrl(a.id),
-                          downloadUrl: anexoCarimbadoUrl(a.id, false),
-                        }),
-                    },
-                    {
-                      label: "Baixar",
-                      icon: Download,
-                      onClick: () =>
-                        window.open(anexoDownloadUrl(a.id), "_blank", "noopener,noreferrer"),
-                    },
-                    {
-                      label: "Excluir",
-                      icon: Trash2,
-                      perigo: true,
-                      onClick: async () => {
-                        const ok = await confirm({
-                          title: "Excluir anexo",
-                          message: `Excluir "${a.descricao ?? `Anexo #${a.id}`}"? Esta ação não pode ser desfeita.`,
-                          confirmLabel: "Excluir",
-                          intent: "danger",
-                        });
-                        if (ok) deleteM.mutate(a.id);
-                      },
-                    },
-                  ]}
-                />
-              </div>
-            </li>
-          ))}
+          {principais.map((a) => [
+            linha(a, { anterior: false }),
+            ...(historicoAberto.has(a.id)
+              ? anterioresDe(a).map((x) => linha(x, { anterior: true }))
+              : []),
+          ])}
         </ul>
       )}
+
+      {desentranhando?.id_anexo_processo != null && (
+        <DesentranharDialog
+          processoId={processo.id}
+          anexoProcessoId={desentranhando.id_anexo_processo}
+          descricaoAnexo={desentranhando.descricao}
+          onClose={() => setDesentranhando(null)}
+        />
+      )}
+
+      <NovaVersaoDialog
+        anexo={versaoDe}
+        onClose={() => setVersaoDe(null)}
+        onRedigir={(anexo, motivo) => setRedigindoVersao({ anexo, motivo })}
+        processoId={processo.id}
+        cota={processo.cota_anexacao}
+        onDone={(nova) => {
+          qc.invalidateQueries({ queryKey: ["processo", processo.id] });
+          toast.success(`Versão ${nova.versao ?? 2} juntada. A anterior ficou no histórico.`);
+        }}
+      />
+
+      <RedigirDocumentoDialog
+        open={redigindoVersao != null}
+        onClose={() => setRedigindoVersao(null)}
+        processoId={processo.id}
+        versaoDe={
+          redigindoVersao
+            ? {
+                id: redigindoVersao.anexo.id,
+                descricao: redigindoVersao.anexo.descricao,
+                versao: redigindoVersao.anexo.versao ?? 1,
+                redigido: !!redigindoVersao.anexo.redigido,
+              }
+            : null
+        }
+        motivoVersao={redigindoVersao?.motivo}
+        onSaved={() => qc.invalidateQueries({ queryKey: ["minutas", processo.id] })}
+      />
 
       <UploadDialog
         open={openUpload}
@@ -636,6 +791,207 @@ export function UploadDialog({
         />
 
         <CotaAnexacaoBar cota={cota} arquivoBytes={file?.size ?? 0} />
+
+        {err && (
+          <div
+            role="alert"
+            className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
+          >
+            {err}
+          </div>
+        )}
+      </form>
+    </Dialog>
+  );
+}
+
+type ComoCorrigir = "arquivo" | "redigir";
+
+/**
+ * SI-72 (RF-04 V1) — corrigir um documento sem apagar o anterior. A versão
+ * nova herda descrição, tipo e publicidade da anterior (é o MESMO documento) e
+ * entra no fim do processo, como qualquer juntada; a anterior fica no
+ * histórico, com o mesmo número e as mesmas folhas.
+ *
+ * Duas formas: enviar o arquivo corrigido, ou redigir no sistema (abre o
+ * editor; documento redigido começa com o texto anterior). A redigida vira
+ * versão quando o rascunho é FINALIZADO, em "Documentos redigidos".
+ */
+export function NovaVersaoDialog({
+  anexo,
+  onClose,
+  processoId,
+  cota,
+  onDone,
+  onRedigir,
+}: {
+  anexo: AnexoNoProcesso | null;
+  onClose: () => void;
+  processoId: number;
+  cota: CotaAnexacaoOut;
+  onDone: (nova: AnexoNoProcesso) => void;
+  /** Abre o editor para redigir a versão (o pai troca este diálogo pelo do editor). */
+  onRedigir?: (anexo: AnexoNoProcesso, motivo: string) => void;
+}) {
+  const [como, setComo] = useState<ComoCorrigir>("arquivo");
+  const [file, setFile] = useState<File | null>(null);
+  const [recusa, setRecusa] = useState<string | null>(null);
+  const [motivo, setMotivo] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [tentou, setTentou] = useState(false);
+
+  // Documento redigido: o natural é corrigir o texto dele.
+  const [anexoAberto, setAnexoAberto] = useState<number | null>(null);
+  if (anexo && anexo.id !== anexoAberto) {
+    setAnexoAberto(anexo.id);
+    setComo(anexo.redigido && onRedigir ? "redigir" : "arquivo");
+  }
+
+  const excede = como === "arquivo" && !!file && cota.usado_bytes + file.size > cota.limite_bytes;
+
+  const enviarM = useMutation({
+    mutationFn: () => {
+      if (!file || !anexo) throw new Error("Selecione um arquivo");
+      return api.processos.enviarNovaVersao(processoId, anexo.id, { file, motivo });
+    },
+    onSuccess: (nova) => {
+      onDone(nova);
+      fechar();
+    },
+    onError: (e: Error) => setErr(e.message),
+  });
+
+  function fechar() {
+    setFile(null);
+    setRecusa(null);
+    setMotivo("");
+    setErr(null);
+    setTentou(false);
+    setAnexoAberto(null);
+    onClose();
+  }
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setErr(null);
+    if (como === "redigir") {
+      if (anexo && onRedigir) {
+        const m = motivo;
+        fechar();
+        onRedigir(anexo, m);
+      }
+      return;
+    }
+    setTentou(true);
+    if (!file) {
+      document.getElementById("file")?.focus();
+      return;
+    }
+    if (excede) return;
+    enviarM.mutate();
+  }
+
+  const erroArquivo = recusa ?? (tentou && !file ? "Escolha o arquivo corrigido." : undefined);
+  const proxima = (anexo?.versao ?? 1) + 1;
+
+  return (
+    <Dialog
+      open={!!anexo}
+      onClose={fechar}
+      title="Enviar nova versão"
+      description={
+        anexo
+          ? `Corrige “${anexo.descricao ?? `Anexo #${anexo.id}`}”. A versão atual não é apagada: fica no histórico do processo, com o mesmo número e as mesmas folhas.`
+          : undefined
+      }
+      size="lg"
+      footer={
+        <>
+          <Button variant="ghost" onClick={fechar}>
+            Cancelar
+          </Button>
+          <Button onClick={submit} loading={enviarM.isPending} disabled={excede}>
+            {como === "redigir"
+              ? "Abrir o editor"
+              : enviarM.isPending
+                ? "Enviando…"
+                : `Enviar versão ${proxima}`}
+          </Button>
+        </>
+      }
+    >
+      <form onSubmit={submit} noValidate className="space-y-5">
+        {onRedigir && (
+          <EscolhaSegmentada<ComoCorrigir>
+            nome="nova-versao-como"
+            titulo="Como corrigir"
+            valor={como}
+            onChange={setComo}
+            opcoes={[
+              {
+                valor: "arquivo",
+                rotulo: "Enviar arquivo",
+                icon: Upload,
+                descricao: "Você já tem o documento corrigido no computador.",
+              },
+              {
+                valor: "redigir",
+                rotulo: "Redigir no sistema",
+                icon: FileText,
+                descricao: anexo?.redigido
+                  ? "Abre o editor com o texto da versão atual, para corrigir."
+                  : "Abre o editor para escrever a versão nova.",
+              },
+            ]}
+          />
+        )}
+
+        {como === "arquivo" && (
+          <div className="space-y-1">
+            <Label htmlFor="file" required>
+              Arquivo corrigido
+            </Label>
+            <EscolherArquivo
+              file={file}
+              invalido={!!erroArquivo}
+              describedBy={erroArquivo ? "file-error" : undefined}
+              onChange={(f, r) => {
+                setRecusa(r ?? null);
+                setFile(f);
+              }}
+            />
+            {erroArquivo && (
+              <p id="file-error" role="alert" className="text-xs font-medium text-danger-soft-foreground">
+                {erroArquivo}
+              </p>
+            )}
+          </div>
+        )}
+
+        <FormField
+          label="O que mudou"
+          opcional
+          hint="Ajuda quem vai avaliar o documento. Ex.: incluída a assinatura do requerente."
+        >
+          <Textarea
+            id="motivo-versao"
+            rows={3}
+            maxLength={1000}
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value)}
+          />
+        </FormField>
+
+        <p className="text-xs text-foreground-muted">
+          {como === "redigir"
+            ? `O rascunho vira a versão ${proxima} quando você o finalizar, em “Documentos redigidos”. `
+            : ""}
+          A versão nova mantém {como === "arquivo" ? "a descrição, " : ""}o tipo e quem pode ver (
+          {anexo?.publico ? "público" : "interno"}) da atual. Assinaturas da versão
+          atual não passam para a nova.
+        </p>
+
+        {como === "arquivo" && <CotaAnexacaoBar cota={cota} arquivoBytes={file?.size ?? 0} />}
 
         {err && (
           <div

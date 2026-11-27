@@ -13,16 +13,31 @@ from ..database import get_db
 from ..models import AnexoProcesso, Processo, Usuario
 from ..schemas.processo import AnexoNoProcesso
 from ..services.anexos import (
+    AnexoConflito,
     AnexoError,
+    AnexoNaoEncontrado,
     delete_anexo,
+    enviar_nova_versao,
     get_anexo_path_autorizado,
     upload_anexo,
+    versao_substituta,
 )
-from ..services.sigilo import SigiloAcessoError
+from ..services.sigilo import SigiloAcessoError, assert_acesso_processo
 from ..services.pdf_carimbo import CarimboError, carimbar_anexo_com_cache, invalidate_cache
 from ..services.storage import obter_storage
 
 router = APIRouter(tags=["anexos"])
+
+
+async def _exigir_acesso(db: AsyncSession, processo_id: int, tenant_id: int, usuario) -> None:
+    """Guard de sigilo das rotas que escrevem no processo (SI-72). Vem ANTES de
+    qualquer leitura do recurso: 404 igual para "não existe" e "não pode ver"."""
+    try:
+        await assert_acesso_processo(
+            db, tenant_id=tenant_id, processo_id=processo_id, usuario=usuario
+        )
+    except SigiloAcessoError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
 
 
 @router.post(
@@ -41,6 +56,7 @@ async def upload_endpoint(
     tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),
 ) -> AnexoNoProcesso:
+    await _exigir_acesso(db, processo_id, tenant_id, current)
     try:
         anexo = await upload_anexo(
             db,
@@ -114,16 +130,67 @@ async def download_endpoint(
 async def delete_endpoint(
     processo_id: int,
     anexo_id: int,
-    _: Usuario = Depends(require_permission("processo", "excluir")),
+    current: Usuario = Depends(require_permission("processo", "excluir")),
     tenant_id: int = Depends(require_tenant_id),
     tenant_slug: str = Depends(require_tenant_slug),
     db: AsyncSession = Depends(get_db),
 ) -> None:
+    await _exigir_acesso(db, processo_id, tenant_id, current)
     try:
         await delete_anexo(db, processo_id, anexo_id, tenant_id=tenant_id)
     except AnexoError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     invalidate_cache(anexo_id, tenant_slug=tenant_slug)
+
+
+@router.post(
+    "/processos/{processo_id}/anexos/{anexo_id}/versoes",
+    response_model=AnexoNoProcesso,
+    status_code=status.HTTP_201_CREATED,
+)
+async def nova_versao_endpoint(
+    processo_id: int,
+    anexo_id: int,
+    file: UploadFile = File(...),
+    motivo: str | None = Form(None, max_length=1000),
+    descricao: str | None = Form(None, max_length=512),
+    current: Usuario = Depends(require_permission("processo", "atualizar")),
+    tenant_id: int = Depends(require_tenant_id),
+    tenant_slug: str = Depends(require_tenant_slug),
+    db: AsyncSession = Depends(get_db),
+) -> AnexoNoProcesso:
+    """SI-72 (RF-04 V1): corrige um documento sem apagar o anterior. A versão
+    nova entra no fim do processo; a anterior fica no histórico."""
+    await _exigir_acesso(db, processo_id, tenant_id, current)
+    try:
+        nova = await enviar_nova_versao(
+            db,
+            processo_id,
+            anexo_id,
+            file,
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            usuario_id=current.id,
+            motivo=motivo,
+            descricao=descricao,
+        )
+    except AnexoNaoEncontrado as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except AnexoConflito as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except AnexoError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return AnexoNoProcesso(
+        id=nova.id,
+        descricao=nova.descricao,
+        publico=nova.publico,
+        qtd_paginas=nova.qtd_paginas,
+        e_doc=nova.e_doc,
+        tipo_anexo=None,
+        versao=nova.versao,
+        id_anexo_anterior=nova.id_anexo_anterior,
+        motivo_versao=nova.motivo_versao,
+    )
 
 
 @router.get(
@@ -164,6 +231,8 @@ async def carimbado_endpoint(
         )
     ).first()
     numero_processo = row[0] if row else "—"
+    # SI-72 — versão substituída sai com a faixa "substituído pela versão N".
+    substituta = (await versao_substituta(db, [anexo_id], tenant_id=tenant_id)).get(anexo_id)
 
     try:
         carimbado_path = await carimbar_anexo_com_cache(
@@ -171,6 +240,8 @@ async def carimbado_endpoint(
             numero_processo=numero_processo,
             e_doc=anexo.e_doc,
             tenant_slug=tenant_slug,
+            versao=anexo.versao or 1,
+            substituido_pela_versao=substituta,
         )
     except CarimboError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
