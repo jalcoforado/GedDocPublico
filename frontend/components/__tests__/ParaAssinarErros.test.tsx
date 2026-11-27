@@ -16,6 +16,7 @@ vi.mock("@/lib/api", () => ({
   },
   anexoInlineUrl: (id: number) => `/inline/${id}`,
   anexoDownloadUrl: (id: number) => `/dl/${id}`,
+  anexoCarimbadoUrl: (id: number) => `/carimbado/${id}`,
 }));
 
 vi.mock("@/components/ui/toast", () => ({

@@ -21,7 +21,9 @@ from ..config import validacao_publica_url
 from .audit import log as audit_log
 from . import anexos as anexos_svc
 from . import assinatura_throttle as throttle
+from .pdf_selo_assinatura import SeloError, contar_paginas_pdf
 from .sigilo import assert_acesso_processo
+from .storage import obter_storage
 from .validacao_publica import status_validacao_publica
 from ..models import (
     Anexo,
@@ -37,6 +39,7 @@ from ..schemas.assinatura import (
     AssinaturaAnexoStatus,
     EvidenciasOut,
     PendenciaAssinatura,
+    PosicaoSelo,
     SolicitacaoOut,
     SolicitarAssinaturaRequest,
     ValidacaoOut,
@@ -193,11 +196,15 @@ def _registrar_assinatura_com_senha(
     hash_algoritmo: str,
     ip: str | None,
     user_agent: str | None,
+    posicao: PosicaoSelo | None = None,
 ) -> None:
     """Marca `aa` como assinada por senha, com as evidências de integridade.
     Comum a `assinar` (pedido a outra pessoa) e `autoassinar_sem_commit`
     (despacho, SI-62): as duas assinaturas têm de ser indistinguíveis na
-    validação pública."""
+    validação pública.
+
+    `posicao` (SI-68) é onde o selo aparece no PDF servido. O despacho não
+    passa posição e continua sem selo, como antes."""
     now = datetime.now()
     aa.assinado = True
     aa.dt_assinatura = now
@@ -220,6 +227,40 @@ def _registrar_assinatura_com_senha(
         "hash_algoritmo": hash_algoritmo,
         "dt_assinatura": now.isoformat(),
     }
+    if posicao is not None:
+        aa.selo_pagina = posicao.pagina
+        aa.selo_x = posicao.x
+        aa.selo_y = posicao.y
+        aa.evidencias["posicao_selo"] = posicao.model_dump()
+
+
+async def _validar_posicao_selo(
+    db: AsyncSession,
+    anexo_id: int,
+    posicao: PosicaoSelo,
+    *,
+    tenant_id: int,
+    tenant_slug: str,
+) -> None:
+    """Selo só em PDF, e numa página que existe. A faixa 0–1 de x/y o schema
+    já garantiu; manter o quadrado inteiro dentro da página é do desenho."""
+    try:
+        anexo, _path = await anexos_svc.get_anexo_path(
+            db, anexo_id, tenant_id=tenant_id, tenant_slug=tenant_slug
+        )
+        conteudo = await obter_storage().get_bytes(tenant_slug, anexo.e_doc)
+    except (anexos_svc.AnexoError, FileNotFoundError) as e:
+        raise AssinaturaError("Arquivo do documento não encontrado") from e
+    if not anexo.e_doc.lower().endswith(".pdf"):
+        raise AssinaturaError("A posição da assinatura só vale para documento PDF")
+    try:
+        total = contar_paginas_pdf(conteudo)
+    except SeloError as e:
+        raise AssinaturaError("Não foi possível ler o PDF para posicionar a assinatura") from e
+    if posicao.pagina > total:
+        raise AssinaturaError(
+            f"O documento tem {total} página(s); escolha uma delas para a assinatura"
+        )
 
 
 async def conferir_senha_para_assinar(
@@ -375,6 +416,7 @@ async def assinar(
     tenant_slug: str,
     ip: str | None = None,
     user_agent: str | None = None,
+    posicao: PosicaoSelo | None = None,
 ) -> AssinaturaAnexo:
     aa = (
         await db.execute(
@@ -402,6 +444,12 @@ async def assinar(
     ).scalar_one()
     if ua.id_assinante != usuario_id:
         raise AssinaturaError("Você não é o destinatário desta solicitação")
+
+    # Posição inválida volta antes da senha: não gasta tentativa do throttle.
+    if posicao is not None:
+        await _validar_posicao_selo(
+            db, aa.id_anexo, posicao, tenant_id=tenant_id, tenant_slug=tenant_slug
+        )
 
     # Throttle (fail-open) — bloqueio temporário após excesso de tentativas.
     if await throttle.esta_bloqueado(tenant_id, usuario_id, aa.id):
@@ -453,6 +501,7 @@ async def assinar(
         hash_algoritmo=hash_algoritmo,
         ip=ip,
         user_agent=user_agent,
+        posicao=posicao,
     )
 
     pendentes_user = (
@@ -510,6 +559,7 @@ async def assinar(
             "hash_algoritmo": hash_algoritmo,
             "nivel": "simples",
             "metodo": "senha_bcrypt",
+            "posicao_selo": posicao.model_dump() if posicao is not None else None,
         },
     )
     aa.id_audit_log = audit_id
@@ -929,6 +979,7 @@ async def listar_minhas_pendentes(
                 SolicitacaoAssinatura,
                 Processo.numero_processo,
                 Usuario.nome,
+                Anexo.e_doc,
             )
             .join(UsuarioAssinatura, UsuarioAssinatura.id == AssinaturaAnexo.id_usuario_assinatura)
             .join(SolicitacaoAssinatura, SolicitacaoAssinatura.id == UsuarioAssinatura.id_solicitacao_assinatura)
@@ -956,6 +1007,7 @@ async def listar_minhas_pendentes(
             numero_processo=numero,
             nome_solicitante=nome,
             dt_inicio=solic.dt_inicio,
+            anexo_pdf=bool(e_doc and e_doc.lower().endswith(".pdf")),
         )
-        for aa, desc, solic, numero, nome in rows
+        for aa, desc, solic, numero, nome, e_doc in rows
     ]

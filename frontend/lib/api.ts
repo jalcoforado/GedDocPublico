@@ -1,3 +1,5 @@
+import type { PosicaoSelo } from "./selo-assinatura";
+
 const BROWSER_API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8090/api/v2";
 const SERVER_API_URL = process.env.INTERNAL_API_URL ?? BROWSER_API_URL;
@@ -3989,10 +3991,11 @@ export const api = {
         `/solicitacoes-assinatura/${solicitacaoId}/cancelar`,
         { method: "POST" },
       ),
-    assinar: (assinaturaAnexoId: number, senha: string) =>
+    /** `posicao` (SI-68): onde o selo aparece no PDF; sem ela, assina sem selo. */
+    assinar: (assinaturaAnexoId: number, senha: string, posicao?: PosicaoSelo) =>
       request<SolicitacaoAssinatura>(
         `/assinaturas/${assinaturaAnexoId}/assinar`,
-        { method: "POST", body: JSON.stringify({ senha }) },
+        { method: "POST", body: JSON.stringify(posicao ? { senha, posicao } : { senha }) },
       ),
     recusar: (solicitacaoId: number, motivo: string) =>
       request<SolicitacaoAssinatura>(
@@ -6328,7 +6331,11 @@ export interface PendenciaAssinatura {
   numero_processo: string | null;
   nome_solicitante: string;
   dt_inicio: string;
+  /** SI-68 — só PDF aceita posicionar o selo. */
+  anexo_pdf?: boolean;
 }
+
+export type { PosicaoSelo };
 
 // Solicitação de assinatura (espelha SolicitacaoOut do backend)
 export interface AssinaturaAnexoStatus {
