@@ -64,4 +64,39 @@ describe("AcoesDaLinha", () => {
     );
     expect(screen.queryByRole("button", { name: "Excluir" })).toBeNull();
   });
+
+  it("sempreNoMenu leva a ação ao ⋯ mesmo havendo espaço (forma igual em toda linha)", () => {
+    const excluir = vi.fn();
+    render(
+      <AcoesDaLinha
+        acoes={[
+          { label: "Abrir", onClick: vi.fn() },
+          { label: "Enviar nova versão", onClick: vi.fn() },
+          { label: "Excluir", perigo: true, sempreNoMenu: true, onClick: excluir },
+          { label: "Baixar", sempreNoMenu: true, onClick: vi.fn() },
+        ]}
+      />,
+    );
+    const mais = screen.getByRole("button", { name: "Mais ações" });
+    const aVista = screen.getAllByRole("button").filter((b) => b !== mais).map((b) => b.textContent);
+    expect(aVista).toEqual(["Abrir", "Enviar nova versão"]);
+    fireEvent.click(screen.getByRole("button", { name: "Mais ações" }));
+    // No menu, a destrutiva continua por último.
+    expect(screen.getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Baixar", "Excluir"]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Excluir" }));
+    expect(excluir).toHaveBeenCalledTimes(1);
+  });
+
+  it("sem sempreNoMenu, um item sozinho continua à vista (comportamento de antes)", () => {
+    render(
+      <AcoesDaLinha
+        acoes={[
+          { label: "A", onClick: vi.fn() },
+          { label: "B", onClick: vi.fn() },
+          { label: "Excluir", perigo: true, onClick: vi.fn() },
+        ]}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Mais ações" })).toBeNull();
+  });
 });

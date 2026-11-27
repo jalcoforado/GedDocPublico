@@ -74,6 +74,11 @@ class MinutaCreate(BaseModel):
     # é no instante da criação, não há como preencher depois e re-resolver).
     destinatario: str | None = Field(default=None, max_length=300)
     finalidade: MinutaFinalidade = "documento"
+    # SI-72 — redigir a VERSÃO NOVA de um anexo do processo: ao finalizar, o PDF
+    # entra como versão seguinte dele. Sem template nem corpo, e com o anterior
+    # também redigido, o rascunho já nasce com o texto do anterior.
+    id_anexo_substitui: int | None = None
+    motivo_versao: str | None = Field(default=None, max_length=1000)
 
 
 class MinutaUpdate(BaseModel):
@@ -105,6 +110,8 @@ class MinutaOut(BaseModel):
     finalizada_em: datetime | None
     criado_em: datetime
     atualizado_em: datetime | None
+    id_anexo_substitui: int | None = None
+    motivo_versao: str | None = None
 
 
 class MinutaListItem(BaseModel):
@@ -121,6 +128,7 @@ class MinutaListItem(BaseModel):
     id_usuario_criacao: int
     criado_em: datetime
     atualizado_em: datetime | None
+    id_anexo_substitui: int | None = None
 
 
 class DespachoConcluidoOut(BaseModel):

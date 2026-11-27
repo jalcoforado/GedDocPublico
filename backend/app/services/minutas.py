@@ -397,6 +397,20 @@ async def listar_historico_minuta(
     return list((await db.execute(stmt)).scalars().all())
 
 
+async def _alvo_de_versao_http(
+    db: AsyncSession, processo_id: int, anexo_id: int, *, tenant_id: int, travar: bool
+):
+    """`anexos.alvo_de_versao` com os erros já em HTTP (minuta fala HTTP)."""
+    try:
+        return await anexos_svc.alvo_de_versao(
+            db, processo_id, anexo_id, tenant_id=tenant_id, travar=travar
+        )
+    except anexos_svc.AnexoNaoEncontrado as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except anexos_svc.AnexoConflito as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+
+
 async def criar_minuta(
     db: AsyncSession,
     *,
@@ -414,6 +428,28 @@ async def criar_minuta(
             detail="Despacho é redigido no editor do sistema, não no Google Docs.",
         )
 
+    # SI-72 — rascunho que vai virar a versão nova de um anexo do processo.
+    texto_anterior: str | None = None
+    if payload.id_anexo_substitui is not None:
+        if payload.finalidade != "documento":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Despacho não é versão de outro documento.",
+            )
+        anterior = await _alvo_de_versao_http(
+            db, processo_id, payload.id_anexo_substitui, tenant_id=tenant_id, travar=False
+        )
+        origem_anterior = (
+            await db.execute(
+                select(Minuta.corpo_html).where(
+                    Minuta.id_anexo_final == anterior.id,
+                    Minuta.tenant_id == tenant_id,
+                    Minuta.excluido.is_(False),
+                )
+            )
+        ).scalars().first()
+        texto_anterior = origem_anterior
+
     corpo_html: str | None
     if payload.origem == "google":
         # O documento vive no Google Docs até o import (PR-D). Sem corpo local.
@@ -429,7 +465,9 @@ async def criar_minuta(
         corpo_html = ph.resolve(template.corpo_html, contexto)
         corpo_html = sanitizar_html(corpo_html)
     else:
-        corpo_html = payload.corpo_html or ""
+        # Versão nova de documento redigido, sem texto informado: começa do
+        # texto da versão anterior — corrigir, não reescrever.
+        corpo_html = payload.corpo_html or texto_anterior or ""
         corpo_html = sanitizar_html(corpo_html)
 
     agora = _utcnow()
@@ -446,6 +484,8 @@ async def criar_minuta(
         corpo_html=corpo_html,
         id_usuario_criacao=usuario.id,
         criado_em=agora,
+        id_anexo_substitui=payload.id_anexo_substitui,
+        motivo_versao=(payload.motivo_versao or "").strip() or None,
     )
     db.add(m)
     await db.flush()
@@ -839,19 +879,33 @@ async def virar_anexo_sem_commit(
             timbre=papel_timbrado(tenant),
         )
 
-    anexo = await anexos_svc._criar_anexo_from_bytes(
-        db,
-        m.id_processo,
-        content=pdf_bytes,
-        filename=f"{m.titulo}.pdf",
-        tenant_id=tenant_id,
-        tenant_slug=tenant_slug,
-        descricao=m.titulo,
-        id_tipo_anexo=None,
-        publico=publico,
-        usuario_id=usuario_id,
-        commit=False,
-    )
+    if m.id_anexo_substitui is not None:
+        # SI-72 — versão redigida: revalida AGORA, com trava (entre criar o
+        # rascunho e finalizar, outra versão pode ter chegado — aí 409 e o
+        # rascunho fica para ser refeito sobre a vigente).
+        anterior = await _alvo_de_versao_http(
+            db, m.id_processo, m.id_anexo_substitui, tenant_id=tenant_id, travar=True
+        )
+        anexo = await anexos_svc.criar_versao_sem_commit(
+            db, anterior, m.id_processo,
+            content=pdf_bytes, filename=f"{m.titulo}.pdf",
+            tenant_id=tenant_id, tenant_slug=tenant_slug, usuario_id=usuario_id,
+            motivo=m.motivo_versao, descricao=m.titulo,
+        )
+    else:
+        anexo = await anexos_svc._criar_anexo_from_bytes(
+            db,
+            m.id_processo,
+            content=pdf_bytes,
+            filename=f"{m.titulo}.pdf",
+            tenant_id=tenant_id,
+            tenant_slug=tenant_slug,
+            descricao=m.titulo,
+            id_tipo_anexo=None,
+            publico=publico,
+            usuario_id=usuario_id,
+            commit=False,
+        )
     await db.flush()  # garante anexo.id
 
     m.status = "finalizada"

@@ -18,10 +18,12 @@ from ..models import (
     Anexo,
     AnexoProcesso,
     AssinaturaAnexo,
+    AvaliacaoDocumento,
     Assunto,
     Despacho,
     Encaminhamento,
     Manifestante,
+    Minuta,
     Movimentacao,
     Prioridade,
     Processo,
@@ -1092,6 +1094,53 @@ async def _load_anexos(
     )
     rows = (await db.execute(stmt)).all()
 
+    # SI-72 — versões. A substituída fica na lista (mesmo número, mesmas
+    # folhas); aqui só se descobre quem substituiu quem e quem aceita versão
+    # nova. Mesmas regras de `anexos.motivo_sem_nova_versao`, em lote.
+    ids = [a.id for a, _ap, _t in rows]
+    substituto: dict[int, int] = {}
+    de_minuta: set[int] = set()
+    if ids:
+        substituto = {
+            anterior: novo
+            for novo, anterior in (
+                await db.execute(
+                    select(Anexo.id, Anexo.id_anexo_anterior).where(
+                        Anexo.id_anexo_anterior.in_(ids),
+                        Anexo.tenant_id == tenant_id,
+                        Anexo.excluido.is_(False),
+                    )
+                )
+            ).all()
+        }
+        de_minuta = set(
+            (
+                await db.execute(
+                    select(Minuta.id_anexo_final).where(
+                        Minuta.id_anexo_final.in_(ids),
+                        Minuta.tenant_id == tenant_id,
+                        Minuta.excluido.is_(False),
+                    )
+                )
+            ).scalars().all()
+        )
+    principais = {ap.id_anexo_principal for _a, ap, _t in rows if ap.id_anexo_principal}
+
+    # SI-73 — avaliação mais recente de cada versão (o maior id vence).
+    avaliacao: dict[int, str] = {}
+    if ids:
+        for id_anexo, resultado in (
+            await db.execute(
+                select(AvaliacaoDocumento.id_anexo, AvaliacaoDocumento.resultado)
+                .where(
+                    AvaliacaoDocumento.id_anexo.in_(ids),
+                    AvaliacaoDocumento.tenant_id == tenant_id,
+                )
+                .order_by(AvaliacaoDocumento.id)
+            )
+        ).all():
+            avaliacao[id_anexo] = resultado or "aguardando"
+
     # F8 — numeração cumulativa. `PAGINAS_CAPA` é a página fixa que
     # `pdf_capa.py` sempre gera (um `showPage()` só). Mesmo filtro de
     # "conta no PDF consolidado" que `pdf_montagem.py` usa (extensão .pdf);
@@ -1120,6 +1169,19 @@ async def _load_anexos(
                 documento_numero=idx,
                 pagina_processo=pagina_processo,
                 id_anexo_principal=ap.id_anexo_principal,
+                versao=a.versao or 1,
+                id_anexo_anterior=a.id_anexo_anterior,
+                id_anexo_substituto=substituto.get(a.id),
+                motivo_versao=a.motivo_versao,
+                aceita_nova_versao=(
+                    a.id not in substituto
+                    and not ap.anexo_herdado
+                    and ap.id_anexo_principal is None
+                    and a.id not in principais
+                    and avaliacao.get(a.id) != "aguardando"
+                ),
+                redigido=a.id in de_minuta,
+                avaliacao=avaliacao.get(a.id),
             )
         )
     return resultado

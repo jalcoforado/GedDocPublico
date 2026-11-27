@@ -34,6 +34,8 @@ travar um comportamento, escreva a guarda — a lista delas está no fim.
 | **gatear um endpoint** | `CLAUDE.md` §Multi-tenancy e §Modularização | Módulo, permissão e sigilo são **três eixos independentes**; nenhum substitui outro. |
 | **servir conteúdo de um processo** | `CLAUDE.md` §Sigilo gradual | `assert_acesso_processo` é obrigatório, inclusive onde a assinatura não menciona processo. Um download de anexo ficou aberto 7 meses assim. |
 | **mexer em relatório de protocolo** | [relatorios-protocolo](relatorios-protocolo.md) · `CLAUDE.md` §Sigilo gradual | Cada seção conta pela sua data; o número da seção tem de ser o total da lista dela. Sigilo vale nos totais, não só nas listas. Período em dia de Brasília. |
+| **mexer em anexo/documento do processo** | [versoes-de-documento](versoes-de-documento.md) · `CLAUDE.md` §Sigilo gradual | Versão nova entra no fim e a anterior fica (folha não se renumera). A substituída não se exclui; a vigente sim, se não assinada. Upload, versão e exclusão passam pelo guard de sigilo. |
+| **mexer em avaliação de documento** | [avaliacao-de-documentos](avaliacao-de-documentos.md) · [versoes-de-documento](versoes-de-documento.md) | A decisão aponta para a versão exata. Só o avaliador designado decide. Documento aguardando não recebe versão nova; documento avaliado não se exclui. |
 | **mexer em tipo de processo/assunto** | [catalogo-protocolo](catalogo-protocolo.md) | O processo guarda só o assunto: mover assunto de tipo muda processos já abertos. A abertura carrega no máximo 200 assuntos. |
 | **mexer em permissão/RBAC** | `CLAUDE.md` §Modularização · [RUNBOOK](../RUNBOOK.md) | Todo grupo é SU hoje; o gate está inerte. Quem criar o primeiro grupo não-SU precisa conceder leitura também. |
 | **rodar/consertar a suíte** | `CLAUDE.md` §Testes e §Testes—convenções | `PYTEST_DB_HOST=db` é obrigatório. Teste com super-usuário passa pelo motivo errado. |
@@ -75,6 +77,8 @@ contrato — e o leitor precisa saber a diferença antes de agir.
 | [runbooks/platform-operator-bootstrap](runbooks/platform-operator-bootstrap.md) | Concessão/revogação de principal de plataforma. |
 | [architecture/security/threat-model-platform-operator](architecture/security/threat-model-platform-operator.md) | Modelo de ameaça da fronteira de plataforma. |
 | [acessos-teste-local](acessos-teste-local.md) | Credenciais e atalhos do ambiente local. |
+| [versoes-de-documento](versoes-de-documento.md) | Versão nova de documento: onde cada versão aparece, o que fica bloqueado. |
+| [avaliacao-de-documentos](avaliacao-de-documentos.md) | Pedido de avaliação, decisão por documento, reenvio do devolvido e o que fica travado. |
 | [catalogo-protocolo](catalogo-protocolo.md) | Tipo de processo × assunto, o catálogo sugerido de demonstração e o que ele não faz. |
 
 ### Registro — não descrevem o presente

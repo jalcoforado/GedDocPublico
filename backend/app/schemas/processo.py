@@ -432,6 +432,23 @@ class AnexoNoProcesso(BaseModel):
     pagina_processo: int | None = None
     # SI-62: documento que este arquivo acompanha (anexos do despacho).
     id_anexo_principal: int | None = None
+    # SI-72 (RF-04 V1) — versões. A versão substituída CONTINUA na lista, com
+    # o mesmo número e as mesmas folhas (folha não se renumera); a tela a
+    # recolhe sob a vigente. `id_anexo_substituto` = quem a substituiu
+    # (None = vigente). `aceita_nova_versao` = regras do documento; o estado
+    # do processo (arquivado, inativo) a tela já conhece pelo próprio processo.
+    versao: int = 1
+    id_anexo_anterior: int | None = None
+    id_anexo_substituto: int | None = None
+    motivo_versao: str | None = None
+    aceita_nova_versao: bool = False
+    # Gerado por minuta ("Redigir documento"): a versão nova redigida já nasce
+    # com o texto dele.
+    redigido: bool = False
+    # SI-73 (RF-04 V2): a avaliação mais recente DESTA versão — `aguardando`,
+    # `aprovado`, `devolvido` — ou None se nunca foi pedida. Versão nova nasce
+    # sem avaliação: a aprovação da anterior não passa adiante.
+    avaliacao: str | None = None
 
 
 class EncaminhamentoOut(BaseModel):

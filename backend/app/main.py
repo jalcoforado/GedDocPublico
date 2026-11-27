@@ -11,6 +11,7 @@ from .services.transporte_workflow import registrar_providers as _registrar_prov
 from .routers import (
     admin_tenants,
     anexos,
+    avaliacoes,
     assinaturas,
     assuntos,
     audit,
@@ -115,6 +116,7 @@ app.include_router(assuntos.router, prefix="/api/v2")
 app.include_router(processos.router, prefix="/api/v2")
 app.include_router(protocolo.router, prefix="/api/v2")
 app.include_router(anexos.router, prefix="/api/v2")
+app.include_router(avaliacoes.router, prefix="/api/v2")
 app.include_router(assinaturas.router, prefix="/api/v2")
 app.include_router(validacao_publica.router, prefix="/api/v2")
 app.include_router(admin_tenants.router, prefix="/api/v2")

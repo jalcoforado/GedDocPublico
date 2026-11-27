@@ -188,7 +188,18 @@ async def get_meu_detail(
         for mov, acao, ut in movs
     ]
 
-    # Anexos públicos do processo — cidadão não vê sigilosos.
+    # Anexos públicos do processo — cidadão não vê sigilosos. Desde o SI-72,
+    # só a versão vigente: a substituída fica no processo, não no portal.
+    Sucessora = aliased(Anexo, name="sucessora")
+    substituido = (
+        select(Sucessora.id)
+        .where(
+            Sucessora.id_anexo_anterior == Anexo.id,
+            Sucessora.tenant_id == tenant_id,
+            Sucessora.excluido.is_(False),
+        )
+        .exists()
+    )
     anexos_rows = (
         await db.execute(
             select(Anexo)
@@ -201,6 +212,7 @@ async def get_meu_detail(
                 Anexo.publico.is_(True),
                 Anexo.excluido.is_(False),
                 Anexo.ativo.is_(True),
+                ~substituido,
             )
             .order_by(AnexoProcesso.ordem)
         )

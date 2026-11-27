@@ -308,6 +308,13 @@ class Anexo(Base):
     # PR 4c — vínculo com item de `servico.documentos_exigidos` (soft-link;
     # null = anexo geral, não vinculado a documento exigido).
     documento_exigido_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # SI-72 (RF-04 V1) — versão nova de documento: aponta para a versão que
+    # esta substitui. A anterior não some nem é renumerada. Migration 0147.
+    id_anexo_anterior: Mapped[int | None] = mapped_column(
+        ForeignKey("protocolos.anexo.id"), nullable=True
+    )
+    versao: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    motivo_versao: Mapped[str | None] = mapped_column(String(1000), nullable=True)
 
 
 class AnexoProcesso(Base):
