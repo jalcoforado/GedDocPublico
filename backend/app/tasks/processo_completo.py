@@ -11,6 +11,7 @@ from datetime import datetime
 from ..config import get_settings, tenant_jobs_dir
 from ..models import Job
 from ..services.pdf_montagem import gerar_processo_completo_pdf
+from ..services.pdf_selo_assinatura import selos_dos_anexos
 from ..services.processos import get_processo_detail
 from ._task_db import task_session_scope
 from .celery_app import celery_app
@@ -45,7 +46,13 @@ async def _run_async(
                 detail = await get_processo_detail(db, processo_id, tenant_id=tenant_id)
                 if detail is None:
                     raise RuntimeError(f"Processo {processo_id} não encontrado")
-                pdf_bytes = await gerar_processo_completo_pdf(detail, tenant_slug=tenant_slug)
+                selos = await selos_dos_anexos(
+                    db, [a.id for a in detail.anexos],
+                    tenant_id=tenant_id, tenant_slug=tenant_slug,
+                )
+                pdf_bytes = await gerar_processo_completo_pdf(
+                    detail, tenant_slug=tenant_slug, selos=selos
+                )
                 numero_safe = detail.numero_processo.replace("/", "_")
 
             out_dir = tenant_jobs_dir(tenant_slug) / str(job_id)

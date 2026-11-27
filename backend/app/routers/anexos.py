@@ -2,7 +2,7 @@ import mimetypes
 import urllib.parse
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +20,7 @@ from ..services.anexos import (
 )
 from ..services.sigilo import SigiloAcessoError
 from ..services.pdf_carimbo import CarimboError, carimbar_anexo_com_cache, invalidate_cache
+from ..services.pdf_selo_assinatura import SeloError, aplicar_selos_pdf_bytes, selos_dos_anexos
 from ..services.storage import obter_storage
 
 router = APIRouter(tags=["anexos"])
@@ -188,9 +189,23 @@ async def carimbado_endpoint(
         download_name = download_name[:-4] + "-carimbado.pdf"
     safe_name = urllib.parse.quote(download_name)
     disposition = "inline" if inline else "attachment"
+    headers = {"Content-Disposition": f"{disposition}; filename*=UTF-8''{safe_name}"}
+
+    # SI-68: selos das assinaturas posicionadas, por cima do carimbo. Feito a
+    # cada pedido sobre o carimbado em cache — o cache continua só com o
+    # carimbo e não precisa ser invalidado quando alguém assina.
+    selos = (
+        await selos_dos_anexos(db, [anexo_id], tenant_id=tenant_id, tenant_slug=tenant_slug)
+    ).get(anexo_id)
+    if selos:
+        try:
+            conteudo = aplicar_selos_pdf_bytes(carimbado_path.read_bytes(), selos)
+        except SeloError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        return Response(content=conteudo, media_type="application/pdf", headers=headers)
 
     return FileResponse(
         path=str(carimbado_path),
         media_type="application/pdf",
-        headers={"Content-Disposition": f"{disposition}; filename*=UTF-8''{safe_name}"},
+        headers=headers,
     )

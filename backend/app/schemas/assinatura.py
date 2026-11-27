@@ -17,8 +17,22 @@ class SolicitarAssinaturaRequest(BaseModel):
     id_tipo_assinatura: int | None = None
 
 
+class PosicaoSelo(BaseModel):
+    """Onde o selo da assinatura aparece no PDF (SI-68).
+
+    `x`/`y` são o canto superior esquerdo do quadrado em FRAÇÃO da página como
+    ela é vista na tela (0–1, origem no canto superior esquerdo, rotação já
+    aplicada). O backend converte para pontos e mantém o selo dentro da página.
+    """
+    pagina: int = Field(ge=1)
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+
+
 class AssinarRequest(BaseModel):
     senha: str = Field(min_length=1)
+    # SI-68: opcional. Sem ela a assinatura vale como antes, sem selo no PDF.
+    posicao: PosicaoSelo | None = None
 
 
 class AssinaturaAnexoStatus(BaseModel):
@@ -136,3 +150,5 @@ class PendenciaAssinatura(BaseModel):
     numero_processo: str | None  # E3 — None se processo ainda é rascunho
     nome_solicitante: str | None
     dt_inicio: datetime
+    # SI-68: só PDF aceita posição do selo; a tela só oferece o quadrado nesse caso.
+    anexo_pdf: bool = False

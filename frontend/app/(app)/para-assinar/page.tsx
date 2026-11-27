@@ -5,6 +5,7 @@ import { Ban, Download, Eye, PenLine } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
+import { PosicionarSelo } from "@/components/PosicionarSelo";
 import { AcoesDaLinha } from "@/components/ui/acoes-da-linha";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -17,10 +18,12 @@ import { Table, TBody, TD, TH, THead, TR, TRLink } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import {
+  anexoCarimbadoUrl,
   anexoDownloadUrl,
   anexoInlineUrl,
   api,
   type PendenciaAssinatura,
+  type PosicaoSelo,
 } from "@/lib/api";
 
 function fmt(s: string) {
@@ -38,6 +41,8 @@ export default function ParaAssinarPage() {
   const [assinando, setAssinando] = useState<PendenciaAssinatura | null>(null);
   const [senha, setSenha] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  // SI-68: onde o selo vai no PDF. null = sem selo (não-PDF, ou o PDF não abriu).
+  const [posicao, setPosicao] = useState<PosicaoSelo | null>(null);
   const [recusando, setRecusando] = useState<PendenciaAssinatura | null>(null);
   const [motivo, setMotivo] = useState("");
   // Erro sob o campo só depois de tentar confirmar; os botões não ficam
@@ -49,6 +54,7 @@ export default function ParaAssinarPage() {
     setAssinando(null);
     setSenha("");
     setErr(null);
+    setPosicao(null);
     setTentouAssinar(false);
   }
   function fecharRecusa() {
@@ -81,14 +87,23 @@ export default function ParaAssinarPage() {
   const m = useMutation({
     mutationFn: () => {
       if (!assinando) throw new Error("Nenhuma pendência selecionada");
-      return api.assinaturas.assinar(assinando.id_assinatura_anexo, senha);
+      return api.assinaturas.assinar(
+        assinando.id_assinatura_anexo,
+        senha,
+        assinando.anexo_pdf && posicao ? posicao : undefined,
+      );
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["minhas-pendencias-assinatura"] });
-      toast.success("Assinatura registrada.");
+      toast.success(
+        assinando?.anexo_pdf && posicao
+          ? `Assinatura registrada na página ${posicao.pagina} do documento.`
+          : "Assinatura registrada.",
+      );
       setAssinando(null);
       setSenha("");
       setErr(null);
+      setPosicao(null);
     },
     // A mensagem (incl. 409 "atualize a senha" e 429 "muitas tentativas") vem
     // pronta do backend em e.message.
@@ -167,6 +182,7 @@ export default function ParaAssinarPage() {
                           setAssinando(p);
                           setSenha("");
                           setErr(null);
+                          setPosicao(null);
                         },
                       },
                       {
@@ -203,6 +219,7 @@ export default function ParaAssinarPage() {
         open={!!assinando}
         onClose={fecharAssinatura}
         title={assinando ? `Assinar — ${assinando.anexo_descricao}` : ""}
+        size={assinando?.anexo_pdf ? "xl" : "md"}
         footer={
           <>
             <Button variant="ghost" onClick={fecharAssinatura}>
@@ -214,42 +231,66 @@ export default function ParaAssinarPage() {
           </>
         }
       >
-        <div className="space-y-4">
-          <p className="text-sm">
-            Confirme sua senha para registrar a assinatura do anexo{" "}
-            <b>{assinando?.anexo_descricao}</b> no processo{" "}
-            <b className="font-mono">{assinando?.numero_processo ?? "Rascunho"}</b>.
-          </p>
-          <form
-            noValidate
-            onSubmit={(e) => {
-              e.preventDefault();
-              assinar();
-            }}
-          >
-            <FormField
-              label="Senha"
-              required
-              hint="A mesma do login. Ela confirma que é você quem assina."
-              error={tentouAssinar && !senha ? "Digite sua senha para assinar." : undefined}
-            >
-              <PasswordInput
-                id="senha-assinar"
-                autoComplete="current-password"
-                value={senha}
-                onChange={(e) => setSenha(e.target.value)}
-                autoFocus
-              />
-            </FormField>
-          </form>
-          {err && (
-            <div
-              role="alert"
-              className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
-            >
-              {err}
-            </div>
+        <div
+          className={
+            assinando?.anexo_pdf
+              ? "grid gap-5 md:grid-cols-[minmax(0,1fr)_17rem] md:items-start"
+              : undefined
+          }
+        >
+          {assinando?.anexo_pdf && (
+            <PosicionarSelo
+              fontes={[
+                anexoCarimbadoUrl(assinando.id_anexo),
+                anexoInlineUrl(assinando.id_anexo),
+              ]}
+              onChange={setPosicao}
+            />
           )}
+          <div className="space-y-4">
+            <p className="text-sm">
+              Confirme sua senha para registrar a assinatura do anexo{" "}
+              <b>{assinando?.anexo_descricao}</b> no processo{" "}
+              <b className="font-mono">{assinando?.numero_processo ?? "Rascunho"}</b>.
+            </p>
+            {assinando?.anexo_pdf && (
+              <p className="text-sm text-foreground-muted">
+                Arraste o quadrado até onde a assinatura deve aparecer no documento, ou clique no
+                ponto da página. O selo leva seu nome, cargo, a data e a hora da assinatura e o
+                código de validação.
+              </p>
+            )}
+            <form
+              noValidate
+              onSubmit={(e) => {
+                e.preventDefault();
+                assinar();
+              }}
+            >
+              <FormField
+                label="Senha"
+                required
+                hint="A mesma do login. Ela confirma que é você quem assina."
+                error={tentouAssinar && !senha ? "Digite sua senha para assinar." : undefined}
+              >
+                <PasswordInput
+                  id="senha-assinar"
+                  autoComplete="current-password"
+                  value={senha}
+                  onChange={(e) => setSenha(e.target.value)}
+                  autoFocus
+                />
+              </FormField>
+            </form>
+            {err && (
+              <div
+                role="alert"
+                className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger-soft-foreground"
+              >
+                {err}
+              </div>
+            )}
+          </div>
         </div>
       </Dialog>
 

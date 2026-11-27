@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -130,3 +130,9 @@ class AssinaturaAnexo(Base):
         ForeignKey("utils.usuario.id"), nullable=True
     )
     validacao_expira_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # SI-68 — onde o selo aparece no PDF servido: página (1-based) e canto
+    # superior esquerdo em fração da página vista na tela (0–1). As três nulas
+    # = assinatura sem selo (legado, não-PDF, despacho). Migration 0147.
+    selo_pagina: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    selo_x: Mapped[float | None] = mapped_column(Float, nullable=True)
+    selo_y: Mapped[float | None] = mapped_column(Float, nullable=True)

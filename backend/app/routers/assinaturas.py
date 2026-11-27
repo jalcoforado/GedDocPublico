@@ -117,6 +117,7 @@ async def assinar_endpoint(
             tenant_slug=tenant_slug,
             ip=_client_ip(request),
             user_agent=request.headers.get("user-agent"),
+            posicao=payload.posicao,
         )
     except AssinaturaThrottleError as e:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(e))

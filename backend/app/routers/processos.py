@@ -75,6 +75,7 @@ from ..services.pdf_comprovante import gerar_comprovante_pdf
 from ..services.pdf_etiqueta import gerar_etiqueta_pdf
 from ..services.pdf_folha_ocorrencias import gerar_folha_ocorrencias_pdf
 from ..services.pdf_montagem import gerar_processo_completo_pdf
+from ..services.pdf_selo_assinatura import selos_dos_anexos
 from ..services.checklist_documentos import calcular_checklist
 from ..services import complementacao_documental as _comp_svc
 from ..services.complementacao_documental import ComplementacaoError
@@ -1150,7 +1151,10 @@ async def completo_pdf_endpoint(
     if detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
     _recusar_pdf_se_rascunho(detail)
-    pdf_bytes = await gerar_processo_completo_pdf(detail, tenant_slug=tenant_slug)
+    selos = await selos_dos_anexos(
+        db, [a.id for a in detail.anexos], tenant_id=tenant_id, tenant_slug=tenant_slug
+    )
+    pdf_bytes = await gerar_processo_completo_pdf(detail, tenant_slug=tenant_slug, selos=selos)
     fname = f"processo-completo-{detail.numero_processo.replace('/', '_')}.pdf"
     return _pdf_response(pdf_bytes, inline=inline, fname=fname)
 

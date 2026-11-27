@@ -18,9 +18,17 @@ from pypdf import PdfReader, PdfWriter
 from ..schemas.processo import ProcessoDetail
 from .pdf_capa import gerar_capa_pdf
 from .pdf_carimbo import CarimboError, carimbar_anexo_com_cache
+from .pdf_selo_assinatura import SeloAssinatura, aplicar_selos_pdf_bytes
 
 
-async def gerar_processo_completo_pdf(detail: ProcessoDetail, *, tenant_slug: str) -> bytes:
+async def gerar_processo_completo_pdf(
+    detail: ProcessoDetail,
+    *,
+    tenant_slug: str,
+    selos: dict[int, list[SeloAssinatura]] | None = None,
+) -> bytes:
+    """`selos` (SI-68): por id de anexo, os selos das assinaturas posicionadas,
+    desenhados por cima do carimbo — os mesmos do `carimbado.pdf` avulso."""
     writer = PdfWriter()
 
     # 1. Capa
@@ -52,7 +60,13 @@ async def gerar_processo_completo_pdf(detail: ProcessoDetail, *, tenant_slug: st
             # Arquivo ausente do storage — pula, como antes da abstração.
             continue
         try:
-            for p in PdfReader(str(carimbado_path)).pages:
+            do_anexo = (selos or {}).get(anexo.id)
+            origem = (
+                BytesIO(aplicar_selos_pdf_bytes(carimbado_path.read_bytes(), do_anexo))
+                if do_anexo
+                else str(carimbado_path)
+            )
+            for p in PdfReader(origem).pages:
                 writer.add_page(p)
         except Exception:
             continue
