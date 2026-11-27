@@ -30,10 +30,67 @@ from ..services.jobs import (
     get_job,
     listar_jobs,
 )
-from ..services.sigilo import niveis_acesso_usuario
+from ..services.sigilo import SigiloAcessoError, assert_acesso_processo, niveis_acesso_usuario
 
 settings = get_settings()
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+
+async def _exigir_processo_acessivel(
+    db: AsyncSession, processo_id: int, tenant_id: int, usuario
+) -> None:
+    """404 se o processo não existe na prefeitura ou está acima da credencial
+    de sigilo de quem pede (SI-72). Antes, disparar o PDF completo ou o
+    carimbo de um processo sigiloso não olhava sigilo nenhum."""
+    existe = (
+        await db.execute(
+            select(Processo.id).where(
+                Processo.id == processo_id,
+                Processo.tenant_id == tenant_id,
+                Processo.excluido.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+    if existe is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
+    try:
+        await assert_acesso_processo(
+            db, tenant_id=tenant_id, processo_id=processo_id, usuario=usuario
+        )
+    except SigiloAcessoError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processo não encontrado")
+
+
+async def _job_autorizado(db: AsyncSession, job_id: int, tenant_id: int, usuario):
+    """O job, se quem pede pode vê-lo; senão 404 (não confirma a existência).
+
+    Até o SI-72 bastava ser do mesmo tenant: qualquer servidor com acesso ao
+    protocolo baixava o resultado de job alheio trocando o id na URL —
+    inclusive o PDF completo de processo sigiloso. Regra agora:
+    1. só quem criou o job, ou super-usuário;
+    2. job ligado a processo reconfere o sigilo na hora de ler (a credencial
+       pode ter baixado depois de criar).
+    """
+    from ..services.permissoes import load_permissions
+
+    nao_achou = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job não encontrado")
+    row = await get_job(db, job_id, tenant_id=tenant_id)
+    if row is None:
+        raise nao_achou
+    job, nome = row
+    if job.id_usuario != usuario.id:
+        perms = await load_permissions(db, usuario.id, tenant_id=tenant_id)
+        if not perms.is_super_usuario:
+            raise nao_achou
+    processo_id = (job.parametros or {}).get("id_processo")
+    if processo_id is not None:
+        try:
+            await assert_acesso_processo(
+                db, tenant_id=tenant_id, processo_id=int(processo_id), usuario=usuario
+            )
+        except SigiloAcessoError:
+            raise nao_achou
+    return job, nome
 
 
 @router.get(
@@ -92,14 +149,11 @@ async def listar_agenda_endpoint(
 )
 async def get_job_endpoint(
     job_id: int,
-    _: Usuario = Depends(get_current_user),
+    current: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> JobOut:
-    row = await get_job(db, job_id, tenant_id=tenant_id)
-    if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job não encontrado")
-    job, nome = row
+    job, nome = await _job_autorizado(db, job_id, tenant_id, current)
     out = JobOut.model_validate(job)
     out.nome_usuario = nome
     return out
@@ -121,6 +175,7 @@ async def disparar_processo_completo(
 ) -> JobOut:
     from ..tasks.processo_completo import run as run_task
 
+    await _exigir_processo_acessivel(db, payload.id_processo, tenant_id, current)
     # E3 — rascunho não tem numero_processo; a task quebraria em
     # `.replace('/', '_')` bem mais adiante (worker), sem contexto de HTTP
     # pra devolver erro claro. Recusa aqui, antes de enfileirar.
@@ -161,6 +216,7 @@ async def disparar_carimbar_anexos(
 ) -> JobOut:
     from ..tasks.carimbar_anexos import run as run_task
 
+    await _exigir_processo_acessivel(db, payload.id_processo, tenant_id, current)
     # E3 — mesmo risco do processo-completo acima: pdf_carimbo.py carimba
     # numero_processo em cada página, e rascunho não tem um.
     situacao = (
@@ -277,14 +333,11 @@ async def disparar_limpeza(
 )
 async def baixar_resultado(
     job_id: int,
-    _: Usuario = Depends(get_current_user),
+    current: Usuario = Depends(get_current_user),
     tenant_id: int = Depends(require_tenant_id),
     db: AsyncSession = Depends(get_db),
 ):
-    row = await get_job(db, job_id, tenant_id=tenant_id)
-    if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job não encontrado")
-    job, _ = row
+    job, _ = await _job_autorizado(db, job_id, tenant_id, current)
     if job.status != "concluido" or not job.resultado_path:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -300,5 +353,9 @@ async def baixar_resultado(
             detail="Arquivo de resultado não está mais disponível",
         )
     fname = os.path.basename(full)
-    media = "application/pdf" if fname.lower().endswith(".pdf") else "text/plain"
+    media = (
+        "application/pdf" if fname.lower().endswith(".pdf")
+        else "application/zip" if fname.lower().endswith(".zip")  # SI-72: PDFs carimbados
+        else "text/plain"
+    )
     return FileResponse(full, filename=fname, media_type=media)

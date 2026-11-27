@@ -30,6 +30,7 @@ function isTabId(v: string | null): v is TabId {
 
 import { AcoesProcesso } from "@/components/AcoesProcesso";
 import { AnexosProcesso } from "@/components/AnexosProcesso";
+import { separarVersoes } from "@/lib/versoes-anexo";
 import { MinutasProcesso } from "@/components/MinutasProcesso";
 import { CancelarComplementacaoDialog } from "@/components/CancelarComplementacaoDialog";
 import { ChecklistDocumentosCard } from "@/components/ChecklistDocumentosCard";
@@ -392,6 +393,9 @@ export default function ProcessoDetailPage() {
 
   const p = q.data;
   const podeAtualizarProcesso = can("processo", "atualizar");
+  // SI-72 — a aba conta documentos, não arquivos: a versão substituída fica
+  // recolhida sob a vigente e não entra no número.
+  const qtdDocumentos = separarVersoes(p.anexos).principais.length;
 
   return (
     <div className="space-y-6">
@@ -582,8 +586,8 @@ export default function ProcessoDetailPage() {
             },
             {
               value: "documentos",
-              label: <ComContagem rotulo="Documentos" n={p.anexos.length} />,
-              nomeAcessivel: `Documentos (${p.anexos.length})`,
+              label: <ComContagem rotulo="Documentos" n={qtdDocumentos} />,
+              nomeAcessivel: `Documentos (${qtdDocumentos})`,
             },
             { value: "relacionados", label: "Relacionados" },
           ]}

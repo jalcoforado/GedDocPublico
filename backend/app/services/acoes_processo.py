@@ -1121,6 +1121,8 @@ def _descreve_ato(acao: str) -> str:
         return "mudança de sigilo"
     if acao == "processo.anexo_desentranhado":
         return "desentranhamento de documento"
+    if acao == "processo.anexo_nova_versao":
+        return "versão nova de documento"
     if acao.startswith("processo.volume_"):
         return "mudança de volume"
     return f"outro ato ({acao})"

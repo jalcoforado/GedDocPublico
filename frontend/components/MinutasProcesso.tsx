@@ -62,11 +62,16 @@ export function MinutasProcesso({ processo }: { processo: ProcessoDetail }) {
   });
 
   async function finalizar(id: number) {
+    // SI-72 — rascunho de versão nova: ao finalizar, substitui o documento.
+    const substitui = minutas.find((x) => x.id === id)?.id_anexo_substitui;
+    const anterior = substitui != null ? processo.anexos.find((a) => a.id === substitui) : undefined;
     if (
       await confirm({
-        title: "Finalizar documento?",
+        title: substitui != null ? "Finalizar a versão nova?" : "Finalizar documento?",
         message:
-          "Será gerado um PDF anexado ao processo. Depois de finalizado, o documento não pode mais ser editado (mas pode ser carimbado e assinado).",
+          substitui != null
+            ? `Será gerado um PDF que entra no processo como versão ${(anterior?.versao ?? 1) + 1} de “${anterior?.descricao ?? `Anexo #${substitui}`}”. A versão atual fica no histórico. Depois de finalizado, o documento não pode mais ser editado.`
+            : "Será gerado um PDF anexado ao processo. Depois de finalizado, o documento não pode mais ser editado (mas pode ser carimbado e assinado).",
         confirmLabel: "Finalizar",
       })
     ) {
@@ -135,6 +140,14 @@ export function MinutasProcesso({ processo }: { processo: ProcessoDetail }) {
                   <Badge intent={STATUS_INTENT[m.status]}>{STATUS_LABEL[m.status]}</Badge>
                   <span>v{m.versao}</span>
                   {m.origem === "google" && <span>· Google Docs</span>}
+                  {m.id_anexo_substitui != null && (
+                    <span>
+                      · versão nova de “
+                      {processo.anexos.find((a) => a.id === m.id_anexo_substitui)?.descricao ??
+                        `Anexo #${m.id_anexo_substitui}`}
+                      ”
+                    </span>
+                  )}
                   {m.finalidade === "despacho" && (
                     <span>
                       · Despacho{m.status === "rascunho" ? " — só você vê até assinar" : " assinado"}

@@ -504,3 +504,24 @@ describe("Detalhe servidor — Checklist em modo servidor", () => {
     ).toBeNull();
   });
 });
+
+describe("Detalhe servidor — contador da aba Documentos (SI-72)", () => {
+  it("conta documentos, não versões: a substituída não entra no número", async () => {
+    const anexo = (id: number, extra: Record<string, unknown> = {}) => ({
+      id, descricao: `Doc ${id}`, publico: true, qtd_paginas: 1, e_doc: `${id}.pdf`,
+      tipo_anexo: null, ordem: id, documento_numero: id, pagina_processo: null,
+      id_anexo_substituto: null, id_anexo_anterior: null, versao: 1, ...extra,
+    });
+    getMock.mockResolvedValue(
+      processo({
+        anexos: [
+          anexo(1, { id_anexo_substituto: 3 }),
+          anexo(2),
+          anexo(3, { versao: 2, id_anexo_anterior: 1 }),
+        ],
+      } as Partial<ProcessoDetail>),
+    );
+    renderPage();
+    expect(await screen.findByRole("tab", { name: "Documentos (2)" })).toBeInTheDocument();
+  });
+});

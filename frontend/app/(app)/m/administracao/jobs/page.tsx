@@ -26,6 +26,7 @@ import { SkeletonRow } from "@/components/ui/skeleton";
 import { TBody, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { api, jobResultadoUrl, type JobOut, type JobStatus } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { TabList, TabPanel, Tabs } from "@/components/ui/tabs";
 
 // dd/mm/aaaa hh:mm — o segundo não ajuda a ler a lista, só a alarga.
@@ -105,6 +106,11 @@ function ExecucoesTab() {
   const toast = useToast();
   const prompt = usePrompt();
   const [todos, setTodos] = useState(false);
+  // SI-72: o backend só entrega o resultado a quem disparou (ou super-
+  // usuário). Com "todos" marcado, a linha alheia não oferece "Baixar".
+  const { user, perms } = useAuth();
+  const podeBaixar = (j: JobOut) =>
+    !!perms?.is_super_usuario || (user != null && j.id_usuario === user.id);
 
   const q = useQuery({
     queryKey: ["jobs", todos],
@@ -221,7 +227,10 @@ function ExecucoesTab() {
               <TD className="text-xs tabular-nums">{fmtDateTime(j.criado_em)}</TD>
               <TD className="text-xs tabular-nums">{fmtDateTime(j.concluido_em)}</TD>
               <TD className="text-right">
-                {j.status === "concluido" && j.resultado_path && (
+                {j.status === "concluido" && j.resultado_path && !podeBaixar(j) && (
+                  <span className="text-xs text-foreground-subtle">só quem disparou baixa</span>
+                )}
+                {j.status === "concluido" && j.resultado_path && podeBaixar(j) && (
                   // Mesmo peso dos botões de linha das outras telas; <a> e não
                   // AcoesDaLinha porque o arquivo abre em outra aba.
                   <Button asChild variant="secondary" size="sm">
