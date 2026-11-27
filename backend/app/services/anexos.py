@@ -468,13 +468,21 @@ async def delete_anexo(
     # excluída (arquivo errado enviado por engano), desde que não assinada —
     # checado acima; a anterior volta a ser a vigente, porque a sucessora
     # excluída deixa de contar (`sucessora_de` e o índice único olham só
-    # `excluido = false`). Quando o RF-04 V2 (SI-73) trouxer a avaliação, a
-    # versão já avaliada também não poderá sair: aí excluir a correção
-    # "ressuscitaria" a versão devolvida.
+    # `excluido = false`).
     if await sucessora_de(db, anexo_id, tenant_id=tenant_id) is not None:
         raise AnexoError(
             "Este documento já foi substituído por uma versão posterior e "
             "faz parte do histórico; não pode ser excluído."
+        )
+    # SI-73: documento com avaliação registrada (aguardando ou decidida) não
+    # sai. Excluir a correção "ressuscitaria" a versão devolvida, e excluir a
+    # aprovada apagaria do processo o que o avaliador aprovou.
+    from .avaliacoes import anexo_tem_avaliacao  # lazy: evita ciclo de import
+
+    if await anexo_tem_avaliacao(db, anexo_id, tenant_id=tenant_id):
+        raise AnexoError(
+            "Este documento tem avaliação registrada e faz parte do histórico; "
+            "não pode ser excluído. Envie uma versão nova se precisar corrigi-lo."
         )
 
     vinculo = (
@@ -555,8 +563,14 @@ async def motivo_sem_nova_versao(
     Documento redigido no sistema ACEITA (desde o SI-72 com versão redigida):
     a versão nova pode ser outro arquivo ou um rascunho com o texto dele.
     """
+    from .avaliacoes import anexo_aguarda_avaliacao  # lazy: evita ciclo de import
+
     if await sucessora_de(db, anexo.id, tenant_id=tenant_id) is not None:
         return "Este documento já foi substituído; envie a correção sobre a versão vigente."
+    # SI-73: a avaliação aponta para esta versão exata; corrigir no meio dela
+    # deixaria o avaliador decidindo sobre um arquivo que já não vale.
+    if await anexo_aguarda_avaliacao(db, anexo.id, tenant_id=tenant_id):
+        return "Documento aguardando avaliação: espere a decisão antes de enviar versão nova."
     if vinculo.anexo_herdado:
         return "Documento herdado de processo apensado; corrija-o no processo de origem."
     if vinculo.id_anexo_principal is not None:

@@ -7,6 +7,7 @@ from .assinatura import (
 from .apensamento import ProcessoApensamento, ProcessoVolume
 from .assunto import Assunto, AssuntoTipoProcessoTipoAnexo, TipoAnexo, TipoProcesso
 from .audit import AuditLog
+from .avaliacao import AvaliacaoDocumento, AvaliacaoPedido
 from .ccd import CcdClasse, TtdRegra
 from .complementacao_documental import ComplementacaoDocumental
 from .especie_documental import EspecieDocumental
@@ -143,6 +144,8 @@ __all__ = [
     "Assunto",
     "AssuntoTipoProcessoTipoAnexo",
     "AuditLog",
+    "AvaliacaoDocumento",
+    "AvaliacaoPedido",
     "Alcada",
     "Bairro",
     "BloqueioSaldo",

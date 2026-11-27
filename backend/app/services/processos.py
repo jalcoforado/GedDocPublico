@@ -18,6 +18,7 @@ from ..models import (
     Anexo,
     AnexoProcesso,
     AssinaturaAnexo,
+    AvaliacaoDocumento,
     Assunto,
     Despacho,
     Encaminhamento,
@@ -1125,6 +1126,21 @@ async def _load_anexos(
         )
     principais = {ap.id_anexo_principal for _a, ap, _t in rows if ap.id_anexo_principal}
 
+    # SI-73 — avaliação mais recente de cada versão (o maior id vence).
+    avaliacao: dict[int, str] = {}
+    if ids:
+        for id_anexo, resultado in (
+            await db.execute(
+                select(AvaliacaoDocumento.id_anexo, AvaliacaoDocumento.resultado)
+                .where(
+                    AvaliacaoDocumento.id_anexo.in_(ids),
+                    AvaliacaoDocumento.tenant_id == tenant_id,
+                )
+                .order_by(AvaliacaoDocumento.id)
+            )
+        ).all():
+            avaliacao[id_anexo] = resultado or "aguardando"
+
     # F8 — numeração cumulativa. `PAGINAS_CAPA` é a página fixa que
     # `pdf_capa.py` sempre gera (um `showPage()` só). Mesmo filtro de
     # "conta no PDF consolidado" que `pdf_montagem.py` usa (extensão .pdf);
@@ -1162,8 +1178,10 @@ async def _load_anexos(
                     and not ap.anexo_herdado
                     and ap.id_anexo_principal is None
                     and a.id not in principais
+                    and avaliacao.get(a.id) != "aguardando"
                 ),
                 redigido=a.id in de_minuta,
+                avaliacao=avaliacao.get(a.id),
             )
         )
     return resultado

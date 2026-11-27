@@ -445,6 +445,10 @@ class AnexoNoProcesso(BaseModel):
     # Gerado por minuta ("Redigir documento"): a versão nova redigida já nasce
     # com o texto dele.
     redigido: bool = False
+    # SI-73 (RF-04 V2): a avaliação mais recente DESTA versão — `aguardando`,
+    # `aprovado`, `devolvido` — ou None se nunca foi pedida. Versão nova nasce
+    # sem avaliação: a aprovação da anterior não passa adiante.
+    avaliacao: str | None = None
 
 
 class EncaminhamentoOut(BaseModel):

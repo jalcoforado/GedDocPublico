@@ -45,7 +45,9 @@ apontando para o substituído e `versao` = anterior + 1.
 | Processo arquivado | 409 | Desarquive antes. |
 | Herdado de apensamento | 409 | O documento pertence ao processo de origem. |
 | Arquivo que acompanha o despacho, e o próprio PDF do despacho | 409 | A peça é o conjunto, já assinado. |
+| Documento aguardando avaliação (SI-73) | 409 | A avaliação aponta para esta versão exata. |
 | Excluir a versão substituída | 400 | É histórico. |
+| Excluir versão com avaliação registrada (SI-73) | 400 | É histórico da avaliação. |
 | Excluir a versão vigente assinada | 400 | Regra geral da Assinatura v2. |
 | Processo acima da credencial de sigilo, ou de outra prefeitura | 404 | Guard `assert_acesso_processo` antes de tudo. |
 
@@ -68,9 +70,10 @@ bloqueado com "reabra a minuta").
 A versão **vigente** pode ser excluída enquanto não estiver assinada. A
 anterior volta a ser a vigente e aceita de novo uma versão nova, que nasce
 outra vez como versão 2 (a excluída deixa de contar: a busca da sucessora e o
-índice único olham só `excluido = false`). Quando o SI-73 trouxer a avaliação,
-a versão já avaliada também não poderá sair: aí excluir a correção
-"ressuscitaria" a versão devolvida.
+índice único olham só `excluido = false`). Desde o SI-73, a versão com
+avaliação registrada (aguardando ou decidida) também não sai: excluir a
+correção "ressuscitaria" a versão devolvida. Ver
+[avaliacao-de-documentos](avaliacao-de-documentos.md).
 
 ## Contagem de páginas (vale para todo upload de PDF)
 
@@ -107,7 +110,7 @@ só quem disparou (ou super-usuário), com o sigilo reconferido na hora.
 
 ## Fora deste card
 
-- Pedido de avaliação e decisão por documento (SI-73); a decisão aponta para o
-  `id` da versão exata avaliada.
+- Pedido de avaliação e decisão por documento: entregue no SI-73, em
+  [avaliacao-de-documentos](avaliacao-de-documentos.md).
 - Desentranhar uma versão continua possível. Se a vigente for desentranhada, a
   substituída volta a aparecer na lista principal, para não sumir da tela.

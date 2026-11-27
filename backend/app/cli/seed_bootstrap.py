@@ -72,6 +72,9 @@ MODULO_TRANSACOES: dict[str, tuple[str, ...]] = {
         "processo_desarquivar",
         # SI-61 (0140): desfazer recebimento por engano, idem.
         "processo_cancelar_recebimento",
+        # SI-73 (0148): avaliar (aprovar/devolver) documento de processo. Quem
+        # pede usa `processo`/`atualizar`; quem decide, esta.
+        "documento_avaliar",
     ),
     "pagamentos": (
         "pagamento_cadastro", "pagamento_solicitar", "pagamento_autorizar",
